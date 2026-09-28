@@ -40,6 +40,10 @@ _Avoid_: Waiting, blocked, paused
 A mark on a Session that finished a turn, needs input or failed while no Client was looking at it.
 _Avoid_: Unread, new, dirty
 
+**Muted**:
+A Session that sends no notifications outside the TUI until the user unmutes it or it ends.
+_Avoid_: Silenced, snoozed
+
 **Stalled**:
 A soft mark on a Working Session that has shown no activity for a configured time.
 _Avoid_: Hung, frozen, stuck
