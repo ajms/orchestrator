@@ -88,6 +88,14 @@ _Avoid_: Init hook, bootstrap
 A per-Repo command run in a Worktree just before it is removed.
 _Avoid_: Cleanup hook, archive script
 
+**Preset**:
+A named level of Agent autonomy: a permission mode plus allow and deny rules, chosen per Session.
+_Avoid_: Profile, policy, autonomy level
+
+**Guard**:
+An Orchestrator rule that stops an Agent from acting outside its Session (its Worktree and Branch) unless the user allows it.
+_Avoid_: Sandbox, restriction, deny rule
+
 **Insert mode**:
 The input mode in which keystrokes go to the focused Session's Agent.
 _Avoid_: Terminal mode, passthrough
