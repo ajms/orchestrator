@@ -8,6 +8,22 @@ A terminal UI for running and supervising many coding-agent sessions in parallel
 The long-lived system that owns all Sessions and the TUI through which the user supervises them.
 _Avoid_: Manager, squad, dashboard (the dashboard is one view of it)
 
+**Daemon**:
+The background process that is the Orchestrator's single source of truth for Repos and Sessions, and outlives any TUI.
+_Avoid_: Server, backend, supervisor
+
+**Client**:
+A TUI (or CLI command) connected to the Daemon; many can be connected at once.
+_Avoid_: Frontend, viewer
+
+**Holder**:
+The process that keeps one Session's Agent and its screen alive, independent of the Daemon.
+_Avoid_: Shim, wrapper, runner
+
+**Suspended**:
+A Session whose Agent is not running (e.g. after a reboot) but can be resumed with its conversation intact.
+_Avoid_: Paused, stopped, dead
+
 **Repo**:
 A git repository known to the Orchestrator, identified by the location of its main checkout; it becomes known the first time a Session is started in it.
 _Avoid_: Project, workspace
