@@ -9,8 +9,16 @@ The long-lived system that owns all Sessions and the TUI through which the user 
 _Avoid_: Manager, squad, dashboard (the dashboard is one view of it)
 
 **Repo**:
-A git repository the user has registered with the Orchestrator so Sessions can be started in it.
+A git repository known to the Orchestrator, identified by the location of its main checkout; it becomes known the first time a Session is started in it.
 _Avoid_: Project, workspace
+
+**Repo config**:
+The settings that apply to one Repo: those committed in the Repo itself, layered under the user's personal overrides for it.
+_Avoid_: Project settings, repo file
+
+**Trust**:
+The user's approval to run the scripts a Repo config brings from the Repo itself; it lapses when those scripts change.
+_Avoid_: Allow-list, permission
 
 **Session**:
 One Agent conversation working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent keeps the same Session.
