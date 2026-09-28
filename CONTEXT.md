@@ -96,6 +96,14 @@ _Avoid_: Command mode, orchestrator mode
 A contiguous range of ports reserved for one live Session so parallel Sessions don't collide.
 _Avoid_: Port range, port offset
 
+**Leftover**:
+A Worktree or Branch that looks like the Orchestrator's but belongs to no Session.
+_Avoid_: Orphan, stray, garbage
+
+**Reconciliation**:
+The Daemon bringing its records back in line with what actually exists on disk, in git and on GitHub.
+_Avoid_: Sync, repair, recovery
+
 **Review**:
 Inspecting a Session's changes against its Base branch, usually right before Landing.
 _Avoid_: Diff view, inspection
