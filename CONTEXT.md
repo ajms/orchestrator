@@ -29,8 +29,20 @@ The branch a Session's Branch was created from and is Landed back into.
 _Avoid_: Parent, target, trunk
 
 **Landing**:
-Finishing a Session by getting its changes out of the Worktree: either a local merge into the Base branch or pushing the Branch and opening a pull request.
+Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch or pushing the Branch and opening a pull request.
 _Avoid_: Shipping, completing, finishing
+
+**Setup script**:
+A per-Repo command run in a new Worktree before its Agent starts.
+_Avoid_: Init hook, bootstrap
+
+**Teardown script**:
+A per-Repo command run in a Worktree just before it is removed.
+_Avoid_: Cleanup hook, archive script
+
+**Port block**:
+A contiguous range of ports reserved for one live Session so parallel Sessions don't collide.
+_Avoid_: Port range, port offset
 
 **Discarding**:
 Ending a Session by throwing its Worktree and Branch away without Landing.
