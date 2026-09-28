@@ -61,12 +61,24 @@ The user's approval to run the scripts a Repo config brings from the Repo itself
 _Avoid_: Allow-list, permission
 
 **Session**:
-One Agent conversation working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent keeps the same Session.
+One Agent working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent, or starting a new Conversation, keeps the same Session.
 _Avoid_: Task, job, instance, run
 
 **Agent**:
 A coding-agent program (e.g. Claude Code) that the Orchestrator drives inside a Session.
 _Avoid_: Bot, assistant, model
+
+**Agent adapter**:
+What teaches the Orchestrator to launch, resume and observe one kind of Agent, and which capabilities that Agent has.
+_Avoid_: Driver, plugin, integration
+
+**Conversation**:
+The Agent's own chat history within a Session; a Session can move through several (e.g. after the Agent's history is cleared), and only the latest is resumed.
+_Avoid_: Chat, thread, transcript
+
+**Subagent**:
+A helper the Agent spawns inside its own Session; it shares the Session's Worktree and is not a Session itself.
+_Avoid_: Child session, worker, sub-session
 
 **Worktree**:
 The git worktree dedicated to a single Session, checked out on that Session's Branch.
