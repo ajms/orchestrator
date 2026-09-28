@@ -48,6 +48,14 @@ _Avoid_: Init hook, bootstrap
 A per-Repo command run in a Worktree just before it is removed.
 _Avoid_: Cleanup hook, archive script
 
+**Insert mode**:
+The input mode in which keystrokes go to the focused Session's Agent.
+_Avoid_: Terminal mode, passthrough
+
+**Normal mode**:
+The input mode in which keystrokes go to the Orchestrator itself.
+_Avoid_: Command mode, orchestrator mode
+
 **Port block**:
 A contiguous range of ports reserved for one live Session so parallel Sessions don't collide.
 _Avoid_: Port range, port offset
