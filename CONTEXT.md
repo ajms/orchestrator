@@ -21,8 +21,28 @@ The process that keeps one Session's Agent and its screen alive, independent of 
 _Avoid_: Shim, wrapper, runner
 
 **Suspended**:
-A Session whose Agent is not running (e.g. after a reboot) but can be resumed with its conversation intact.
+The Phase of a Session whose Agent is not running (e.g. after a reboot) but can be resumed with its conversation intact.
 _Avoid_: Paused, stopped, dead
+
+**Phase**:
+Where a Session is in its lifecycle: Setting up, Setup failed, Active, PR open, Suspended, Landed or Discarded.
+_Avoid_: Stage, lifecycle state
+
+**Agent state**:
+What a live Session's Agent is doing right now: Starting, Working, Needs input, Idle, Errored or Exited.
+_Avoid_: Activity, run state
+
+**Needs input**:
+The Agent state in which the Agent is blocked on the user: a permission prompt or a question it asked.
+_Avoid_: Waiting, blocked, paused
+
+**Unseen**:
+A mark on a Session that finished a turn, needs input or failed while no Client was looking at it.
+_Avoid_: Unread, new, dirty
+
+**Stalled**:
+A soft mark on a Working Session that has shown no activity for a configured time.
+_Avoid_: Hung, frozen, stuck
 
 **Repo**:
 A git repository known to the Orchestrator, identified by the location of its main checkout; it becomes known the first time a Session is started in it.
