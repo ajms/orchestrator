@@ -96,6 +96,10 @@ _Avoid_: Command mode, orchestrator mode
 A contiguous range of ports reserved for one live Session so parallel Sessions don't collide.
 _Avoid_: Port range, port offset
 
+**Review**:
+Inspecting a Session's changes against its Base branch, usually right before Landing.
+_Avoid_: Diff view, inspection
+
 **Discarding**:
 Ending a Session by throwing its Worktree and Branch away without Landing.
 _Avoid_: Cancelling, deleting, aborting
