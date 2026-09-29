@@ -13,6 +13,7 @@ fn context(worktree: &Path) -> GuardContext<'_> {
         base_branch: "main",
         enabled: true,
         allowed: &[],
+        agent_dirs: &[],
     }
 }
 
@@ -461,6 +462,48 @@ fn writing_temp_files_is_allowed() {
         GuardKind::WriteOutsideWorktree,
         "/etc/motd",
     )]);
+}
+
+#[test]
+fn writes_to_the_agents_own_dirs_are_allowed() {
+    let agent_dirs = [
+        PathBuf::from("/home/dev/.claude/projects"),
+        PathBuf::from("/home/dev/.claude/plans"),
+    ];
+    let worktree = Path::new(WORKTREE);
+    let with_agent_dirs = GuardContext {
+        agent_dirs: &agent_dirs,
+        ..context(worktree)
+    };
+    let check = |tool: &str, input: serde_json::Value| {
+        evaluate_guard(tool, &input.to_string(), None, &with_agent_dirs)
+    };
+    let memory = "/home/dev/.claude/projects/-home-dev-shop/memory/MEMORY.md";
+    assert_eq!(
+        check("Write", json!({ "file_path": memory })),
+        GuardDecision::Allow
+    );
+    assert_eq!(
+        check(
+            "Edit",
+            json!({ "file_path": "/home/dev/.claude/plans/fix-login.md" })
+        ),
+        GuardDecision::Allow
+    );
+    assert_eq!(
+        check("Bash", json!({ "command": format!("echo x >> {memory}") })),
+        GuardDecision::Allow
+    );
+    assert_eq!(
+        check(
+            "Write",
+            json!({ "file_path": "/home/dev/.claude/settings.json" })
+        ),
+        ask(
+            GuardKind::WriteOutsideWorktree,
+            "/home/dev/.claude/settings.json"
+        )
+    );
 }
 
 #[test]

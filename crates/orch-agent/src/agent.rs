@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use orch_core::{AgentEvent, ConversationId, PermissionMode, SessionId, SessionStatus};
 
 use crate::{GuardAnswer, Preset};
@@ -112,5 +114,9 @@ pub trait AgentAdapter {
 
     fn guard_answer(&self, _answer: &GuardAnswer) -> Option<String> {
         None
+    }
+
+    fn agent_dirs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+        Vec::new()
     }
 }

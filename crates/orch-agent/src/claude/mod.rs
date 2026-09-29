@@ -2,6 +2,8 @@ mod hooks;
 mod settings;
 mod statusline;
 
+use std::path::PathBuf;
+
 use hooks::HookEvent;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
 use serde_json::{Map, Value, json};
@@ -138,6 +140,12 @@ impl AgentAdapter for ClaudeCode {
             output["hookSpecificOutput"]["permissionDecisionReason"] = json!(reason);
         }
         Some(output.to_string())
+    }
+
+    fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+        settings::config_dir(lookup)
+            .map(|dir| vec![dir.join("projects"), dir.join("plans")])
+            .unwrap_or_default()
     }
 
     fn draft(&self, conversation: &ConversationId) -> Option<Argv> {
