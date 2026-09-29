@@ -1,0 +1,24 @@
+[package]
+name = "orch"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orch-core.workspace = true
+orch-agent.workspace = true
+orch-config = { path = "../orch-config" }
+orch-daemon = { path = "../orch-daemon" }
+orch-store = { path = "../orch-store" }
+orch-holder.workspace = true
+orch-git = { path = "../orch-git" }
+orch-protocol = { path = "../orch-protocol" }
+orch-tui = { path = "../orch-tui" }
+serde_json.workspace = true
+tokio = { version = "1", features = ["rt"] }
+clap = { version = "4", features = ["derive"] }
+nix = { version = "0.30", features = ["term", "signal"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "net", "io-util"] }
+vt100 = "0.16"

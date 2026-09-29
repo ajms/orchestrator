@@ -29,7 +29,7 @@ Where a Session is in its lifecycle: Setting up, Setup failed, Active, PR open, 
 _Avoid_: Stage, lifecycle state
 
 **Agent state**:
-What a live Session's Agent is doing right now: Starting, Working, Needs input, Idle, Errored or Exited.
+What a live Session's Agent is doing right now: Starting, Working, Needs input, Idle, Errored, Exited or Unknown. Unknown: the Agent runs but reports no state (its adapter lacks hooks).
 _Avoid_: Activity, run state
 
 **Needs input**:
@@ -42,6 +42,7 @@ _Avoid_: Unread, new, dirty
 
 **Muted**:
 A Session that sends no notifications outside the TUI until the user unmutes it or it ends.
+Muted also silences the terminal bell.
 _Avoid_: Silenced, snoozed
 
 **Stalled**:
@@ -123,6 +124,10 @@ _Avoid_: Port range, port offset
 **Leftover**:
 A Worktree or Branch that looks like the Orchestrator's but belongs to no Session.
 _Avoid_: Orphan, stray, garbage
+
+**Unknown Holder**:
+A live Holder the Daemon has no Session record for.
+_Avoid_: Orphan, stray
 
 **Reconciliation**:
 The Daemon bringing its records back in line with what actually exists on disk, in git and on GitHub.

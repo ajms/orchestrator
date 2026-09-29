@@ -1,0 +1,1 @@
+{"session_id":"0d3f8a21-7b6c-4e5d-9a8b-1c2d3e4f5a6b","model":{"id":"claude-sonnet-5"},"cost":{"total_cost_usd":0.0412},"context_window":{"total_input_tokens":20113,"total_output_tokens":811,"context_window_size":1000000,"used_percentage":2.01},"rate_limits":{"seven_day":{"used_percentage":96.4,"resets_at":1791014400}}}

@@ -1,0 +1,13 @@
+[package]
+name = "orch-notify"
+version.workspace = true
+edition.workspace = true
+description = "Notification policy and sinks: desktop (freedesktop D-Bus) and terminal bell / OSC 777."
+
+[dependencies]
+orch-core.workspace = true
+orch-config.workspace = true
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+
+[dev-dependencies]
+tempfile = "3"

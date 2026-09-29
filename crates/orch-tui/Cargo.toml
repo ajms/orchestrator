@@ -1,0 +1,25 @@
+[package]
+name = "orch-tui"
+description = "The TUI Client: sidebar, live pane, keymap and popups over the Daemon protocol."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orch-agent.workspace = true
+orch-core.workspace = true
+orch-term.workspace = true
+orch-git = { path = "../orch-git" }
+orch-notify = { path = "../orch-notify" }
+orch-protocol = { path = "../orch-protocol" }
+orch-holder.workspace = true
+base64 = "0.22"
+crossterm = "0.29"
+ratatui = "0.30"
+tui-term = "0.3.4"
+vt100 = "0.16"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "time"] }

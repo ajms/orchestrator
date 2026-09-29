@@ -1,0 +1,18 @@
+[package]
+name = "orch-holder"
+description = "The Holder: owns one Session's Agent PTY, screen and socket."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orch-agent.workspace = true
+orch-config = { path = "../orch-config" }
+orch-core.workspace = true
+orch-term.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64 = "0.22"
+nix = { version = "0.30", features = ["process", "signal", "term", "fs", "user"] }
+portable-pty = "0.9"
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "time", "macros"] }
+vt100 = "0.16"

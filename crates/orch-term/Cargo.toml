@@ -1,0 +1,8 @@
+[package]
+name = "orch-term"
+description = "Terminal input encoding shared by the Holder and the TUI."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+crossterm = { version = "0.29", default-features = false, features = ["events"] }

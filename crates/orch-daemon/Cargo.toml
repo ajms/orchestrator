@@ -1,0 +1,21 @@
+[package]
+name = "orch-daemon"
+description = "The Daemon: single owner of state, Session lifecycle and relaying to Clients."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orch-agent.workspace = true
+orch-config = { path = "../orch-config" }
+orch-core.workspace = true
+orch-git = { path = "../orch-git" }
+orch-holder.workspace = true
+orch-notify = { path = "../orch-notify" }
+orch-protocol = { path = "../orch-protocol" }
+orch-store = { path = "../orch-store" }
+getrandom = "0.3"
+serde.workspace = true
+serde_json.workspace = true
+nix = { version = "0.30", features = ["fs", "signal", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros", "process", "signal"] }
+uuid = "1"
