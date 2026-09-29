@@ -1334,6 +1334,7 @@ dependencies = [
  "orch-notify",
  "orch-protocol",
  "orch-term",
+ "portable-pty",
  "ratatui",
  "tempfile",
  "tokio",
