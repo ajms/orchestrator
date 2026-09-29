@@ -64,6 +64,17 @@ struct HookPayload {
     error: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct HookName {
+    hook_event_name: HookEvent,
+}
+
+pub(super) fn event_name(payload: &str) -> Option<HookEvent> {
+    serde_json::from_str::<HookName>(payload)
+        .ok()
+        .map(|hook| hook.hook_event_name)
+}
+
 pub(super) fn map_hook(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
     let hook: HookPayload =
         serde_json::from_str(payload).map_err(|err| PayloadError(err.to_string()))?;

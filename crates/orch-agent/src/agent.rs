@@ -97,6 +97,10 @@ pub trait AgentAdapter {
         Ok(Vec::new())
     }
 
+    fn is_guard_payload(&self, _payload: &str) -> bool {
+        false
+    }
+
     fn guard_answer(&self, _answer: &GuardAnswer) -> Option<String> {
         None
     }

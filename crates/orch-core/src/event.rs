@@ -1,7 +1,27 @@
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct SessionId(pub String);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidSessionId(pub String);
+
 impl SessionId {
+    const MAX_LEN: usize = 64;
+
+    pub fn parse(id: &str) -> Result<Self, InvalidSessionId> {
+        let safe = id.len() <= Self::MAX_LEN
+            && !id.starts_with('.')
+            && !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if safe {
+            Ok(Self(id.into()))
+        } else {
+            Err(InvalidSessionId(id.into()))
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

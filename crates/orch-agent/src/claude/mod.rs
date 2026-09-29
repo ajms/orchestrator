@@ -1,4 +1,5 @@
 mod hooks;
+mod settings;
 mod statusline;
 
 use hooks::HookEvent;
@@ -111,6 +112,10 @@ impl AgentAdapter for ClaudeCode {
 
     fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         statusline::map_tap(payload)
+    }
+
+    fn is_guard_payload(&self, payload: &str) -> bool {
+        hooks::event_name(payload) == Some(GUARD_HOOK)
     }
 
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String> {

@@ -14,6 +14,12 @@ pub fn config_home(lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     base_dir(lookup, "XDG_CONFIG_HOME", ".config")
 }
 
+pub fn runtime_dir(lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    lookup("XDG_RUNTIME_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+}
+
 pub fn state_home(lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     base_dir(lookup, "XDG_STATE_HOME", ".local/state")
 }

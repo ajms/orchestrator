@@ -5,6 +5,7 @@ mod shell;
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use shell::{SimpleCommand, Word};
@@ -29,7 +30,8 @@ pub enum GuardDecision {
     Ask(GuardHit),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "answer", rename_all = "snake_case")]
 pub enum GuardAnswer {
     Proceed,
     Ask,
