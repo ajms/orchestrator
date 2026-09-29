@@ -1,4 +1,5 @@
 use std::io::{self, Stdout, Write};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc as std_mpsc;
@@ -70,13 +71,9 @@ async fn event_loop(
                     program,
                     args,
                     text,
-                } => {
-                    let events = events.clone();
-                    tokio::task::spawn_blocking(move || {
-                        if let Err(err) = copy(&program, &args, &text) {
-                            let _ = events.send(Event::Notice(format!("copy: {err}")));
-                        }
-                    });
+                } => in_background(events, program, args, Some(text)),
+                Effect::OpenUrl { url } => {
+                    in_background(events, "xdg-open".into(), vec![url], None)
                 }
                 Effect::EditText { text } => {
                     let result = screen
@@ -92,6 +89,15 @@ async fn event_loop(
                         .and_then(|result| result);
                     if let Err(err) = result {
                         let _ = events.send(Event::Notice(format!("external Review: {err}")));
+                    }
+                }
+                Effect::OpenInEditor { file, line, cwd } => {
+                    let result = screen
+                        .suspend(input, move || run_editor(&file, line, &cwd))
+                        .await
+                        .unwrap_or_else(|err| Err(EditorError::Io(err)));
+                    if let Err(err) = result {
+                        let _ = events.send(Event::Notice(format!("editor failed: {err}")));
                     }
                 }
                 Effect::LoadReview {
@@ -186,38 +192,63 @@ fn edit(text: &str) -> Result<String, EditorError> {
         .suffix(".md")
         .tempfile()?;
     std::fs::write(file.path(), text)?;
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".into());
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg(format!("{editor} \"$1\""))
-        .arg("sh")
-        .arg(file.path())
-        .status()?;
-    if !status.success() {
-        return Err(EditorError::Exited { editor, status });
-    }
+    run_editor(file.path(), None, Path::new("."))?;
     Ok(std::fs::read_to_string(file.path())?)
 }
 
-fn copy(program: &str, args: &[String], text: &str) -> io::Result<()> {
+fn run_editor(file: &Path, line: Option<u32>, cwd: &Path) -> Result<(), EditorError> {
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".into());
+    let at = line.map_or(String::new(), |line| format!(" +{line}"));
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor}{at} \"$1\""))
+        .arg("sh")
+        .arg(file)
+        .current_dir(cwd)
+        .status()?;
+    match status.success() {
+        true => Ok(()),
+        false => Err(EditorError::Exited { editor, status }),
+    }
+}
+
+fn in_background(
+    events: &UnboundedSender<Event>,
+    program: String,
+    args: Vec<String>,
+    stdin: Option<String>,
+) {
+    let events = events.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(err) = run_process(&program, &args, stdin) {
+            let _ = events.send(Event::Notice(format!("{program}: {err}")));
+        }
+    });
+}
+
+fn run_process(program: &str, args: &[String], stdin: Option<String>) -> io::Result<()> {
+    let piped = match stdin {
+        Some(_) => Stdio::piped(),
+        None => Stdio::null(),
+    };
     let mut child = Command::new(program)
         .args(args)
-        .stdin(Stdio::piped())
+        .stdin(piped)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
-        .map_err(|err| io::Error::new(err.kind(), format!("{program}: {err}")))?;
-    let written = child
-        .stdin
-        .take()
-        .map_or(Ok(()), |mut stdin| stdin.write_all(text.as_bytes()));
+        .process_group(0)
+        .spawn()?;
+    let written = match (child.stdin.take(), stdin) {
+        (Some(mut pipe), Some(text)) => pipe.write_all(text.as_bytes()),
+        _ => Ok(()),
+    };
     let status = child.wait()?;
     written?;
     match status.success() {
         true => Ok(()),
-        false => Err(io::Error::other(format!("{program} exited with {status}"))),
+        false => Err(io::Error::other(format!("exited with {status}"))),
     }
 }
 

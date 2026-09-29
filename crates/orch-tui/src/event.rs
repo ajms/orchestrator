@@ -103,4 +103,12 @@ pub enum Effect {
         cwd: PathBuf,
         env: Vec<(String, String)>,
     },
+    OpenUrl {
+        url: String,
+    },
+    OpenInEditor {
+        file: PathBuf,
+        line: Option<u32>,
+        cwd: PathBuf,
+    },
 }

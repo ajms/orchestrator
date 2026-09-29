@@ -6,6 +6,7 @@ mod daemon_events;
 mod git_review;
 mod guards;
 mod landing;
+mod links;
 mod modes;
 mod mouse;
 mod navigation;

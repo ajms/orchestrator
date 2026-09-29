@@ -166,6 +166,12 @@ impl Selector {
     }
 }
 
+pub(crate) fn columns_on(line: i64, (start, end): (Point, Point), last_col: u16) -> (u16, u16) {
+    let from = if line == start.0 { start.1 } else { 0 };
+    let to = if line == end.0 { end.1 } else { last_col };
+    (from, to.min(last_col))
+}
+
 fn clamp_row(grid: &impl Grid, row: i32) -> u16 {
     let last = i32::from(grid.height().saturating_sub(1));
     row.clamp(0, last) as u16
@@ -186,7 +192,7 @@ fn expand(grid: &mut impl Grid, anchor: Point, cursor: Point, unit: Unit) -> (Po
     }
 }
 
-fn word_start(grid: &mut impl Grid, (mut line, mut col): Point) -> Point {
+pub(crate) fn word_start(grid: &mut impl Grid, (mut line, mut col): Point) -> Point {
     let mut row = grid.row(line);
     if row.blank_at(col) {
         return (line, col);
@@ -208,7 +214,7 @@ fn word_start(grid: &mut impl Grid, (mut line, mut col): Point) -> Point {
     }
 }
 
-fn word_end(grid: &mut impl Grid, (mut line, mut col): Point) -> Point {
+pub(crate) fn word_end(grid: &mut impl Grid, (mut line, mut col): Point) -> Point {
     let mut row = grid.row(line);
     if row.blank_at(col) {
         return (line, col);

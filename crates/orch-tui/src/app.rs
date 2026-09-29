@@ -15,6 +15,7 @@ pub use crate::config::TuiConfig;
 use crate::discard::{DiscardConfirm, DiscardTarget};
 use crate::event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};
 use crate::guard::{GuardId, Guards};
+use crate::hyperlinks::Hyperlinks;
 use crate::land::LandForm;
 use crate::layout::Areas;
 use crate::link::RequestId;
@@ -48,7 +49,9 @@ impl Call {
     fn suspends(&self) -> bool {
         matches!(
             self,
-            Call::Local(Effect::EditText { .. } | Effect::RunExternal { .. })
+            Call::Local(
+                Effect::EditText { .. } | Effect::RunExternal { .. } | Effect::OpenInEditor { .. }
+            )
         )
     }
 }
@@ -179,6 +182,7 @@ pub(crate) struct App {
     pub mismatch: Option<String>,
     pub gesture: Option<Region>,
     pub pane_selection: Selector,
+    pub links: Hyperlinks,
     pub clock: Box<dyn Fn() -> Instant>,
     size: Size,
     guards: Guards,
@@ -212,6 +216,7 @@ impl App {
             mismatch: None,
             gesture: None,
             pane_selection: Selector::default(),
+            links: Hyperlinks::default(),
             clock: Box::new(Instant::now),
             size,
             guards: Guards::default(),
@@ -416,11 +421,19 @@ impl App {
             FromDaemon::Screen(snapshot) => {
                 mirror.restore(&snapshot);
                 self.pane_selection.clear();
+                self.links.hover(None);
             }
-            FromDaemon::Output { bytes } => match mirror.output(&bytes) {
-                Some(grown) => self.pane_selection.shift(grown),
-                None => self.pane_selection.clear(),
-            },
+            FromDaemon::Output { bytes } => {
+                let grown = mirror.output(&bytes);
+                match grown {
+                    Some(grown) => self.pane_selection.shift(grown),
+                    None => self.pane_selection.clear(),
+                }
+                match grown.filter(|grown| *grown != 0) {
+                    Some(grown) => self.links.shift(grown),
+                    None => self.links.hover(None),
+                }
+            }
             FromDaemon::Resized(size) => mirror.resized(size),
             FromDaemon::InputDropped { reason } => {
                 self.message = Some(format!("input not sent: {reason}"));
@@ -438,6 +451,7 @@ impl App {
     fn terminal(&mut self, event: TermEvent) {
         match event {
             TermEvent::Key(key) if key.kind != KeyEventKind::Release => {
+                self.links.hover(None);
                 crate::keymap::handle(self, key)
             }
             TermEvent::Paste(text) => crate::keymap::paste(self, text),
@@ -651,6 +665,15 @@ impl App {
         for effect in copy_effects(&self.config.display, text) {
             self.push(Call::Local(effect));
         }
+    }
+
+    pub fn open_url(&mut self, url: String) {
+        self.push(Call::Local(Effect::OpenUrl { url }));
+    }
+
+    pub fn open_in_editor(&mut self, cwd: PathBuf, file: PathBuf, line: Option<u32>) {
+        let effect = Effect::OpenInEditor { file, line, cwd };
+        self.push(Call::Local(effect));
     }
 
     pub fn report(&mut self, request: Request) {

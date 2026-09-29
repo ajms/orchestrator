@@ -1,8 +1,9 @@
-use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use vt100::MouseProtocolMode;
 
 use crate::app::{App, Call, Mode};
+use crate::hyperlinks::{Hyperlink, HyperlinkTarget, hyperlink_at};
 use crate::passthrough;
 
 const WHEEL_LINES: isize = 3;
@@ -23,6 +24,7 @@ pub(crate) struct PanePoint {
 }
 
 pub(crate) fn handle(app: &mut App, event: MouseEvent) {
+    app.links.hover(None);
     if overlaid(app) {
         app.end_gesture();
         return;
@@ -81,8 +83,9 @@ fn pane(app: &mut App, event: MouseEvent) {
             }
         }
         None => {
-            pane_links(app, event, point);
-            pane_selection(app, event, point);
+            if !pane_links(app, event, point) {
+                pane_selection(app, event, point);
+            }
         }
     }
 }
@@ -139,7 +142,53 @@ pub(crate) fn tick(app: &mut App) {
     }
 }
 
-fn pane_links(_app: &mut App, _event: MouseEvent, _point: PanePoint) {}
+fn pane_links(app: &mut App, event: MouseEvent, point: PanePoint) -> bool {
+    let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
+    match event.kind {
+        MouseEventKind::Down(button) => {
+            app.links.let_go();
+            if !ctrl || button != MouseButton::Left {
+                return false;
+            }
+            let Some(link) = link_under(app, point) else {
+                return false;
+            };
+            app.links.press();
+            open(app, link.target);
+            true
+        }
+        MouseEventKind::Drag(_) => app.links.pressed(),
+        MouseEventKind::Up(_) => {
+            let pressed = app.links.pressed();
+            app.links.let_go();
+            pressed
+        }
+        MouseEventKind::Moved if ctrl => {
+            let link = link_under(app, point);
+            app.links.hover(link);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn link_under(app: &mut App, point: PanePoint) -> Option<Hyperlink> {
+    let worktree = app.selected_view()?.worktree.clone();
+    let pane = app.pane.as_mut()?;
+    let line = pane.line_of(point.row);
+    hyperlink_at(pane, (line, point.col), &worktree)
+}
+
+fn open(app: &mut App, target: HyperlinkTarget) {
+    match target {
+        HyperlinkTarget::Url(url) => app.open_url(url),
+        HyperlinkTarget::File { path, line } => {
+            if let Some(worktree) = app.selected_view().map(|view| view.worktree.clone()) {
+                app.open_in_editor(worktree, path, line);
+            }
+        }
+    }
+}
 
 fn sidebar(_app: &mut App, _event: MouseEvent) {}
 

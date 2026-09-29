@@ -6,6 +6,7 @@ mod discard;
 mod event;
 mod git;
 mod guard;
+mod hyperlinks;
 mod keymap;
 mod land;
 mod layout;

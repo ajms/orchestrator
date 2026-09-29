@@ -1,14 +1,16 @@
 use orch_protocol::{PhaseView, SessionView};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use tui_term::widget::PseudoTerminal;
 
 use super::style;
 use crate::app::{App, Focus, Mode, Selection};
+use crate::hyperlinks::Hyperlink;
 use crate::pane::PaneMirror;
+use crate::selection::{Point, columns_on};
 
 const SELECTION: Color = Color::Rgb(70, 70, 110);
 use crate::sessions::repo_name;
@@ -32,6 +34,9 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
             frame.render_widget(PseudoTerminal::new(pane.screen()).block(block), area);
             if let Some(selection) = shown_selection(app) {
                 highlight(frame, inner, &selection, pane);
+            }
+            if let Some(link) = app.links.hovered() {
+                underline(frame, inner, link, pane);
             }
         }
         None => {
@@ -61,26 +66,38 @@ fn shown_selection(app: &App) -> Option<Selection> {
 }
 
 fn highlight(frame: &mut Frame, inner: Rect, selection: &Selection, pane: &PaneMirror) {
-    let (start, end) = selection.ordered();
+    let span = selection.ordered();
     let buffer = frame.buffer_mut();
+    for_each_cell(inner, pane, span, selection.linewise, |at| {
+        buffer[at].set_bg(SELECTION);
+    });
+}
+
+fn underline(frame: &mut Frame, inner: Rect, link: &Hyperlink, pane: &PaneMirror) {
+    let buffer = frame.buffer_mut();
+    for_each_cell(inner, pane, (link.start, link.end), false, |at| {
+        buffer[at].modifier.insert(Modifier::UNDERLINED);
+    });
+}
+
+fn for_each_cell(
+    inner: Rect,
+    pane: &PaneMirror,
+    (start, end): (Point, Point),
+    linewise: bool,
+    mut paint: impl FnMut((u16, u16)),
+) {
+    let last_col = inner.width.saturating_sub(1);
     let first = pane.row_of(start.0).max(0);
     let last = pane.row_of(end.0).min(i64::from(inner.height) - 1);
     for row in first..=last {
         let line = pane.line_of(row as u16);
-        let row = row as u16;
-        let (from, to) = match selection.linewise {
-            true => (0, inner.width.saturating_sub(1)),
-            false => (
-                if line == start.0 { start.1 } else { 0 },
-                if line == end.0 {
-                    end.1
-                } else {
-                    inner.width.saturating_sub(1)
-                },
-            ),
+        let (from, to) = match linewise {
+            true => (0, last_col),
+            false => columns_on(line, (start, end), last_col),
         };
-        for col in from..=to.min(inner.width.saturating_sub(1)) {
-            buffer[(inner.x + col, inner.y + row)].set_bg(SELECTION);
+        for col in from..=to {
+            paint((inner.x + col, inner.y + row as u16));
         }
     }
 }

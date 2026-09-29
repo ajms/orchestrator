@@ -80,6 +80,8 @@ The mouse works the same in Insert and Normal mode and never switches between th
 
 Otherwise the pane has its own selection. Drag to select; dragging past the top or bottom edge scrolls the history. The selection is copied to the clipboard and PRIMARY when you release. Double-click selects a word, triple-click a line. The wheel scrolls the history.
 
+Hold Ctrl over a URL or a file path to underline it, and Ctrl+click to open it: URLs in your browser, files in `$EDITOR` at the line.
+
 Commands:
 
 - `:new`
