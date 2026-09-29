@@ -42,6 +42,7 @@ _Avoid_: Unread, new, dirty
 
 **Muted**:
 A Session that sends no notifications outside the TUI until the user unmutes it or it ends.
+Muted also silences the terminal bell.
 _Avoid_: Silenced, snoozed
 
 **Stalled**:

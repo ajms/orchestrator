@@ -45,6 +45,9 @@ impl Notifications {
             Channel::Desktop => &self.desktop,
             Channel::Bell => &self.bell,
         };
-        triggers.get(&attention).copied().unwrap_or(true)
+        triggers
+            .get(&attention)
+            .copied()
+            .unwrap_or(attention != Attention::PrClosed)
     }
 }

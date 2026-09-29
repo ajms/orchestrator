@@ -5,17 +5,34 @@ use orch_config::{Channel, ConfigError, ConfigProblem};
 use orch_core::Attention;
 
 #[test]
-fn every_trigger_notifies_on_every_channel_by_default() {
+fn spec_triggers_notify_on_every_channel_by_default() {
     let fx = Fixture::new();
     let global = fx.loader.global().unwrap();
     for attention in [
         Attention::NeedsInput,
         Attention::TurnEnded,
-        Attention::PrClosed,
+        Attention::Errored,
+        Attention::SetupFailed,
+        Attention::ChecksFailing,
+        Attention::ChangesRequested,
+        Attention::PrMerged,
     ] {
         assert!(global.notifications.enabled(Channel::Desktop, attention));
         assert!(global.notifications.enabled(Channel::Bell, attention));
     }
+}
+
+#[test]
+fn a_closed_pr_is_flagged_not_notified_unless_enabled() {
+    let fx = Fixture::new();
+    let defaults = fx.loader.global().unwrap().notifications;
+    assert!(!defaults.enabled(Channel::Desktop, Attention::PrClosed));
+    assert!(!defaults.enabled(Channel::Bell, Attention::PrClosed));
+
+    fx.global("[notifications.desktop]\npr_closed = true\n");
+    let configured = fx.loader.global().unwrap().notifications;
+    assert!(configured.enabled(Channel::Desktop, Attention::PrClosed));
+    assert!(!configured.enabled(Channel::Bell, Attention::PrClosed));
 }
 
 #[test]
