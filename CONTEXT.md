@@ -122,7 +122,7 @@ The Session pane forwarding mouse events to the Agent because the Agent asked fo
 _Avoid_: Mouse capture, mouse mode
 
 **Pane selection**:
-Text the Orchestrator itself highlights and copies in a Session pane when the Agent has not asked for the mouse, or via Visual mode.
+Text the Orchestrator itself highlights and copies: in a Session pane when the Agent has not asked for the mouse or via Visual mode, and in the Review view's diff.
 _Avoid_: Highlight, copy mode
 
 **Port block**:

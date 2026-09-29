@@ -4,7 +4,7 @@ When the Agent has requested mouse tracking (Claude Code's fullscreen renderer d
 
 ## Consequences
 
-- The mouse is independent of Insert and Normal mode and never switches between them.
+- The mouse is independent of Insert and Normal mode and never switches between them, with one exception: clicking a Session in the Sidebar while in Insert mode keeps Insert on the newly shown Session, or drops to Normal if it has no live Agent.
 - A gesture that starts in the pane stays with the pane until release, with coordinates clamped to its edge.
 - Shift-drag remains the terminal's native escape hatch and selects across the whole window; the Orchestrator does not intercept it.
 - We own a mouse encoder (vt100 and crossterm have none) and must keep the Agent's copies reaching the clipboard, including OSC 52, which the emulator drops today.
