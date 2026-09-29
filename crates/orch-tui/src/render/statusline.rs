@@ -31,7 +31,9 @@ fn mode_line(app: &App) -> Line<'static> {
         (Mode::CommandLine(line), _) => format!(":{line}▏"),
         (_, Some(message)) => message.clone(),
         _ if app.guard_waiting_hidden() => "Guard prompt waiting — :guard to answer".into(),
-        (Mode::Insert, None) => "keys go to the Agent · Ctrl-\\ Ctrl-n → Normal".into(),
+        (Mode::Insert, None) => {
+            "keys go to the Agent · Ctrl-\\ Ctrl-n → Normal · Ctrl-h → sidebar".into()
+        }
         (Mode::Visual(_), None) => "h/j/k/l extend · y yank · Esc cancel".into(),
         (Mode::Normal, None) => {
             "j/k select · i insert · Ctrl-w h/l focus · d review · : commands".into()
