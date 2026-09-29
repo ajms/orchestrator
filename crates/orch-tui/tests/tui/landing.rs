@@ -202,6 +202,7 @@ fn land_works_from_the_review() {
             files: vec![FileDiff {
                 path: "a.rs".into(),
                 lines: vec!["@@ -0,0 +1 @@".into(), "+a".into()],
+                deleted: false,
             }],
         }),
     });

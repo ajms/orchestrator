@@ -2,6 +2,7 @@ use orch_protocol::Size;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 
 pub const SIDEBAR_WIDTH: u16 = 40;
+const FILE_LIST_WIDTH: u16 = 40;
 
 pub struct Areas {
     pub sidebar: Rect,
@@ -27,6 +28,10 @@ impl Areas {
         Self::of(Rect::new(0, 0, size.cols, size.rows))
     }
 
+    pub fn main(&self) -> Rect {
+        self.sidebar.union(self.pane)
+    }
+
     pub fn pane_body(&self) -> Rect {
         self.pane.inner(Margin::new(1, 1))
     }
@@ -37,5 +42,27 @@ impl Areas {
             rows: body.height.max(1),
             cols: body.width.max(1),
         }
+    }
+}
+
+pub struct Columns {
+    pub files: Rect,
+    pub diff: Rect,
+}
+
+impl Columns {
+    pub fn of(main: Rect) -> Self {
+        let [files, diff] =
+            Layout::horizontal([Constraint::Length(FILE_LIST_WIDTH), Constraint::Min(20)])
+                .areas(main);
+        Self { files, diff }
+    }
+
+    pub fn files_body(&self) -> Rect {
+        self.files.inner(Margin::new(1, 1))
+    }
+
+    pub fn diff_body(&self) -> Rect {
+        self.diff.inner(Margin::new(1, 1))
     }
 }

@@ -23,7 +23,7 @@ use crate::mouse::Region;
 use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
-use crate::review::ReviewView;
+use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
 
@@ -655,6 +655,9 @@ impl App {
     pub fn end_gesture(&mut self) {
         self.gesture = None;
         self.pane_selection.let_go();
+        if let Some(review) = &mut self.review {
+            review.selection.let_go();
+        }
     }
 
     pub fn push(&mut self, call: Call) {
@@ -674,6 +677,26 @@ impl App {
     pub fn open_in_editor(&mut self, cwd: PathBuf, file: PathBuf, line: Option<u32>) {
         let effect = Effect::OpenInEditor { file, line, cwd };
         self.push(Call::Local(effect));
+    }
+
+    pub fn edit(&mut self, target: EditorTarget) {
+        let worktree = match &self.review {
+            Some(review) => Some(review.worktree.clone()),
+            None => self.selected_view().map(|view| view.worktree.clone()),
+        };
+        if let Some(cwd) = worktree {
+            self.open_in_editor(cwd, target.file, target.line);
+        }
+    }
+
+    pub fn review_action(&mut self, action: ReviewAction) {
+        match action {
+            ReviewAction::Stay => {}
+            ReviewAction::Close => self.review = None,
+            ReviewAction::CommandLine => self.mode = Mode::CommandLine(String::new()),
+            ReviewAction::Open(target) => self.edit(target),
+            ReviewAction::Notice(text) => self.message = Some(text),
+        }
     }
 
     pub fn report(&mut self, request: Request) {
@@ -897,7 +920,8 @@ impl App {
         self.message = None;
         match purpose {
             ReviewPurpose::BuiltIn => {
-                self.review = Some(ReviewView::new(view.base.clone(), data.files));
+                let (base, worktree) = (view.base.clone(), view.worktree.clone());
+                self.review = Some(ReviewView::new(base, worktree, data.files));
             }
             ReviewPurpose::External => {
                 let command = self

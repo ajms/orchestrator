@@ -24,10 +24,12 @@ fn reviewing() -> Harness {
                     "+let timeout = config.login_timeout();".into(),
                     "+log::debug!(\"timeout\");".into(),
                 ],
+                deleted: false,
             },
             FileDiff {
                 path: "src/config.rs".into(),
                 lines: vec!["@@ -0,0 +1 @@".into(), "+pub struct Config;".into()],
+                deleted: false,
             },
         ])),
     });

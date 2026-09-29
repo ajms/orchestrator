@@ -14,6 +14,7 @@ mod new_session;
 mod reconcile;
 mod repo_settings;
 mod review;
+mod review_mouse;
 mod scroll;
 mod selection;
 mod sidebar;

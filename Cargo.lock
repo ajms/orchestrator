@@ -1338,6 +1338,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tui-term",
+ "unicode-width",
  "vt100",
  "vte",
 ]

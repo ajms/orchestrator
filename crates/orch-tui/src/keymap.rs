@@ -5,8 +5,8 @@ use orch_term::keys::{encode_key, is_ctrl_backslash};
 use crate::app::{App, Call, Focus, Mode, Prefix, Selection};
 use crate::event::{Effect, ReviewPurpose};
 use crate::guard::GuardId;
+use crate::layout::Columns;
 use crate::reconcile::ReconcileAction;
-use crate::review::ReviewAction;
 use crate::sessions::phase_label;
 
 pub(crate) fn handle(app: &mut App, key: KeyEvent) {
@@ -59,14 +59,12 @@ fn reconcile(app: &mut App, key: KeyEvent) {
 
 fn review(app: &mut App, key: KeyEvent) {
     app.message = None;
+    let body = Columns::of(app.areas().main()).diff_body();
     let Some(review) = &mut app.review else {
         return;
     };
-    match review.key(key) {
-        ReviewAction::Stay => {}
-        ReviewAction::Close => app.review = None,
-        ReviewAction::CommandLine => app.mode = Mode::CommandLine(String::new()),
-    }
+    let action = review.key(key, body);
+    app.review_action(action);
 }
 
 pub(crate) fn paste(app: &mut App, text: String) {

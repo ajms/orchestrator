@@ -4,7 +4,9 @@ use vt100::MouseProtocolMode;
 
 use crate::app::{App, Call, Mode};
 use crate::hyperlinks::{Hyperlink, HyperlinkTarget, hyperlink_at};
+use crate::layout::Columns;
 use crate::passthrough;
+use crate::review::{EditorTarget, ReviewAction, ReviewView};
 
 const WHEEL_LINES: isize = 3;
 
@@ -100,7 +102,7 @@ fn clamped(body: Rect, event: MouseEvent) -> PanePoint {
 }
 
 fn pane_selection(app: &mut App, event: MouseEvent, point: PanePoint) {
-    let row = i32::from(event.row) - i32::from(app.areas().pane_body().y);
+    let row = body_row(app.areas().pane_body(), event);
     let now = (app.clock)();
     if app.shown_pane().is_none() {
         return;
@@ -130,14 +132,26 @@ fn pane_selection(app: &mut App, event: MouseEvent, point: PanePoint) {
 }
 
 pub(crate) fn auto_scrolling(app: &App) -> bool {
-    app.gesture == Some(Region::Pane) && app.pane_selection.auto_scrolling()
+    match app.gesture {
+        Some(Region::Pane) => app.pane_selection.auto_scrolling(),
+        Some(Region::Review) => app
+            .review
+            .as_ref()
+            .is_some_and(|review| review.selection.auto_scrolling()),
+        _ => false,
+    }
 }
 
 pub(crate) fn tick(app: &mut App) {
     if !auto_scrolling(app) {
         return;
     }
-    if let Some(pane) = app.pane.as_mut() {
+    let body = Columns::of(app.areas().main()).diff_body();
+    if app.gesture == Some(Region::Review)
+        && let Some(review) = app.review.as_mut()
+    {
+        review.tick(body);
+    } else if let Some(pane) = app.pane.as_mut() {
         app.pane_selection.tick(pane);
     }
 }
@@ -182,14 +196,66 @@ fn link_under(app: &mut App, point: PanePoint) -> Option<Hyperlink> {
 fn open(app: &mut App, target: HyperlinkTarget) {
     match target {
         HyperlinkTarget::Url(url) => app.open_url(url),
-        HyperlinkTarget::File { path, line } => {
-            if let Some(worktree) = app.selected_view().map(|view| view.worktree.clone()) {
-                app.open_in_editor(worktree, path, line);
-            }
-        }
+        HyperlinkTarget::File { path, line } => app.edit(EditorTarget { file: path, line }),
     }
 }
 
 fn sidebar(_app: &mut App, _event: MouseEvent) {}
 
-fn review(_app: &mut App, _event: MouseEvent) {}
+fn review(app: &mut App, event: MouseEvent) {
+    let columns = Columns::of(app.areas().main());
+    let (list, body) = (columns.files_body(), columns.diff_body());
+    let at = Position::new(event.column, event.row);
+    let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
+    let now = (app.clock)();
+    let Some(review) = app.review.as_mut() else {
+        return;
+    };
+    let action = match event.kind {
+        MouseEventKind::Down(MouseButton::Left) if list.contains(at) => {
+            if let Some(file) = review.file_at(event.row - list.y) {
+                review.show_file(file);
+            }
+            ReviewAction::Stay
+        }
+        MouseEventKind::Down(MouseButton::Left) if body.contains(at) && ctrl => {
+            review.open_row(body, event.row - body.y)
+        }
+        MouseEventKind::Down(MouseButton::Left) if body.contains(at) => {
+            review.press(body, clamped(body, event).col, body_row(body, event), now);
+            ReviewAction::Stay
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            review.extend(body, clamped(body, event).col, body_row(body, event));
+            ReviewAction::Stay
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            if let Some(text) = review.release(body) {
+                app.copy(&text);
+            }
+            ReviewAction::Stay
+        }
+        MouseEventKind::ScrollUp => {
+            review_wheel(review, (list, body), at, WHEEL_LINES);
+            ReviewAction::Stay
+        }
+        MouseEventKind::ScrollDown => {
+            review_wheel(review, (list, body), at, -WHEEL_LINES);
+            ReviewAction::Stay
+        }
+        _ => ReviewAction::Stay,
+    };
+    app.review_action(action);
+}
+
+fn review_wheel(review: &mut ReviewView, (list, body): (Rect, Rect), at: Position, lines: isize) {
+    if list.contains(at) {
+        review.scroll_list(lines, list.height);
+    } else if body.contains(at) {
+        review.scroll_diff(lines, body);
+    }
+}
+
+fn body_row(body: Rect, event: MouseEvent) -> i32 {
+    i32::from(event.row) - i32::from(body.y)
+}

@@ -67,31 +67,47 @@ fn shown_selection(app: &App) -> Option<Selection> {
 
 fn highlight(frame: &mut Frame, inner: Rect, selection: &Selection, pane: &PaneMirror) {
     let span = selection.ordered();
+    paint_selection(frame, inner, pane.line_of(0), span, selection.linewise);
+}
+
+pub(super) fn paint_selection(
+    frame: &mut Frame,
+    inner: Rect,
+    top: i64,
+    span: (Point, Point),
+    linewise: bool,
+) {
     let buffer = frame.buffer_mut();
-    for_each_cell(inner, pane, span, selection.linewise, |at| {
+    for_each_cell(inner, top, span, linewise, |at| {
         buffer[at].set_bg(SELECTION);
     });
 }
 
 fn underline(frame: &mut Frame, inner: Rect, link: &Hyperlink, pane: &PaneMirror) {
     let buffer = frame.buffer_mut();
-    for_each_cell(inner, pane, (link.start, link.end), false, |at| {
-        buffer[at].modifier.insert(Modifier::UNDERLINED);
-    });
+    for_each_cell(
+        inner,
+        pane.line_of(0),
+        (link.start, link.end),
+        false,
+        |at| {
+            buffer[at].modifier.insert(Modifier::UNDERLINED);
+        },
+    );
 }
 
 fn for_each_cell(
     inner: Rect,
-    pane: &PaneMirror,
+    top: i64,
     (start, end): (Point, Point),
     linewise: bool,
     mut paint: impl FnMut((u16, u16)),
 ) {
     let last_col = inner.width.saturating_sub(1);
-    let first = pane.row_of(start.0).max(0);
-    let last = pane.row_of(end.0).min(i64::from(inner.height) - 1);
+    let first = (start.0 - top).max(0);
+    let last = (end.0 - top).min(i64::from(inner.height) - 1);
     for row in first..=last {
-        let line = pane.line_of(row as u16);
+        let line = top + row;
         let (from, to) = match linewise {
             true => (0, last_col),
             false => columns_on(line, (start, end), last_col),
