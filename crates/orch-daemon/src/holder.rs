@@ -115,6 +115,7 @@ impl Daemon {
                         self.request_recheck(&id);
                     }
                 }
+                FromHolder::Clipboard { text } => self.lock().relay_copy(&id, text),
                 FromHolder::Superseded => break,
                 _ => {}
             }

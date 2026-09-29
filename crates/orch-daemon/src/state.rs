@@ -637,6 +637,17 @@ impl State {
             .map(|client| client.last_used.clone())
     }
 
+    pub(crate) fn relay_copy(&self, session: &SessionId, text: String) {
+        for client in self.clients.values() {
+            if client.session_in_view.as_ref() == Some(session) {
+                client.outbox.send(FromDaemon::Clipboard {
+                    session: session.clone(),
+                    text: text.clone(),
+                });
+            }
+        }
+    }
+
     fn focus_recent_client(&self, session: SessionId) {
         if let Some(client) = self
             .clients

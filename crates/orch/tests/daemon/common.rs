@@ -434,6 +434,7 @@ pub struct TestClient {
     pub rings: Vec<Ring>,
     pub focused: Vec<SessionId>,
     pub rate_limits: Vec<RateLimits>,
+    pub copies: Vec<(SessionId, String)>,
     session_in_view: Option<SessionId>,
     focused_terminal: bool,
 }
@@ -450,6 +451,7 @@ impl From<Client> for TestClient {
             rings: Vec::new(),
             focused: Vec::new(),
             rate_limits: Vec::new(),
+            copies: Vec::new(),
             session_in_view: None,
             focused_terminal: false,
         }
@@ -546,6 +548,9 @@ impl TestClient {
                 five_hour: *five_hour,
                 seven_day: *seven_day,
             }),
+            FromDaemon::Clipboard { session, text } => {
+                self.copies.push((session.clone(), text.clone()))
+            }
             _ => {}
         }
     }

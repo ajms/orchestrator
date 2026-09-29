@@ -1,4 +1,5 @@
 mod cli;
+mod clipboard;
 mod common;
 mod discard;
 mod display;

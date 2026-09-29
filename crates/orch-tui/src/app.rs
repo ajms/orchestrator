@@ -286,6 +286,11 @@ impl App {
                 }
             }
             FromDaemon::Focus { session } => self.focus_session(session),
+            FromDaemon::Clipboard { session, text } => {
+                if self.selected.as_ref() == Some(&session) {
+                    self.copy(&text);
+                }
+            }
             FromDaemon::Response { id, result } => {
                 if let Some((request, pending)) = self.pending.remove(&RequestId(id)) {
                     self.answered(request, pending, result);

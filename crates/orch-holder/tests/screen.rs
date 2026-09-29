@@ -149,3 +149,34 @@ fn resize_while_on_the_alternate_screen_resizes_the_main_screen_too() {
     assert_eq!(restored.screen().size(), (4, 30));
     assert!(restored.screen().contents().contains("line 4"));
 }
+
+fn reports_focus(snapshot: &ScreenSnapshot) -> bool {
+    snapshot
+        .input_modes
+        .windows(8)
+        .any(|window| window == b"\x1b[?1004h")
+}
+
+#[test]
+fn snapshot_carries_focus_reporting_while_the_agent_has_it_on() {
+    let mut emulator = emulator(5, 20);
+    assert!(!reports_focus(&emulator.snapshot()));
+
+    emulator.process(b"\x1b[?1004h");
+    assert!(reports_focus(&emulator.snapshot()));
+
+    emulator.process(b"\x1b[?1004l");
+    assert!(!reports_focus(&emulator.snapshot()));
+}
+
+#[test]
+fn focus_reporting_is_tracked_inside_combined_mode_changes() {
+    let mut emulator = emulator(5, 20);
+    emulator.process(b"\x1b[?2004;1004h");
+    let snapshot = emulator.snapshot();
+    assert!(reports_focus(&snapshot));
+    assert!(snapshot.input_modes().bracketed_paste);
+
+    emulator.process(b"\x1b[?2004;1004l");
+    assert!(!reports_focus(&emulator.snapshot()));
+}

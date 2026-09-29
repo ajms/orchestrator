@@ -71,3 +71,36 @@ fn without_a_display_a_yank_writes_osc_52_for_the_clipboard_and_primary() {
 
     assert_eq!(effects, vec![osc52('c'), osc52('p')]);
 }
+
+fn relayed_copy(session_id: &str) -> Vec<Effect> {
+    let mut tui = Harness::with_config(TuiConfig {
+        display: DisplayVars {
+            wayland_display: Some("wayland-0".into()),
+            x11_display: None,
+        },
+        ..TuiConfig::default()
+    });
+    tui.sessions(vec![
+        session("webshop", "first"),
+        session("webshop", "second"),
+    ]);
+    tui.take_effects();
+    tui.send(orch_tui::Event::Daemon(FromDaemon::Clipboard {
+        session: id(session_id),
+        text: "alpha\nbeta".into(),
+    }));
+    tui.take_effects()
+}
+
+#[test]
+fn an_agent_copy_relayed_for_the_shown_session_reaches_the_clipboard_and_primary() {
+    assert_eq!(
+        relayed_copy("first"),
+        vec![command("wl-copy", &[]), command("wl-copy", &["--primary"])]
+    );
+}
+
+#[test]
+fn an_agent_copy_relayed_for_a_session_no_longer_shown_is_dropped() {
+    assert_eq!(relayed_copy("second"), vec![]);
+}

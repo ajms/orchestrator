@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -255,6 +255,10 @@ pub enum FromDaemon {
     RateLimits {
         five_hour: Option<f64>,
         seven_day: Option<f64>,
+    },
+    Clipboard {
+        session: SessionId,
+        text: String,
     },
 }
 

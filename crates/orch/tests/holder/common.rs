@@ -180,19 +180,31 @@ pub async fn wait_for_screen(
     }
 }
 
-pub async fn next_event(client: &mut HolderClient) -> (u64, HolderEvent) {
+pub async fn next_matching<T>(
+    client: &mut HolderClient,
+    what: &str,
+    mut pick: impl FnMut(FromHolder) -> Option<T>,
+) -> T {
     let deadline = Instant::now() + WAIT;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let message = tokio::time::timeout(remaining, client.recv())
             .await
-            .expect("no event in time")
+            .unwrap_or_else(|_| panic!("no {what} in time"))
             .unwrap()
             .expect("holder closed the connection");
-        if let FromHolder::Event { seq, event } = message {
-            return (seq, event);
+        if let Some(picked) = pick(message) {
+            return picked;
         }
     }
+}
+
+pub async fn next_event(client: &mut HolderClient) -> (u64, HolderEvent) {
+    next_matching(client, "event", |message| match message {
+        FromHolder::Event { seq, event } => Some((seq, event)),
+        _ => None,
+    })
+    .await
 }
 
 pub async fn next_hook_or_tap(client: &mut HolderClient) -> HolderEvent {
@@ -205,9 +217,13 @@ pub async fn next_hook_or_tap(client: &mut HolderClient) -> HolderEvent {
 }
 
 pub async fn type_line(client: &mut HolderClient, line: &str) {
+    send_bytes(client, format!("{line}\r").as_bytes()).await;
+}
+
+pub async fn send_bytes(client: &mut HolderClient, bytes: &[u8]) {
     client
         .send(&ToHolder::Input {
-            bytes: format!("{line}\r").into_bytes(),
+            bytes: bytes.to_vec(),
         })
         .await
         .unwrap();

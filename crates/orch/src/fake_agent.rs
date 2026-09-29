@@ -3,8 +3,10 @@ use std::path::Path;
 use std::process::{Command, ExitCode};
 use std::time::Duration;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use nix::sys::signal::{SigHandler, Signal, signal};
-use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+use nix::sys::termios::{LocalFlags, SetArg, cfmakeraw, tcgetattr, tcsetattr};
 use orch_holder::SESSION_ENV;
 
 use crate::subprocess::run_with_input;
@@ -27,11 +29,13 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
             return code;
         }
     }
-    for line in std::io::stdin().lock().lines() {
-        let Ok(line) = line else { break };
-        if let Some(code) = execute(&line) {
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    while stdin.lock().read_line(&mut line).is_ok_and(|read| read > 0) {
+        if let Some(code) = execute(line.trim_end_matches('\n')) {
             return code;
         }
+        line.clear();
     }
     ExitCode::SUCCESS
 }
@@ -116,11 +120,63 @@ fn execute(line: &str) -> Option<ExitCode> {
             let _ = Command::new("stty").arg("size").status();
             let _ = std::io::stdout().flush();
         }
+        "mouse" => enable_mouse(rest),
+        "raw" => echo_raw(),
+        "osc52" => copy_to_clipboard(rest),
         "sleep" => std::thread::sleep(Duration::from_millis(rest.parse().unwrap_or(0))),
         "exit" => return Some(ExitCode::from(rest.parse::<u8>().unwrap_or(0))),
         _ => say(&format!("unknown> {}", line.escape_debug())),
     }
     None
+}
+
+fn enable_mouse(request: &str) {
+    let (mode, encoding) = request.split_once(' ').unwrap_or((request, "default"));
+    let mode = match mode {
+        "press" => "9",
+        "press-release" => "1000",
+        "button-motion" => "1002",
+        "any-motion" => "1003",
+        _ => return say(&format!("unknown mouse mode> {mode}")),
+    };
+    let encoding = match encoding {
+        "default" => "",
+        "utf8" => "\x1b[?1005h",
+        "sgr" => "\x1b[?1006h",
+        _ => return say(&format!("unknown mouse encoding> {encoding}")),
+    };
+    emit(&format!("\x1b[?{mode}h{encoding}"));
+}
+
+fn echo_raw() {
+    let stdin = std::io::stdin();
+    let Ok(cooked) = tcgetattr(&stdin) else {
+        return say("raw> unavailable");
+    };
+    let mut raw = cooked.clone();
+    cfmakeraw(&mut raw);
+    let _ = tcsetattr(&stdin, SetArg::TCSANOW, &raw);
+    say("raw on");
+    let mut buf = [0; 1024];
+    while let Ok(n @ 1..) = stdin.lock().read(&mut buf) {
+        let received = &buf[..n];
+        if received == b"\x04" {
+            break;
+        }
+        say(&format!("raw> {}", received.escape_ascii()));
+    }
+    let _ = tcsetattr(&stdin, SetArg::TCSANOW, &cooked);
+    say("raw off");
+}
+
+fn copy_to_clipboard(text: &str) {
+    emit(&format!("\x1b]52;c;{}\x07", STANDARD.encode(text)));
+}
+
+fn emit(sequence: &str) {
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout.write_all(sequence.as_bytes());
+    let _ = stdout.flush();
 }
 
 fn say(text: &str) {
