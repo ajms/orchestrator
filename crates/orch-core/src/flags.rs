@@ -84,6 +84,5 @@ impl Attention {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Effect {
-    Attention(Attention),
     RecheckRebase,
 }

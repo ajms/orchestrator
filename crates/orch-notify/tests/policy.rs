@@ -13,17 +13,18 @@ fn event(id: &str, attention: Attention, at: Instant) -> AttentionEvent {
     AttentionEvent {
         session: session(id),
         title: id.to_string(),
+        repo: "app".into(),
         branch: format!("orch/{id}"),
         attention,
         at,
     }
 }
 
-fn client(id: u64, focused: bool, showing: Option<&str>) -> ClientView {
+fn client(id: u64, focused: bool, in_view: Option<&str>) -> ClientView {
     ClientView {
         id: ClientId(id),
         focused,
-        showing: showing.map(session),
+        session_in_view: in_view.map(session),
     }
 }
 
@@ -78,18 +79,18 @@ fn a_session_needing_input_shows_a_desktop_notification_and_rings_every_client()
             desktop: vec![show_session(
                 "fix-login",
                 "fix-login",
-                "Needs input · orch/fix-login"
+                "Needs input · app/orch/fix-login"
             )],
             bell: vec![
                 Ring {
                     client: ClientId(1),
                     title: "fix-login".into(),
-                    body: "Needs input · orch/fix-login".into(),
+                    body: "Needs input · app/orch/fix-login".into(),
                 },
                 Ring {
                     client: ClientId(2),
                     title: "fix-login".into(),
-                    body: "Needs input · orch/fix-login".into(),
+                    body: "Needs input · app/orch/fix-login".into(),
                 },
             ],
         }
@@ -111,7 +112,7 @@ fn nothing_is_sent_for_a_session_visible_in_a_focused_client() {
 }
 
 #[test]
-fn a_focused_client_showing_another_session_does_not_suppress() {
+fn a_focused_client_with_another_session_in_view_does_not_suppress() {
     let mut world = World::new();
     world.clients = vec![client(1, true, Some("other"))];
     let mut policy = NotificationPolicy::new();
@@ -184,7 +185,7 @@ fn a_repo_override_decides_for_sessions_of_that_repo() {
     assert!(from_quiet.desktop.is_empty());
     assert_eq!(
         from_loud.desktop,
-        vec![show_session("b", "b", "Checks failing · orch/b")]
+        vec![show_session("b", "b", "Checks failing · app/orch/b")]
     );
 }
 
@@ -202,7 +203,7 @@ fn a_session_notification_is_replaced_in_place() {
 
     assert_eq!(
         later.desktop,
-        vec![show_session("a", "a", "Finished its turn · orch/a")]
+        vec![show_session("a", "a", "Finished its turn · app/orch/a")]
     );
 }
 
@@ -224,7 +225,7 @@ fn sessions_changing_within_three_seconds_merge_into_one_notification() {
 
     assert_eq!(
         first.desktop,
-        vec![show_session("a", "a", "Needs input · orch/a")]
+        vec![show_session("a", "a", "Needs input · app/orch/a")]
     );
     assert_eq!(
         second.desktop,
@@ -291,7 +292,7 @@ fn after_a_quiet_window_sessions_are_notified_individually_again() {
 
     assert_eq!(
         quiet.desktop,
-        vec![show_session("c", "c", "PR merged · orch/c")]
+        vec![show_session("c", "c", "PR merged · app/orch/c")]
     );
 }
 
@@ -336,7 +337,7 @@ fn dismissing_down_to_one_session_turns_the_merged_notification_back_into_its_ow
         policy.dismiss(&session("b")),
         vec![
             close_merged(),
-            show_session("a", "a", "Needs input · orch/a")
+            show_session("a", "a", "Needs input · app/orch/a")
         ]
     );
     assert_eq!(policy.dismiss(&session("a")), vec![close_session("a")]);
@@ -373,9 +374,12 @@ fn pr_events_notify_with_their_own_wording() {
     let world = World::new();
     let t0 = Instant::now();
     let cases = [
-        (Attention::ChecksFailing, "Checks failing · orch/pr"),
-        (Attention::ChangesRequested, "Changes requested · orch/pr"),
-        (Attention::PrMerged, "PR merged · orch/pr"),
+        (Attention::ChecksFailing, "Checks failing · app/orch/pr"),
+        (
+            Attention::ChangesRequested,
+            "Changes requested · app/orch/pr",
+        ),
+        (Attention::PrMerged, "PR merged · app/orch/pr"),
     ];
     for (attention, body) in cases {
         let mut policy = NotificationPolicy::new();
@@ -402,7 +406,7 @@ fn a_closed_pr_only_notifies_when_enabled() {
     assert_eq!(by_default, Actions::default());
     assert_eq!(
         enabled.desktop,
-        vec![show_session("pr", "pr", "PR closed · orch/pr")]
+        vec![show_session("pr", "pr", "PR closed · app/orch/pr")]
     );
 }
 
@@ -421,7 +425,7 @@ fn a_dismissed_session_does_not_merge_with_the_next_one() {
 
     assert_eq!(
         next.desktop,
-        vec![show_session("b", "b", "Finished its turn · orch/b")]
+        vec![show_session("b", "b", "Finished its turn · app/orch/b")]
     );
 }
 

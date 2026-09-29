@@ -18,6 +18,7 @@ use crate::state::{Daemon, Live, gate_message};
 pub(crate) const HOLDER_EXIT_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const PROMPT_FILE: &str = "prompt";
 const PORT_BASE_ENV: &str = "ORCH_PORT_BASE";
+const CLICK_QUEUE: usize = 64;
 
 pub(crate) struct Busy(Arc<Daemon>);
 
@@ -372,6 +373,9 @@ impl Daemon {
             live.status.set_muted(muted);
             Ok(())
         })?;
+        if muted {
+            self.lock().dismiss(id);
+        }
         Ok(Reply::Done)
     }
 
@@ -522,7 +526,9 @@ impl Daemon {
         config: crate::DaemonConfig,
         store: crate::store::StoreHandle,
     ) -> Arc<Self> {
-        let daemon = Arc::new(Daemon::new(config, store));
+        let (clicks, clicked) = tokio::sync::mpsc::channel(CLICK_QUEUE);
+        let daemon = Arc::new(Daemon::new(config, store, clicks));
+        tokio::spawn(daemon.clone().route_clicks(clicked));
         for (id, phase) in daemon.load_sessions().await {
             match phase {
                 Phase::Active | Phase::PrOpen => {

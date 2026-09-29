@@ -22,6 +22,7 @@ pub struct SessionStatus {
     conversation: Option<ConversationId>,
     usage: Option<UsageSample>,
     subagents: Vec<Subagent>,
+    raised: Vec<Attention>,
 }
 
 impl Default for SessionStatus {
@@ -44,6 +45,7 @@ impl SessionStatus {
             conversation: None,
             usage: None,
             subagents: Vec::new(),
+            raised: Vec::new(),
         }
     }
 
@@ -92,7 +94,11 @@ impl SessionStatus {
         &self.subagents
     }
 
-    pub fn transition(&mut self, event: PhaseEvent) -> Result<Vec<Effect>, InvalidTransition> {
+    pub fn take_attention(&mut self) -> Vec<Attention> {
+        std::mem::take(&mut self.raised)
+    }
+
+    pub fn transition(&mut self, event: PhaseEvent) -> Result<(), InvalidTransition> {
         let pr_closed = self
             .flags
             .pr
@@ -115,12 +121,12 @@ impl SessionStatus {
             self.agent_process_alive = false;
             self.flags.stalled = false;
         }
-        let attention = match event {
-            PhaseEvent::SetupFailed => Some(Attention::SetupFailed),
-            PhaseEvent::PrMerged => Some(Attention::PrMerged),
-            _ => None,
-        };
-        Ok(attention.map(|a| self.raise(a)).into_iter().collect())
+        match event {
+            PhaseEvent::SetupFailed => self.raise(Attention::SetupFailed),
+            PhaseEvent::PrMerged => self.raise(Attention::PrMerged),
+            _ => {}
+        }
+        Ok(())
     }
 
     pub fn observe(&mut self, observation: Observation, at: Instant) -> Vec<Effect> {
@@ -156,11 +162,13 @@ impl SessionStatus {
             AgentState::Idle if turn_ended => Some(Attention::TurnEnded),
             _ => None,
         };
-        let mut effects: Vec<Effect> = attention.map(|a| self.raise(a)).into_iter().collect();
-        if turn_ended && self.flags.needs_rebase {
-            effects.push(Effect::RecheckRebase);
+        if let Some(attention) = attention {
+            self.raise(attention);
         }
-        effects
+        match turn_ended && self.flags.needs_rebase {
+            true => vec![Effect::RecheckRebase],
+            false => Vec::new(),
+        }
     }
 
     pub fn tick(&mut self, now: Instant, stalled_after: Duration) {
@@ -193,7 +201,7 @@ impl SessionStatus {
         }
     }
 
-    pub fn update_pr(&mut self, pr: PrStatus) -> Vec<Effect> {
+    pub fn update_pr(&mut self, pr: PrStatus) {
         let previous = self.flags.pr.replace(pr.clone());
         let news_worth_attention: [(Attention, PrCondition); 3] = [
             (Attention::ChecksFailing, |pr| {
@@ -204,11 +212,11 @@ impl SessionStatus {
             }),
             (Attention::PrClosed, |pr| pr.state == PrState::Closed),
         ];
-        news_worth_attention
-            .into_iter()
-            .filter(|(_, holds)| holds(&pr) && !previous.as_ref().is_some_and(holds))
-            .map(|(attention, _)| self.raise(attention))
-            .collect()
+        for (attention, holds) in news_worth_attention {
+            if holds(&pr) && !previous.as_ref().is_some_and(holds) {
+                self.raise(attention);
+            }
+        }
     }
 
     pub fn set_recovered(&mut self, recovered: bool) {
@@ -309,10 +317,10 @@ impl SessionStatus {
             .find(|subagent| &subagent.id == id)
     }
 
-    fn raise(&mut self, attention: Attention) -> Effect {
+    fn raise(&mut self, attention: Attention) {
         if attention.marks_unseen() && !self.watched {
             self.flags.unseen = true;
         }
-        Effect::Attention(attention)
+        self.raised.push(attention);
     }
 }

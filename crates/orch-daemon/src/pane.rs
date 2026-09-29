@@ -7,6 +7,7 @@ use orch_protocol::{FromDaemon, OpenPane, ToDaemon};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc;
 
+use crate::recency::LastUsed;
 use crate::state::{Daemon, PaneId};
 
 enum Activity {
@@ -20,6 +21,7 @@ pub(crate) async fn serve(
     mut reader: OwnedReadHalf,
     mut writer: OwnedWriteHalf,
     open: OpenPane,
+    peer: Option<i32>,
 ) {
     let OpenPane { session, size } = open;
     let live_holder = daemon
@@ -44,7 +46,7 @@ pub(crate) async fn serve(
         return;
     }
     let pane = daemon.lock().next_id();
-    daemon.pane_activity(&session, pane, Activity::Opened(size));
+    daemon.pane_activity(&session, pane, Activity::Opened(size), peer);
     let (mut from_holder, mut to_holder) = holder.into_split();
 
     let (notices, mut notice_queue) = mpsc::unbounded_channel::<FromDaemon>();
@@ -98,7 +100,9 @@ pub(crate) async fn serve(
             {
                 return;
             }
-            relay_daemon.pane_activity(&relay_session, pane, activity);
+            if let Some(client) = relay_daemon.pane_activity(&relay_session, pane, activity, peer) {
+                client.touch();
+            }
         }
     });
     tokio::select! {
@@ -116,10 +120,17 @@ impl Daemon {
             .is_some_and(|live| live.exclusive)
     }
 
-    fn pane_activity(&self, id: &SessionId, pane: PaneId, activity: Activity) {
+    fn pane_activity(
+        &self,
+        id: &SessionId,
+        pane: PaneId,
+        activity: Activity,
+        peer: Option<i32>,
+    ) -> Option<LastUsed> {
         let mut state = self.lock();
+        let client = state.client_using(peer, id);
         let Some(live) = state.sessions.get_mut(id) else {
-            return;
+            return client;
         };
         let size = match activity {
             Activity::Opened(size) | Activity::Resized(size) => Some(size),
@@ -134,6 +145,7 @@ impl Daemon {
                 state.changed(id);
             }
         }
+        client
     }
 
     fn close_pane(&self, id: &SessionId, pane: PaneId) {

@@ -137,6 +137,11 @@ impl Client {
         }
     }
 
+    #[doc(hidden)]
+    pub fn take_backlog(&mut self) -> Vec<FromDaemon> {
+        self.backlog.drain(..).collect()
+    }
+
     pub async fn recv(&mut self) -> io::Result<Option<FromDaemon>> {
         match self.backlog.pop_front() {
             Some(message) => Ok(Some(message)),

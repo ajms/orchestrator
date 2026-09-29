@@ -213,6 +213,9 @@ impl Daemon {
         }
         let ack = live.holder_outbox();
         state.changed(id);
+        for sample in &usage {
+            state.note_rate_limits(sample);
+        }
         let session = id.clone();
         let prompt = self.session_dir(id).join(PROMPT_FILE);
         self.store.write(move |store| {

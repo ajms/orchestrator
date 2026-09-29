@@ -126,6 +126,7 @@ impl HookPayload {
                 Some("elicitation_dialog" | "elicitation_url_dialog" | "agent_needs_input") => {
                     vec![AgentEvent::QuestionAsked]
                 }
+                Some("quota_auto_resume_fired") => vec![AgentEvent::PromptSubmitted],
                 _ => vec![],
             },
             H::Stop if subagent.is_none() => vec![AgentEvent::TurnEnded],

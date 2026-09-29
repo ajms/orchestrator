@@ -13,6 +13,7 @@ pub struct ClientId(pub u64);
 pub struct AttentionEvent {
     pub session: SessionId,
     pub title: String,
+    pub repo: String,
     pub branch: String,
     pub attention: Attention,
     pub at: Instant,
@@ -22,7 +23,7 @@ pub struct AttentionEvent {
 pub struct ClientView {
     pub id: ClientId,
     pub focused: bool,
-    pub showing: Option<SessionId>,
+    pub session_in_view: Option<SessionId>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -36,7 +37,7 @@ impl AttentionContext<'_> {
     fn is_looking_at(&self, session: &SessionId) -> bool {
         self.clients
             .iter()
-            .any(|client| client.focused && client.showing.as_ref() == Some(session))
+            .any(|client| client.focused && client.session_in_view.as_ref() == Some(session))
     }
 }
 
@@ -118,7 +119,12 @@ impl NotificationPolicy {
             return Actions::default();
         }
         let callout = Callout {
-            body: format!("{} · {}", label(event.attention), event.branch),
+            body: format!(
+                "{} · {}/{}",
+                label(event.attention),
+                event.repo,
+                event.branch
+            ),
             session: event.session,
             title: event.title,
             attention: event.attention,

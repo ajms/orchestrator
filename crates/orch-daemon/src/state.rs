@@ -4,11 +4,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use orch_agent::{GuardHit, GuardKind, mode_name};
-use orch_core::{
-    AgentState, Effect, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus,
-};
+use orch_core::{AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus};
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
+use orch_notify::{AttentionEvent, ClientView};
 use orch_protocol::{
     FlagsView, FromDaemon, GuardKindView, GuardPrompt, ReconcileReport, SessionView, SubagentView,
 };
@@ -18,7 +17,10 @@ use tokio::sync::{Notify, watch};
 
 use crate::DaemonConfig;
 use crate::agents::Adapter;
+use crate::notify::Notifier;
 use crate::outbox::Outbox;
+use crate::rate_limits::RateLimits;
+use crate::recency::{LastUsed, UseClock};
 use crate::store::StoreHandle;
 
 const IDLE_CHECK: Duration = Duration::from_millis(100);
@@ -44,6 +46,9 @@ pub(crate) struct State {
     pub(crate) busy: usize,
     pub(crate) report: Option<ReconcileReport>,
     pub(crate) passes: Passes,
+    notifier: Notifier,
+    rate_limits: RateLimits,
+    use_clock: UseClock,
 }
 
 #[derive(Default)]
@@ -56,8 +61,20 @@ pub(crate) struct Passes {
 
 struct ClientLink {
     outbox: Arc<Outbox>,
-    visible: Option<SessionId>,
+    session_in_view: Option<SessionId>,
     focused: bool,
+    last_used: LastUsed,
+    peer: Option<i32>,
+}
+
+impl ClientLink {
+    fn view(&self, id: ClientId) -> ClientView {
+        ClientView {
+            id: orch_notify::ClientId(id),
+            focused: self.focused,
+            session_in_view: self.session_in_view.clone(),
+        }
+    }
 }
 
 pub(crate) struct Live {
@@ -74,6 +91,7 @@ pub(crate) struct Live {
     pub(crate) recheck: Recheck,
     pub(crate) launching: bool,
     pub(crate) repo_missing: bool,
+    end_noticed: bool,
     holder: Option<HolderLink>,
     generation: u64,
 }
@@ -178,13 +196,14 @@ impl Live {
             recheck: Recheck::default(),
             launching: false,
             repo_missing: false,
+            end_noticed: false,
             holder: None,
             generation: 0,
         }
     }
 
     pub(crate) fn transition(&mut self, event: PhaseEvent) -> Result<(), String> {
-        self.status.transition(event).map(drop).map_err(|refused| {
+        self.status.transition(event).map_err(|refused| {
             format!(
                 "not possible while the Session is {}",
                 phase_name(refused.from)
@@ -229,7 +248,7 @@ impl Live {
             .is_some_and(|link| link.outbox.try_send(message).is_ok())
     }
 
-    pub(crate) fn update_pr(&mut self, mut pr: PrStatus, comments: u32) -> Vec<Effect> {
+    pub(crate) fn update_pr(&mut self, mut pr: PrStatus, comments: u32) {
         let unseen = self
             .status
             .flags()
@@ -399,7 +418,20 @@ fn phase_name(phase: Phase) -> &'static str {
 }
 
 impl Daemon {
-    pub(crate) fn new(config: DaemonConfig, store: StoreHandle) -> Self {
+    pub(crate) fn new(
+        config: DaemonConfig,
+        store: StoreHandle,
+        clicks: tokio::sync::mpsc::Sender<SessionId>,
+    ) -> Self {
+        let notifier = Notifier::spawn(
+            config.notifications.clone(),
+            config.loader.clone(),
+            move |session| {
+                if clicks.try_send(session).is_err() {
+                    eprintln!("orch daemon: a notification click was dropped");
+                }
+            },
+        );
         Self {
             config,
             state: Mutex::new(State {
@@ -410,6 +442,9 @@ impl Daemon {
                 busy: 0,
                 report: None,
                 passes: Passes::default(),
+                notifier,
+                rate_limits: RateLimits::default(),
+                use_clock: UseClock::default(),
             }),
             store,
             shutdown: Notify::new(),
@@ -440,6 +475,15 @@ impl Daemon {
 
     pub(crate) fn session_dir(&self, id: &SessionId) -> PathBuf {
         self.config.sessions_dir.join(id.as_str())
+    }
+
+    pub(crate) async fn route_clicks(
+        self: Arc<Self>,
+        mut clicked: tokio::sync::mpsc::Receiver<SessionId>,
+    ) {
+        while let Some(session) = clicked.recv().await {
+            self.lock().focus_recent_client(session);
+        }
     }
 
     pub(crate) async fn watch_idle(self: Arc<Self>) {
@@ -502,38 +546,119 @@ impl State {
         self.next_id
     }
 
-    pub(crate) fn add_client(&mut self, outbox: Arc<Outbox>) -> ClientId {
+    pub(crate) fn add_client(
+        &mut self,
+        outbox: Arc<Outbox>,
+        peer: Option<i32>,
+    ) -> (ClientId, LastUsed) {
         let id = self.next_id();
         let sessions = self.sessions.values().map(Live::view).collect();
         outbox.send(FromDaemon::Sessions { sessions });
+        if self.rate_limits.is_known() {
+            outbox.send(self.rate_limits.into());
+        }
         if let Some(report) = &self.report {
             outbox.send(FromDaemon::Reconciled {
                 report: Box::new(report.clone()),
             });
         }
-        self.clients.insert(
-            id,
-            ClientLink {
-                outbox,
-                visible: None,
-                focused: false,
-            },
-        );
-        id
+        let link = ClientLink {
+            outbox,
+            session_in_view: None,
+            focused: false,
+            last_used: self.use_clock.stamp(),
+            peer,
+        };
+        let last_used = link.last_used.clone();
+        self.notifier
+            .client_view(link.view(id), link.outbox.clone());
+        self.clients.insert(id, link);
+        (id, last_used)
     }
 
     pub(crate) fn remove_client(&mut self, id: ClientId) {
         if self.clients.remove(&id).is_some() {
+            self.notifier.client_gone(orch_notify::ClientId(id));
             self.refresh_watched();
         }
     }
 
-    pub(crate) fn set_view(&mut self, id: ClientId, visible: Option<SessionId>, focused: bool) {
+    pub(crate) fn set_view(
+        &mut self,
+        id: ClientId,
+        session_in_view: Option<SessionId>,
+        focused: bool,
+    ) {
         if let Some(client) = self.clients.get_mut(&id) {
-            client.visible = visible;
+            client.session_in_view = session_in_view;
             client.focused = focused;
+            self.notifier
+                .client_view(client.view(id), client.outbox.clone());
         }
         self.refresh_watched();
+    }
+
+    pub(crate) fn client_using(&self, peer: Option<i32>, session: &SessionId) -> Option<LastUsed> {
+        self.clients
+            .values()
+            .filter(|client| client.session_in_view.as_ref() == Some(session))
+            .filter(|client| peer.is_none() || client.peer == peer)
+            .max_by_key(|client| client.last_used.at())
+            .map(|client| client.last_used.clone())
+    }
+
+    fn focus_recent_client(&self, session: SessionId) {
+        if let Some(client) = self
+            .clients
+            .values()
+            .max_by_key(|client| client.last_used.at())
+        {
+            client.outbox.send(FromDaemon::Focus { session });
+        }
+    }
+
+    pub(crate) fn note_rate_limits(&mut self, sample: &orch_core::UsageSample) {
+        let latest = self.rate_limits.after(sample);
+        if latest == self.rate_limits {
+            return;
+        }
+        self.rate_limits = latest;
+        for client in self.clients.values() {
+            client.outbox.send(latest.into());
+        }
+    }
+
+    pub(crate) fn dismiss(&self, id: &SessionId) {
+        self.notifier.dismiss(id.clone());
+    }
+
+    fn forward_attention(&mut self, id: &SessionId) {
+        let Some(live) = self.sessions.get_mut(id) else {
+            return;
+        };
+        let raised = live.status.take_attention();
+        let ended = live.status.phase().is_terminal() && !live.end_noticed;
+        live.end_noticed |= ended;
+        if ended && raised.is_empty() {
+            self.notifier.dismiss(id.clone());
+        }
+        let now = Instant::now();
+        let repo_name = live
+            .repo
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        for attention in raised {
+            let event = AttentionEvent {
+                session: id.clone(),
+                title: live.record.slug.clone(),
+                repo: repo_name.clone(),
+                branch: live.record.branch.clone(),
+                attention,
+                at: now,
+            };
+            self.notifier
+                .attention(event, live.repo.clone(), live.status.flags().muted);
+        }
     }
 
     fn refresh_watched(&mut self) {
@@ -542,10 +667,13 @@ impl State {
             let watched = self
                 .clients
                 .values()
-                .any(|client| client.focused && client.visible.as_ref() == Some(&id));
+                .any(|client| client.focused && client.session_in_view.as_ref() == Some(&id));
             let Some(live) = self.sessions.get_mut(&id) else {
                 continue;
             };
+            if watched && !live.status.is_watched() {
+                self.notifier.dismiss(id.clone());
+            }
             let before = live.status.flags().clone();
             live.set_watched(watched);
             if *live.status.flags() != before {
@@ -555,6 +683,7 @@ impl State {
     }
 
     pub(crate) fn changed(&mut self, id: &SessionId) {
+        self.forward_attention(id);
         let Some(live) = self.sessions.get_mut(id) else {
             return;
         };

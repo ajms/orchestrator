@@ -124,3 +124,21 @@ async fn a_working_session_without_activity_is_flagged_stalled_until_it_acts_aga
         })
         .await;
 }
+
+#[tokio::test]
+async fn a_session_stopped_by_its_quota_works_again_once_auto_resume_fires() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = idle_session(&env, &mut client, "Quota").await;
+
+    pane.hook(&hook("StopFailure", r#""error":"rate_limit""#))
+        .await;
+    client.until(&id, "Errored", agent_is(State::Errored)).await;
+    pane.hook(&hook(
+        "Notification",
+        r#""notification_type":"quota_auto_resume_fired""#,
+    ))
+    .await;
+    client.until(&id, "Working", agent_is(State::Working)).await;
+}

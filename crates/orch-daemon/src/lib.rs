@@ -6,14 +6,18 @@ mod draft;
 mod holder;
 mod landing;
 mod lifecycle;
+mod notify;
 mod outbox;
 mod pane;
 mod pr;
+mod rate_limits;
+mod recency;
 mod reconcile;
 mod setup;
 mod state;
 mod store;
 mod subprocess;
+mod usage;
 
 use std::fs::File;
 use std::io::{self, Write};
@@ -43,6 +47,13 @@ pub struct DaemonConfig {
     pub idle_timeout: Duration,
     pub pr_poll_interval: Duration,
     pub reconcile_interval: Duration,
+    pub notifications: NotificationTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationTarget {
+    Desktop,
+    Log(PathBuf),
 }
 
 impl DaemonConfig {

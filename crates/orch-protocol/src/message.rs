@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -96,6 +96,7 @@ pub enum Request {
         muted: bool,
     },
     Reconcile,
+    Usage,
     LeftoverPreview {
         repo: PathBuf,
         leftover: LeftoverView,
@@ -192,9 +193,21 @@ pub enum FromDaemon {
     InputDropped {
         reason: String,
     },
+    Ring {
+        session: SessionId,
+        title: String,
+        body: String,
+    },
+    Focus {
+        session: SessionId,
+    },
+    RateLimits {
+        five_hour: Option<f64>,
+        seven_day: Option<f64>,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "reply", rename_all = "snake_case")]
 pub enum Reply {
     Created {
@@ -222,6 +235,28 @@ pub enum Reply {
     Reconciled {
         report: Box<ReconcileReport>,
     },
+    Usage(UsageReport),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct UsageReport {
+    pub per_repo: Vec<RepoUsage>,
+    pub today: Vec<RepoUsage>,
+    pub total: UsageTotalsView,
+    pub estimated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepoUsage {
+    pub repo: PathBuf,
+    pub totals: UsageTotalsView,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct UsageTotalsView {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,6 +266,7 @@ pub enum RequestError {
     UnknownSession,
     Refused { message: String },
     Conflict { paths: Vec<String> },
+    Internal { message: String },
 }
 
 impl std::fmt::Display for RequestError {
@@ -242,6 +278,7 @@ impl std::fmt::Display for RequestError {
             Self::UnknownSession => f.write_str("no such Session"),
             Self::Refused { message } => f.write_str(message),
             Self::Conflict { paths } => write!(f, "conflict in: {}", paths.join(", ")),
+            Self::Internal { message } => write!(f, "internal error: {message}"),
         }
     }
 }

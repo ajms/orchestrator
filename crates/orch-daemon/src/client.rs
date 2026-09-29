@@ -11,6 +11,7 @@ use crate::pane;
 use crate::state::{ClientId, Daemon};
 
 pub(crate) async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
+    let peer = stream.peer_cred().ok().and_then(|cred| cred.pid());
     let (mut reader, mut writer) = stream.into_split();
     let Ok(Some(ToDaemon::Hello { version, pane })) = read_frame_async(&mut reader).await else {
         return;
@@ -32,11 +33,11 @@ pub(crate) async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
         return;
     }
     if let Some(open) = pane {
-        pane::serve(daemon, reader, writer, open).await;
+        pane::serve(daemon, reader, writer, open, peer).await;
         return;
     }
     let outbox = Arc::new(Outbox::default());
-    let client = daemon.lock().add_client(outbox.clone());
+    let (client, last_used) = daemon.lock().add_client(outbox.clone(), peer);
     let mut writing = tokio::spawn(write_loop(writer, outbox.clone()));
     let mut requests = JoinSet::new();
     loop {
@@ -48,6 +49,7 @@ pub(crate) async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
         if let ToDaemon::Request { id, request } = message {
             let daemon = daemon.clone();
             let outbox = outbox.clone();
+            last_used.touch();
             requests.spawn(async move {
                 let result = handle(&daemon, client, request).await;
                 daemon.store.flush().await;
@@ -122,6 +124,7 @@ async fn handle(
             let daemon = daemon.clone();
             detached(async move { daemon.reconcile_now().await }).await
         }
+        Request::Usage => daemon.usage().await,
         Request::LeftoverPreview { repo, leftover } => {
             daemon.leftover_preview(repo, leftover).await
         }

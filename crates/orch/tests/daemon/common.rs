@@ -73,6 +73,38 @@ impl Env {
         std::fs::write(self.path("config/orchestrator/config.toml"), config).unwrap();
     }
 
+    pub fn notify_log(&self) -> PathBuf {
+        self.path("notify.log")
+    }
+
+    pub fn notifications(&self) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(self.notify_log())
+            .unwrap_or_default()
+            .split_inclusive('\n')
+            .filter(|line| line.ends_with('\n'))
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    pub async fn until_notified(
+        &self,
+        what: &str,
+        ready: impl Fn(&[serde_json::Value]) -> bool,
+    ) -> Vec<serde_json::Value> {
+        wait_until(what, || ready(&self.notifications())).await;
+        self.notifications()
+    }
+
+    pub fn click_notification(&self, key: &str) {
+        use std::io::Write;
+        let mut clicks = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.path("notify.log.clicks"))
+            .unwrap();
+        writeln!(clicks, "{key}").unwrap();
+    }
+
     pub fn orch(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_orch"));
         command
@@ -106,6 +138,8 @@ impl Env {
             .arg("daemon")
             .arg("--idle-timeout-ms")
             .arg(idle_timeout.as_millis().to_string())
+            .arg("--notify-log")
+            .arg(self.notify_log())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());
         command
@@ -370,6 +404,19 @@ pub async fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ring {
+    pub session: SessionId,
+    pub title: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RateLimits {
+    pub five_hour: Option<f64>,
+    pub seven_day: Option<f64>,
+}
+
 pub struct TestClient {
     pub client: Client,
     pub sessions: HashMap<SessionId, SessionView>,
@@ -377,6 +424,11 @@ pub struct TestClient {
     pub history: Vec<SessionView>,
     pub removed: Vec<SessionId>,
     pub reports: Vec<ReconcileReport>,
+    pub rings: Vec<Ring>,
+    pub focused: Vec<SessionId>,
+    pub rate_limits: Vec<RateLimits>,
+    session_in_view: Option<SessionId>,
+    focused_terminal: bool,
 }
 
 impl From<Client> for TestClient {
@@ -388,6 +440,11 @@ impl From<Client> for TestClient {
             history: Vec::new(),
             removed: Vec::new(),
             reports: Vec::new(),
+            rings: Vec::new(),
+            focused: Vec::new(),
+            rate_limits: Vec::new(),
+            session_in_view: None,
+            focused_terminal: false,
         }
     }
 }
@@ -465,7 +522,53 @@ impl TestClient {
                 self.removed.push(session.clone());
             }
             FromDaemon::Reconciled { report } => self.reports.push(*report.clone()),
+            FromDaemon::Ring {
+                session,
+                title,
+                body,
+            } => self.rings.push(Ring {
+                session: session.clone(),
+                title: title.clone(),
+                body: body.clone(),
+            }),
+            FromDaemon::Focus { session } => self.focused.push(session.clone()),
+            FromDaemon::RateLimits {
+                five_hour,
+                seven_day,
+            } => self.rate_limits.push(RateLimits {
+                five_hour: *five_hour,
+                seven_day: *seven_day,
+            }),
             _ => {}
+        }
+    }
+
+    pub async fn until_received(&mut self, what: &str, ready: impl Fn(&Self) -> bool) {
+        let deadline = Instant::now() + WAIT;
+        while !ready(self) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let Ok(message) = tokio::time::timeout(remaining, self.client.recv()).await else {
+                panic!("never received {what}");
+            };
+            let message = message.unwrap().expect("Daemon closed the connection");
+            self.apply(&message);
+        }
+    }
+
+    pub async fn view(&mut self, session: Option<&SessionId>, focused: bool) {
+        self.session_in_view = session.cloned();
+        self.focused_terminal = focused;
+        self.drain().await;
+    }
+
+    pub async fn drain(&mut self) {
+        let view = Request::View {
+            session: self.session_in_view.clone(),
+            focused: self.focused_terminal,
+        };
+        self.request(view).await.unwrap();
+        for message in self.client.take_backlog() {
+            self.apply(&message);
         }
     }
 

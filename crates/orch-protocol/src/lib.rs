@@ -10,7 +10,8 @@ pub use client::{
 };
 pub use message::{
     CommitView, CreateSession, FromDaemon, GuardChoice, Landing, LandingMode, OpenPane,
-    PROTOCOL_VERSION, Reply, Request, RequestError, ToDaemon,
+    PROTOCOL_VERSION, Reply, RepoUsage, Request, RequestError, ToDaemon, UsageReport,
+    UsageTotalsView,
 };
 pub use orch_holder::{ScreenSnapshot, Size};
 pub use reconcile::{Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, RepoReport};

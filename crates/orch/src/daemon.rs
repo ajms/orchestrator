@@ -1,9 +1,10 @@
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Args;
 use orch_config::ConfigLoader;
-use orch_daemon::DaemonConfig;
+use orch_daemon::{DaemonConfig, NotificationTarget};
 use orch_holder::default_runtime_dir;
 use orch_store::Store;
 
@@ -15,6 +16,8 @@ pub struct DaemonArgs {
     pr_poll_ms: u64,
     #[arg(long, hide = true, default_value_t = DaemonConfig::DEFAULT_RECONCILE.as_millis() as u64)]
     reconcile_ms: u64,
+    #[arg(long, hide = true)]
+    notify_log: Option<PathBuf>,
 }
 
 pub fn run(args: DaemonArgs) -> ExitCode {
@@ -39,6 +42,9 @@ pub fn run(args: DaemonArgs) -> ExitCode {
         idle_timeout: Duration::from_millis(args.idle_timeout_ms),
         pr_poll_interval: Duration::from_millis(args.pr_poll_ms),
         reconcile_interval: Duration::from_millis(args.reconcile_ms),
+        notifications: args
+            .notify_log
+            .map_or(NotificationTarget::Desktop, NotificationTarget::Log),
     };
     match orch_daemon::run(config) {
         Ok(()) => ExitCode::SUCCESS,

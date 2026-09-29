@@ -296,3 +296,25 @@ fn an_unanswered_guard_falls_back_to_claudes_own_prompt() {
         })
     );
 }
+
+#[test]
+fn a_fired_quota_auto_resume_puts_the_agent_back_to_work() {
+    assert_eq!(
+        events("notification_quota_auto_resume_fired"),
+        vec![mode(PermissionMode::Default), AgentEvent::PromptSubmitted]
+    );
+}
+
+#[test]
+fn a_stale_or_disabled_quota_auto_resume_leaves_the_state_alone() {
+    for fixture in [
+        "notification_quota_auto_resume_stale",
+        "notification_quota_auto_resume_disabled",
+    ] {
+        assert_eq!(
+            events(fixture),
+            vec![mode(PermissionMode::Default)],
+            "{fixture}"
+        );
+    }
+}

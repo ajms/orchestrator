@@ -8,37 +8,38 @@ use orch_core::{
     Flags, Observation, PhaseEvent, PrState, PrStatus, ReviewDecision, SessionStatus,
 };
 
-fn attention(effects: &[Effect]) -> Vec<Attention> {
-    effects
-        .iter()
-        .filter_map(|effect| match effect {
-            Effect::Attention(attention) => Some(*attention),
-            _ => None,
-        })
-        .collect()
+fn raised<T>(
+    status: &mut SessionStatus,
+    act: impl FnOnce(&mut SessionStatus) -> T,
+) -> Vec<Attention> {
+    act(status);
+    status.take_attention()
 }
 
 #[test]
 fn finishing_a_turn_needing_input_or_failing_calls_for_attention() {
     let mut status = working_session();
     assert_eq!(
-        attention(&status.feed_event(AgentEvent::PermissionRequested)),
+        raised(&mut status, |status| status
+            .feed_event(AgentEvent::PermissionRequested)),
         [Attention::NeedsInput]
     );
     assert_eq!(
-        attention(&status.feed_event(AgentEvent::TurnEnded)),
+        raised(&mut status, |status| status
+            .feed_event(AgentEvent::TurnEnded)),
         [Attention::TurnEnded]
     );
 
     let mut status = working_session();
-    let effects = status.feed_event(AgentEvent::Failed {
+    status.feed_event(AgentEvent::Failed {
         kind: FailureKind::Server,
     });
-    assert_eq!(attention(&effects), [Attention::Errored]);
+    assert_eq!(status.take_attention(), [Attention::Errored]);
 
     let mut status = working_session();
     assert_eq!(
-        attention(&status.feed(Observation::Exited { code: Some(2) })),
+        raised(&mut status, |status| status
+            .feed(Observation::Exited { code: Some(2) })),
         [Attention::Errored]
     );
 }
@@ -46,18 +47,30 @@ fn finishing_a_turn_needing_input_or_failing_calls_for_attention() {
 #[test]
 fn staying_in_a_state_or_working_calls_for_no_attention() {
     let mut status = working_session();
-    assert!(attention(&status.feed_event(AgentEvent::PromptSubmitted)).is_empty());
+    assert!(
+        raised(&mut status, |status| status
+            .feed_event(AgentEvent::PromptSubmitted))
+        .is_empty()
+    );
     let mut status = idle_session();
-    assert!(attention(&status.feed_event(AgentEvent::TurnEnded)).is_empty());
+    assert!(
+        raised(&mut status, |status| status
+            .feed_event(AgentEvent::TurnEnded))
+        .is_empty()
+    );
     let mut status = working_session();
-    assert!(attention(&status.feed(Observation::Exited { code: Some(0) })).is_empty());
+    assert!(
+        raised(&mut status, |status| status
+            .feed(Observation::Exited { code: Some(0) }))
+        .is_empty()
+    );
 }
 
 #[test]
 fn a_failed_setup_calls_for_attention() {
     let mut status = SessionStatus::new();
-    let effects = status.transition(PhaseEvent::SetupFailed).unwrap();
-    assert_eq!(attention(&effects), [Attention::SetupFailed]);
+    status.transition(PhaseEvent::SetupFailed).unwrap();
+    assert_eq!(status.take_attention(), [Attention::SetupFailed]);
     assert!(status.flags().unseen);
 }
 
@@ -176,7 +189,7 @@ fn pr_updates_are_recorded_and_failing_checks_or_requested_changes_call_for_atte
         0,
         PrState::Open,
     );
-    assert!(attention(&status.update_pr(pending.clone())).is_empty());
+    assert!(raised(&mut status, |status| status.update_pr(pending.clone())).is_empty());
     assert_eq!(status.flags().pr, Some(pending));
 
     let failing = pr(
@@ -186,10 +199,10 @@ fn pr_updates_are_recorded_and_failing_checks_or_requested_changes_call_for_atte
         PrState::Open,
     );
     assert_eq!(
-        attention(&status.update_pr(failing.clone())),
+        raised(&mut status, |status| status.update_pr(failing.clone())),
         [Attention::ChecksFailing, Attention::ChangesRequested]
     );
-    assert!(attention(&status.update_pr(failing)).is_empty());
+    assert!(raised(&mut status, |status| status.update_pr(failing)).is_empty());
 }
 
 #[test]
@@ -201,7 +214,10 @@ fn a_pr_closed_without_merging_is_flagged_for_a_decision() {
         0,
         PrState::Closed,
     );
-    assert_eq!(attention(&status.update_pr(closed)), [Attention::PrClosed]);
+    assert_eq!(
+        raised(&mut status, |status| status.update_pr(closed)),
+        [Attention::PrClosed]
+    );
     assert_eq!(
         status.flags().pr.as_ref().map(|pr| pr.state),
         Some(PrState::Closed)
@@ -211,11 +227,16 @@ fn a_pr_closed_without_merging_is_flagged_for_a_decision() {
 #[test]
 fn landing_a_pr_session_reports_the_merge() {
     let mut status = pr_session();
-    let effects = status.transition(PhaseEvent::PrMerged).unwrap();
-    assert_eq!(attention(&effects), [Attention::PrMerged]);
+    status.transition(PhaseEvent::PrMerged).unwrap();
+    assert_eq!(status.take_attention(), [Attention::PrMerged]);
 
     let mut status = idle_session();
-    assert!(attention(&status.transition(PhaseEvent::Landed).unwrap()).is_empty());
+    assert!(
+        raised(&mut status, |status| status
+            .transition(PhaseEvent::Landed)
+            .unwrap())
+        .is_empty()
+    );
 }
 
 #[test]
@@ -224,10 +245,10 @@ fn muted_and_recovered_sessions_still_derive_state_and_call_for_attention() {
     status.set_muted(true);
     status.set_recovered(true);
 
-    let effects = status.feed_event(AgentEvent::TurnEnded);
+    status.feed_event(AgentEvent::TurnEnded);
 
     assert_eq!(status.agent_state(), Some(AgentState::Idle));
-    assert_eq!(attention(&effects), [Attention::TurnEnded]);
+    assert_eq!(status.take_attention(), [Attention::TurnEnded]);
     let flags = status.flags();
     assert!(flags.muted && flags.recovered && flags.unseen);
 }
@@ -264,4 +285,27 @@ fn a_status_restored_from_records_keeps_phase_and_flags_until_observed_again() {
     assert_eq!(status.agent_state(), Some(AgentState::Starting));
     status.transition(PhaseEvent::PrMerged).unwrap();
     assert_eq!(status.phase(), orch_core::Phase::Landed);
+}
+
+#[test]
+fn attention_is_reported_once_and_restoring_a_session_raises_none() {
+    let mut status = working_session();
+    status.feed_event(AgentEvent::PermissionRequested);
+    assert_eq!(status.take_attention(), [Attention::NeedsInput]);
+    assert!(status.take_attention().is_empty());
+
+    let mut restored = SessionStatus::new();
+    restored.restore(
+        orch_core::Phase::Active,
+        Flags {
+            unseen: true,
+            ..Flags::default()
+        },
+    );
+    restored.restore_agent(AgentState::NeedsInput, true);
+    restored.feed_event(AgentEvent::ToolStarted {
+        tool: "Bash".into(),
+        subagent: None,
+    });
+    assert!(restored.take_attention().is_empty());
 }

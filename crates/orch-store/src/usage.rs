@@ -28,7 +28,7 @@ impl UsageTotals {
             || self.cost_usd < other.cost_usd
     }
 
-    fn plus(self, other: UsageTotals) -> Self {
+    pub fn plus(self, other: UsageTotals) -> Self {
         Self {
             input_tokens: self.input_tokens + other.input_tokens,
             output_tokens: self.output_tokens + other.output_tokens,
@@ -50,6 +50,12 @@ impl UsageTotals {
             output_tokens: row.get::<_, i64>(first + 1)? as u64,
             cost_usd: row.get(first + 2)?,
         })
+    }
+}
+
+impl std::iter::Sum for UsageTotals {
+    fn sum<I: Iterator<Item = Self>>(totals: I) -> Self {
+        totals.fold(Self::default(), Self::plus)
     }
 }
 
@@ -137,9 +143,8 @@ impl Store {
         Ok(self
             .usage_segments(session)?
             .into_iter()
-            .fold(UsageTotals::default(), |sum, (_, segment)| {
-                sum.plus(segment)
-            }))
+            .map(|(_, segment)| segment)
+            .sum())
     }
 
     pub fn usage_per_repo(&self) -> Result<Vec<(PathBuf, UsageTotals)>, StoreError> {

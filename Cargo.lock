@@ -1245,6 +1245,7 @@ dependencies = [
  "orch-core",
  "orch-git",
  "orch-holder",
+ "orch-notify",
  "orch-protocol",
  "orch-store",
  "serde",
