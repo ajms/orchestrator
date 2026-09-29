@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -16,6 +16,8 @@ pub enum ToDaemon {
         version: u32,
         #[serde(default)]
         pane: Option<OpenPane>,
+        #[serde(default)]
+        display: Option<DisplayVars>,
     },
     Request {
         id: u64,
@@ -29,6 +31,43 @@ pub enum ToDaemon {
         text: String,
     },
     Resize(Size),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayVars {
+    pub wayland_display: Option<String>,
+    pub x11_display: Option<String>,
+}
+
+impl DisplayVars {
+    const WAYLAND: &str = "WAYLAND_DISPLAY";
+    const X11: &str = "DISPLAY";
+
+    pub fn from_env() -> Self {
+        Self::from_vars(|key| std::env::var(key).ok())
+    }
+
+    pub fn from_vars(var: impl Fn(&str) -> Option<String>) -> Self {
+        let set = |key| var(key).filter(|value| !value.is_empty());
+        Self {
+            wayland_display: set(Self::WAYLAND),
+            x11_display: set(Self::X11),
+        }
+    }
+
+    pub(crate) fn reported(&self) -> Option<Self> {
+        (self != &Self::default()).then(|| self.clone())
+    }
+
+    pub fn pairs(&self) -> Vec<(String, String)> {
+        [
+            (Self::WAYLAND, &self.wayland_display),
+            (Self::X11, &self.x11_display),
+        ]
+        .into_iter()
+        .filter_map(|(key, value)| Some((key.to_string(), value.clone()?)))
+        .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

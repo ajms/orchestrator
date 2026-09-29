@@ -1,8 +1,9 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use crossterm::event::MouseEventKind;
+use orch_protocol::DisplayVars;
 use orch_protocol::FromDaemon;
-use orch_tui::{Display, Effect, TuiConfig};
+use orch_tui::{Effect, TuiConfig};
 use ratatui::style::Color;
 
 use crate::common::*;
@@ -449,9 +450,9 @@ fn losing_terminal_focus_ends_the_selection_gesture() {
 #[test]
 fn a_selection_copy_under_wayland_sets_the_clipboard_and_primary_with_wl_copy() {
     let mut tui = Harness::with_config(TuiConfig {
-        display: Display {
-            wayland: Some("wayland-0".into()),
-            x11: None,
+        display: DisplayVars {
+            wayland_display: Some("wayland-0".into()),
+            x11_display: None,
         },
         ..TuiConfig::default()
     });

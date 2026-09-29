@@ -172,7 +172,7 @@ async fn connect(
         false => orch_protocol::connect_or_spawn_daemon(runtime_dir, program).await,
     };
     let link = match ensured {
-        Ok(_) => SocketLink::connect(&socket, events.clone()).await,
+        Ok(_) => SocketLink::connect(&socket, &options.config.display, events.clone()).await,
         Err(err) => Err(err),
     };
     let link = match link {

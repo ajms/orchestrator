@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use orch_agent::Presets;
+use orch_protocol::DisplayVars;
 
 const DEFAULT_REVIEW_COMMAND: &str = r#"git -p diff "$ORCH_MERGE_BASE" "$ORCH_REVIEW_TREE""#;
 
@@ -11,13 +12,7 @@ pub struct TuiConfig {
     pub presets: Presets,
     pub branch_prefix: String,
     pub review_command: String,
-    pub display: Display,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Display {
-    pub wayland: Option<String>,
-    pub x11: Option<String>,
+    pub display: DisplayVars,
 }
 
 impl Default for TuiConfig {
@@ -28,7 +23,7 @@ impl Default for TuiConfig {
             presets: Presets::default(),
             branch_prefix: orch_git::DEFAULT_BRANCH_PREFIX.into(),
             review_command: DEFAULT_REVIEW_COMMAND.into(),
-            display: Display::default(),
+            display: DisplayVars::default(),
         }
     }
 }

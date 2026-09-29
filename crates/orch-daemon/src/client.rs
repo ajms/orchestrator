@@ -13,7 +13,12 @@ use crate::state::{ClientId, Daemon};
 pub(crate) async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
     let peer = stream.peer_cred().ok().and_then(|cred| cred.pid());
     let (mut reader, mut writer) = stream.into_split();
-    let Ok(Some(ToDaemon::Hello { version, pane })) = read_frame_async(&mut reader).await else {
+    let Ok(Some(ToDaemon::Hello {
+        version,
+        pane,
+        display,
+    })) = read_frame_async(&mut reader).await
+    else {
         return;
     };
     if version != PROTOCOL_VERSION {
@@ -25,6 +30,9 @@ pub(crate) async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
         };
         let _ = write_frame_async(&mut writer, &mismatch).await;
         return;
+    }
+    if let Some(display) = display {
+        daemon.lock().display = display;
     }
     let welcome = FromDaemon::Welcome {
         version: PROTOCOL_VERSION,

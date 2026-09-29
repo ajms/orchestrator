@@ -6,12 +6,12 @@ mod view;
 pub use client::{
     Client, ConnectError, DAEMON_UNIT, DEFAULT_SPAWN_WAIT, Pane, connect_or_spawn,
     connect_or_spawn_daemon, daemon_command, daemon_lock, daemon_socket, daemon_under_systemd,
-    open_connection, restart_daemon, restart_running_daemon, spawn_detached, stop_daemon,
+    open_control, open_pane, restart_daemon, restart_running_daemon, spawn_detached, stop_daemon,
 };
 pub use message::{
-    CommitView, CreateSession, FromDaemon, GuardChoice, Landing, LandingMode, OpenPane,
-    PROTOCOL_VERSION, Reply, RepoSettings, RepoUsage, Request, RequestError, StaleOverrides,
-    ToDaemon, TrustNeeded, UsageReport, UsageTotalsView,
+    CommitView, CreateSession, DisplayVars, FromDaemon, GuardChoice, Landing, LandingMode,
+    OpenPane, PROTOCOL_VERSION, Reply, RepoSettings, RepoUsage, Request, RequestError,
+    StaleOverrides, ToDaemon, TrustNeeded, UsageReport, UsageTotalsView,
 };
 pub use orch_holder::{ScreenSnapshot, Size};
 pub use reconcile::{Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, RepoReport};

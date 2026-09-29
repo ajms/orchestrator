@@ -1,11 +1,11 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use orch_protocol::FromDaemon;
-use orch_tui::{Display, Effect, TuiConfig};
+use orch_protocol::{DisplayVars, FromDaemon};
+use orch_tui::{Effect, TuiConfig};
 
 use crate::common::*;
 
-fn yank_in(display: Display) -> Vec<Effect> {
+fn yank_in(display: DisplayVars) -> Vec<Effect> {
     let mut tui = Harness::with_config(TuiConfig {
         display,
         ..TuiConfig::default()
@@ -38,9 +38,9 @@ fn osc52(target: char) -> Effect {
 
 #[test]
 fn under_wayland_a_yank_runs_wl_copy_for_the_clipboard_and_primary() {
-    let effects = yank_in(Display {
-        wayland: Some("wayland-0".into()),
-        x11: Some(":0".into()),
+    let effects = yank_in(DisplayVars {
+        wayland_display: Some("wayland-0".into()),
+        x11_display: Some(":0".into()),
     });
 
     assert_eq!(
@@ -51,9 +51,9 @@ fn under_wayland_a_yank_runs_wl_copy_for_the_clipboard_and_primary() {
 
 #[test]
 fn under_x11_a_yank_runs_xclip_for_the_clipboard_and_primary() {
-    let effects = yank_in(Display {
-        wayland: None,
-        x11: Some(":0".into()),
+    let effects = yank_in(DisplayVars {
+        wayland_display: None,
+        x11_display: Some(":0".into()),
     });
 
     assert_eq!(
@@ -67,7 +67,7 @@ fn under_x11_a_yank_runs_xclip_for_the_clipboard_and_primary() {
 
 #[test]
 fn without_a_display_a_yank_writes_osc_52_for_the_clipboard_and_primary() {
-    let effects = yank_in(Display::default());
+    let effects = yank_in(DisplayVars::default());
 
     assert_eq!(effects, vec![osc52('c'), osc52('p')]);
 }

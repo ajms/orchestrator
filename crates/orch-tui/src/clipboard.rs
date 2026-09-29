@@ -1,11 +1,11 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use orch_protocol::DisplayVars;
 
-use crate::config::Display;
 use crate::event::Effect;
 
-pub fn copy_effects(display: &Display, text: &str) -> Vec<Effect> {
-    match (&display.wayland, &display.x11) {
+pub fn copy_effects(display: &DisplayVars, text: &str) -> Vec<Effect> {
+    match (&display.wayland_display, &display.x11_display) {
         (Some(_), _) => vec![
             command(text, "wl-copy", &[]),
             command(text, "wl-copy", &["--primary"]),
