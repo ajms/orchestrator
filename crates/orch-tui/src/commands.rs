@@ -22,6 +22,10 @@ const COMMANDS: &[Command] = &[
         run: |app, _| app.open_land(),
     },
     Command {
+        names: &["refresh"],
+        run: |app, _| app.on_selected(|session| Request::RefreshPr { session }),
+    },
+    Command {
         names: &["abandon"],
         run: |app, _| app.on_selected(|session| Request::AbandonPr { session }),
     },
@@ -67,11 +71,11 @@ const COMMANDS: &[Command] = &[
     },
     Command {
         names: &["usage"],
-        run: |app, _| not_available(app, "usage"),
+        run: |app, _| app.request_usage(),
     },
     Command {
         names: &["reconcile"],
-        run: |app, _| not_available(app, "reconcile"),
+        run: |app, _| app.request_reconcile(),
     },
 ];
 
@@ -114,10 +118,4 @@ fn preset(app: &mut App, args: &str) {
 fn mute(app: &mut App, _: &str) {
     let muted = !app.selected_view().is_some_and(|view| view.flags.muted);
     app.on_selected(|session| Request::SetMuted { session, muted });
-}
-
-fn not_available(app: &mut App, name: &str) {
-    app.message = Some(format!(
-        ":{name} is not available yet (the Daemon does not support it)"
-    ));
 }

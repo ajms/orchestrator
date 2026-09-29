@@ -80,21 +80,21 @@ fn entering_insert_mode_returns_to_the_live_screen() {
 fn capital_v_selects_whole_lines_and_y_yanks_them_to_the_clipboard() {
     let mut tui = long_history();
     tui.keys("V");
-    assert!(tui.lines().pop().unwrap().contains("V-LINE"));
+    assert!(statusline(&mut tui).contains("V-LINE"));
     tui.keys("ky");
 
     assert_eq!(
         clipboard(&tui.take_effects()).as_deref(),
         Some("line 099\nline 100")
     );
-    assert!(tui.lines().pop().unwrap().contains("NORMAL"));
+    assert!(statusline(&mut tui).contains("NORMAL"));
 }
 
 #[test]
 fn v_selects_characters_from_the_cursor() {
     let mut tui = long_history();
     tui.keys("v");
-    assert!(tui.lines().pop().unwrap().contains("VISUAL"));
+    assert!(statusline(&mut tui).contains("VISUAL"));
     tui.keys("hhhk");
     tui.keys("y");
 
@@ -110,7 +110,7 @@ fn esc_leaves_visual_mode_without_yanking() {
     tui.keys("V");
     tui.press(KeyCode::Esc);
     assert!(clipboard(&tui.take_effects()).is_none());
-    assert!(tui.lines().pop().unwrap().contains("NORMAL"));
+    assert!(statusline(&mut tui).contains("NORMAL"));
 }
 
 #[test]

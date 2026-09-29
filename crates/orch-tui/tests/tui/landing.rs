@@ -7,10 +7,6 @@ use ratatui::style::Color;
 
 use crate::common::*;
 
-fn statusline(tui: &mut Harness) -> String {
-    tui.lines().pop().unwrap()
-}
-
 fn last_request(tui: &mut Harness) -> Request {
     tui.daemon().requests().pop().unwrap()
 }

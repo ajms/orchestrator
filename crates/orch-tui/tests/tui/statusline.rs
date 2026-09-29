@@ -1,12 +1,9 @@
 use orch_protocol::AgentStateView;
-use orch_tui::{Event, RateLimits};
+use orch_protocol::FromDaemon;
+use orch_tui::Event;
 use ratatui::style::Color;
 
 use crate::common::*;
-
-fn statusline(tui: &mut Harness) -> String {
-    tui.lines().pop().unwrap()
-}
 
 #[test]
 fn the_statusline_summarises_agent_states_and_unseen_sessions() {
@@ -34,13 +31,13 @@ fn the_statusline_summarises_agent_states_and_unseen_sessions() {
 fn a_rate_limit_badge_appears_above_80_percent_and_turns_red_at_95() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "a")]);
-    tui.send(Event::RateLimits(RateLimits {
+    tui.send(Event::Daemon(FromDaemon::RateLimits {
         five_hour: Some(79.0),
         seven_day: None,
     }));
     assert!(!statusline(&mut tui).contains("5h"));
 
-    tui.send(Event::RateLimits(RateLimits {
+    tui.send(Event::Daemon(FromDaemon::RateLimits {
         five_hour: Some(83.2),
         seven_day: Some(50.0),
     }));
@@ -49,7 +46,7 @@ fn a_rate_limit_badge_appears_above_80_percent_and_turns_red_at_95() {
     assert!(!status.contains("7d"), "{status}");
     assert_ne!(tui.colour_of("5h 83%"), Color::Red);
 
-    tui.send(Event::RateLimits(RateLimits {
+    tui.send(Event::Daemon(FromDaemon::RateLimits {
         five_hour: Some(83.2),
         seven_day: Some(96.0),
     }));

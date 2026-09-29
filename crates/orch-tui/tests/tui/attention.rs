@@ -1,4 +1,5 @@
 use orch_notify::terminal_attention;
+use orch_protocol::FromDaemon;
 use orch_tui::{Effect, Event};
 
 use crate::common::*;
@@ -7,11 +8,11 @@ use crate::common::*;
 fn a_ring_from_the_daemon_emits_osc_777_to_the_outer_terminal() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "first")]);
-    tui.send(Event::Ring {
+    tui.send(Event::Daemon(FromDaemon::Ring {
         session: id("first"),
         title: "webshop / first".into(),
         body: "Needs input".into(),
-    });
+    }));
     assert!(
         tui.take_effects()
             .contains(&Effect::WriteTerminal(terminal_attention(
@@ -27,11 +28,11 @@ fn a_muted_session_does_not_ring() {
     muted.flags.muted = true;
     let mut tui = Harness::new();
     tui.sessions(vec![muted]);
-    tui.send(Event::Ring {
+    tui.send(Event::Daemon(FromDaemon::Ring {
         session: id("quiet"),
         title: "webshop / quiet".into(),
         body: "Idle".into(),
-    });
+    }));
     assert!(
         !tui.take_effects()
             .iter()

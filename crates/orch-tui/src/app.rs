@@ -1,27 +1,34 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView, CreateSession, FromDaemon, GuardChoice, GuardPrompt, LandingMode, PhaseView,
-    Reply, Request, RequestError, SessionView, Size,
+    AgentStateView, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt, LandingMode,
+    LeftoverView, PhaseView, ReconcileReport, Reply, Request, RequestError, SessionView, Size,
+    UsageReport,
 };
 
 pub use crate::config::TuiConfig;
-use crate::discard::DiscardConfirm;
-use crate::event::{
-    EditorError, Effect, Event, PaneId, RateLimits, ReviewData, ReviewPurpose, ReviewTarget,
-};
+use crate::discard::{DiscardConfirm, DiscardTarget};
+use crate::event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};
 use crate::guard::{GuardId, Guards};
 use crate::land::LandForm;
 use crate::layout::Areas;
 use crate::link::RequestId;
 use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
+use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, fix_label, leftover_label, plan};
 use crate::review::ReviewView;
-use crate::sessions::{Sessions, phase_label};
+use crate::sessions::{Sessions, phase_label, repo_name};
 
 pub(crate) const NO_SESSION: &str = "no Session selected";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct RateLimits {
+    pub five_hour: Option<f64>,
+    pub seven_day: Option<f64>,
+}
 
 pub(crate) enum Call {
     Request(RequestId, Request),
@@ -78,6 +85,13 @@ enum Pending {
     Draft(SessionId, LandingMode),
     Land,
     DiscardPreview(SessionId),
+    Usage,
+    Reconcile,
+    LeftoverPreview {
+        repo: PathBuf,
+        leftover: LeftoverView,
+    },
+    Fix(Fix),
 }
 
 pub(crate) struct TrustPrompt {
@@ -91,6 +105,8 @@ pub(crate) enum Popup {
     Trust(TrustPrompt),
     Land(LandForm),
     Discard(DiscardConfirm),
+    Usage(UsageReport),
+    Retarget(RetargetPicker),
 }
 
 pub(crate) struct App {
@@ -105,6 +121,8 @@ pub(crate) struct App {
     pub rate_limits: RateLimits,
     pub popup: Option<Popup>,
     pub review: Option<ReviewView>,
+    pub reconcile: Option<ReconcileView>,
+    pub reconcile_report: ReconcileReport,
     pub mismatch: Option<String>,
     size: Size,
     guards: Guards,
@@ -132,6 +150,8 @@ impl App {
             rate_limits: RateLimits::default(),
             popup: None,
             review: None,
+            reconcile: None,
+            reconcile_report: ReconcileReport::default(),
             mismatch: None,
             size,
             guards: Guards::default(),
@@ -151,18 +171,12 @@ impl App {
             Event::Daemon(message) => self.daemon(message),
             Event::Pane { pane, message } => self.pane_message(pane, message),
             Event::Terminal(event) => self.terminal(event),
-            Event::RateLimits(limits) => self.rate_limits = limits,
             Event::EditorClosed(result) => self.editor_closed(result),
             Event::Review {
                 session,
                 purpose,
                 result,
             } => self.review_loaded(session, purpose, result),
-            Event::Ring {
-                session,
-                title,
-                body,
-            } => self.ring(&session, &title, &body),
             Event::VersionMismatch { message } => self.mismatch = Some(message),
             Event::Notice(text) => self.message = Some(text),
             Event::Disconnected { reason } => {
@@ -179,6 +193,23 @@ impl App {
                 self.sessions.replace(sessions);
             }
             FromDaemon::SessionChanged { session } => self.sessions.upsert(*session),
+            FromDaemon::SessionRemoved { session } => self.remove_session(&session),
+            FromDaemon::Reconciled { report } => self.reconciled(*report, false),
+            FromDaemon::Ring {
+                session,
+                title,
+                body,
+            } => self.ring(&session, &title, &body),
+            FromDaemon::RateLimits {
+                five_hour,
+                seven_day,
+            } => {
+                self.rate_limits = RateLimits {
+                    five_hour,
+                    seven_day,
+                }
+            }
+            FromDaemon::Focus { session } => self.focus_session(session),
             FromDaemon::Response { id, result } => {
                 if let Some(pending) = self.pending.remove(&RequestId(id)) {
                     self.answered(pending, result);
@@ -234,8 +265,33 @@ impl App {
                     unlanded,
                 }),
             ) => {
-                let confirm = DiscardConfirm::new(session, uncommitted, unlanded);
+                let question = match self.sessions.get(&session) {
+                    Some(view) => format!("Discard {} / {}?", repo_name(&view.repo), view.slug),
+                    None => format!("Discard {}?", self.sessions.slug_or_id(&session)),
+                };
+                let target = DiscardTarget::Session(session);
+                let confirm = DiscardConfirm::new(target, question, uncommitted, unlanded);
                 self.popup = Some(Popup::Discard(confirm));
+            }
+            (
+                Pending::LeftoverPreview { repo, leftover },
+                Ok(Reply::DiscardPreview {
+                    uncommitted,
+                    unlanded,
+                }),
+            ) => {
+                let question = format!("Remove the Leftover {}?", leftover_label(&leftover));
+                let target = DiscardTarget::Leftover { repo, leftover };
+                let confirm = DiscardConfirm::new(target, question, uncommitted, unlanded);
+                self.popup = Some(Popup::Discard(confirm));
+            }
+            (Pending::Usage, Ok(Reply::Usage(report))) => self.popup = Some(Popup::Usage(report)),
+            (Pending::Reconcile, Ok(Reply::Reconciled { report })) => {
+                self.reconciled(*report, true)
+            }
+            (Pending::Fix(fix), Ok(_)) => {
+                self.message = Some(format!("done: {}", fix_label(&fix)));
+                self.request_reconcile();
             }
             (Pending::Resume(session), Err(err)) => {
                 if self.insert_when_open.as_ref() == Some(&session) {
@@ -310,6 +366,73 @@ impl App {
             let bytes = orch_notify::terminal_attention(title, body);
             self.push(Call::Local(Effect::WriteTerminal(bytes)));
         }
+    }
+
+    fn remove_session(&mut self, session: &SessionId) {
+        let order = self.sessions.ordered_ids();
+        self.sessions.remove(session);
+        if self.selected.as_ref() != Some(session) {
+            return;
+        }
+        let at = order.iter().position(|id| id == session).unwrap_or(0);
+        let remaining: Vec<&SessionId> = order.iter().filter(|id| *id != session).collect();
+        self.selected = remaining
+            .get(at.min(remaining.len().saturating_sub(1)))
+            .map(|id| (*id).clone());
+    }
+
+    fn focus_session(&mut self, session: SessionId) {
+        if self.sessions.get(&session).is_none() {
+            return;
+        }
+        self.selected = Some(session);
+        self.reveal_guards();
+        self.popup = None;
+        self.review = None;
+        self.reconcile = None;
+        self.mode = Mode::Normal;
+        self.prefix = None;
+        self.focus = Focus::Pane;
+    }
+
+    fn reconciled(&mut self, report: ReconcileReport, open: bool) {
+        self.reconcile_report = report;
+        if open || self.reconcile.is_some() {
+            let selected = self.reconcile.as_ref().map_or(0, |view| view.selected);
+            let view = ReconcileView::new(&self.reconcile_report, &self.sessions, selected);
+            self.reconcile = Some(view);
+        }
+    }
+
+    pub fn findings(&self) -> usize {
+        self.reconcile_report.findings().count()
+    }
+
+    pub fn request_usage(&mut self) {
+        self.request(Request::Usage, Pending::Usage);
+    }
+
+    pub fn request_reconcile(&mut self) {
+        self.request(Request::Reconcile, Pending::Reconcile);
+    }
+
+    pub fn apply_fix(&mut self, fix: Fix) {
+        match plan(fix, &self.sessions) {
+            FixStep::Preview { repo, leftover } => {
+                let request = Request::LeftoverPreview {
+                    repo: repo.clone(),
+                    leftover: leftover.clone(),
+                };
+                self.request(request, Pending::LeftoverPreview { repo, leftover });
+            }
+            FixStep::Pick(picker) => self.popup = Some(Popup::Retarget(picker)),
+            FixStep::Send(fix) => self.send_fix(fix),
+        }
+    }
+
+    pub fn send_fix(&mut self, fix: Fix) {
+        let request = Request::Fix { fix: fix.clone() };
+        self.request(request, Pending::Fix(fix));
     }
 
     pub fn pane_size(&self) -> Size {

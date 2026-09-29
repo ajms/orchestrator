@@ -1,4 +1,6 @@
-use orch_protocol::{GuardKindView, GuardPrompt, LandingMode, SessionView};
+use orch_protocol::{
+    GuardKindView, GuardPrompt, LandingMode, RepoUsage, SessionView, UsageReport, UsageTotalsView,
+};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -9,6 +11,7 @@ use crate::app::{App, Popup};
 use crate::discard::DiscardConfirm;
 use crate::land::LandForm;
 use crate::new_form::{Field, NewForm};
+use crate::reconcile::RetargetPicker;
 use crate::sessions::repo_name;
 
 pub(super) fn draw(app: &App, frame: &mut Frame) {
@@ -20,11 +23,9 @@ pub(super) fn draw(app: &App, frame: &mut Frame) {
                 land(frame, view, form);
             }
         }
-        Some(Popup::Discard(confirm)) => {
-            if let Some(view) = app.sessions.get(&confirm.session) {
-                discard(frame, view, confirm);
-            }
-        }
+        Some(Popup::Discard(confirm)) => discard(frame, confirm),
+        Some(Popup::Usage(report)) => usage(frame, report),
+        Some(Popup::Retarget(picker)) => retarget(frame, picker),
         None => {}
     }
     if let Some((_, prompt)) = app.guard_prompt() {
@@ -128,14 +129,9 @@ fn land(frame: &mut Frame, view: &SessionView, form: &LandForm) {
     show(frame, " :land ", Color::Green, lines, 76);
 }
 
-fn discard(frame: &mut Frame, view: &SessionView, preview: &DiscardConfirm) {
+fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
     let mut lines = vec![
-        Line::from(format!(
-            " Discard {} / {}?",
-            repo_name(&view.repo),
-            view.slug
-        ))
-        .bold(),
+        Line::from(format!(" {}", preview.question)).bold(),
         Line::default(),
     ];
     if preview.uncommitted.is_empty() && preview.unlanded.is_empty() {
@@ -158,6 +154,61 @@ fn discard(frame: &mut Frame, view: &SessionView, preview: &DiscardConfirm) {
     lines.push(Line::default());
     lines.push(Line::from(" y discard · any other key cancels").dark_gray());
     show(frame, " :discard ", Color::Red, lines, 76);
+}
+
+fn usage(frame: &mut Frame, report: &UsageReport) {
+    let mut lines = vec![
+        Line::from(" Estimated from the Agents' own reports; actual billing may differ.")
+            .dark_gray(),
+        Line::default(),
+    ];
+    lines.push(Line::from(" Per Repo").bold());
+    lines.extend(report.per_repo.iter().map(repo_usage));
+    lines.push(Line::default());
+    lines.push(Line::from(" Today").bold());
+    lines.extend(report.today.iter().map(repo_usage));
+    lines.push(Line::default());
+    lines.push(usage_line("Total", &report.total).bold());
+    lines.push(Line::default());
+    lines.push(Line::from(" Esc close").dark_gray());
+    show(frame, " :usage (estimates) ", Color::Cyan, lines, 80);
+}
+
+fn repo_usage(usage: &RepoUsage) -> Line<'static> {
+    usage_line(&repo_name(&usage.repo), &usage.totals)
+}
+
+fn usage_line(name: &str, totals: &UsageTotalsView) -> Line<'static> {
+    Line::from(format!(
+        "   {name:<20}  {:>8} in  {:>8} out  ${:.2}",
+        tokens(totals.input_tokens),
+        tokens(totals.output_tokens),
+        totals.cost_usd
+    ))
+}
+
+fn tokens(count: u64) -> String {
+    match count {
+        count if count >= 1_000_000 => format!("{:.1}M", count as f64 / 1_000_000.0),
+        count if count >= 1_000 => format!("{:.1}k", count as f64 / 1_000.0),
+        count => count.to_string(),
+    }
+}
+
+fn retarget(frame: &mut Frame, picker: &RetargetPicker) {
+    let base = picker
+        .candidates
+        .get(picker.choice)
+        .cloned()
+        .unwrap_or_default();
+    let lines = vec![
+        Line::from(format!(" Retarget {} onto:", picker.slug)).bold(),
+        Line::default(),
+        Line::from(format!("   ◂ {base} ▸")),
+        Line::default(),
+        Line::from(" ←/→ choose a Branch · Enter retarget · Esc cancel").dark_gray(),
+    ];
+    show(frame, " Retarget ", Color::Yellow, lines, 70);
 }
 
 pub(super) fn mismatch(frame: &mut Frame, message: &str) {

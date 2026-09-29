@@ -10,10 +10,6 @@ fn one_session() -> Harness {
     tui
 }
 
-fn statusline(tui: &mut Harness) -> String {
-    tui.lines().pop().unwrap()
-}
-
 fn last_request(tui: &mut Harness) -> Request {
     tui.daemon().requests().pop().unwrap()
 }
@@ -89,22 +85,6 @@ fn guards_off_and_on_toggle_the_sessions_guards() {
 }
 
 #[test]
-fn commands_the_daemon_cannot_serve_yet_say_so() {
-    let mut tui = one_session();
-    for command in ["usage", "reconcile"] {
-        let before = tui.daemon().requests().len();
-        tui.command(command);
-        let name = command.split(' ').next().unwrap();
-        let status = statusline(&mut tui);
-        assert!(
-            status.contains(&format!(":{name} is not available yet")),
-            "{status}"
-        );
-        assert_eq!(tui.daemon().requests().len(), before);
-    }
-}
-
-#[test]
 fn an_unknown_command_is_reported() {
     let mut tui = one_session();
     tui.command("frobnicate");
@@ -157,6 +137,18 @@ fn mute_toggles_the_sessions_mute() {
         Request::SetMuted {
             session: id("quiet"),
             muted: false
+        }
+    );
+}
+
+#[test]
+fn refresh_polls_the_sessions_pr_now() {
+    let mut tui = one_session();
+    tui.command("refresh");
+    assert_eq!(
+        last_request(&mut tui),
+        Request::RefreshPr {
+            session: id("first")
         }
     );
 }

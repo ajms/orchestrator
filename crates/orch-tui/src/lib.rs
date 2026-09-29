@@ -13,6 +13,7 @@ mod link;
 mod new_form;
 mod pane;
 mod popup;
+mod reconcile;
 mod render;
 mod review;
 mod runtime;
@@ -20,9 +21,7 @@ mod sessions;
 mod socket;
 
 pub use config::TuiConfig;
-pub use event::{
-    EditorError, Effect, Event, PaneId, RateLimits, ReviewData, ReviewPurpose, ReviewTarget,
-};
+pub use event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};
 pub use git::load_review;
 pub use link::{DaemonLink, RequestId, Tui};
 pub use review::FileDiff;

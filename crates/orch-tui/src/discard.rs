@@ -1,17 +1,33 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use orch_core::SessionId;
-use orch_protocol::CommitView;
+use std::path::PathBuf;
+
+use orch_protocol::{CommitView, LeftoverView};
 
 const SHORT_ID: usize = 7;
 
+pub(crate) enum DiscardTarget {
+    Session(SessionId),
+    Leftover {
+        repo: PathBuf,
+        leftover: LeftoverView,
+    },
+}
+
 pub(crate) struct DiscardConfirm {
-    pub session: SessionId,
+    pub target: DiscardTarget,
+    pub question: String,
     pub uncommitted: Vec<String>,
     pub unlanded: Vec<String>,
 }
 
 impl DiscardConfirm {
-    pub fn new(session: SessionId, uncommitted: Vec<String>, unlanded: Vec<CommitView>) -> Self {
+    pub fn new(
+        target: DiscardTarget,
+        question: String,
+        uncommitted: Vec<String>,
+        unlanded: Vec<CommitView>,
+    ) -> Self {
         let unlanded = unlanded
             .into_iter()
             .map(|commit| {
@@ -20,7 +36,8 @@ impl DiscardConfirm {
             })
             .collect();
         Self {
-            session,
+            target,
+            question,
             uncommitted,
             unlanded,
         }

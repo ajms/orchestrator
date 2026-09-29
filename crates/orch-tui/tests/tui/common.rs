@@ -254,7 +254,15 @@ impl Harness {
             .unwrap_or_else(|| panic!("no sidebar line contains {needle:?} in\n{}", self.screen()))
     }
 
+    pub fn sidebar_colour_of(&mut self, needle: &str) -> Color {
+        self.sidebar_cell(needle).fg
+    }
+
     pub fn sidebar_background_of(&mut self, needle: &str) -> Color {
+        self.sidebar_cell(needle).bg
+    }
+
+    fn sidebar_cell(&mut self, needle: &str) -> ratatui::buffer::Cell {
         let lines = self.sidebar_lines();
         let (y, line) = lines
             .iter()
@@ -262,7 +270,7 @@ impl Harness {
             .find(|(_, line)| line.contains(needle))
             .unwrap_or_else(|| panic!("{needle:?} not in the sidebar"));
         let column = line[..line.find(needle).unwrap()].chars().count() as u16;
-        self.terminal.backend().buffer()[(column, y as u16)].bg
+        self.terminal.backend().buffer()[(column, y as u16)].clone()
     }
 
     pub fn line_with(&mut self, needle: &str) -> String {
@@ -359,4 +367,8 @@ pub fn screen_of(text: &str, size: Size) -> ScreenSnapshot {
         alternate: None,
         input_modes: screen.input_mode_formatted(),
     }
+}
+
+pub fn statusline(tui: &mut Harness) -> String {
+    tui.lines().pop().unwrap()
 }

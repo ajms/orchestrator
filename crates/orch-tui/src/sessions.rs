@@ -23,6 +23,15 @@ impl Sessions {
         }
     }
 
+    pub fn slug_or_id(&self, id: &SessionId) -> String {
+        self.get(id)
+            .map_or_else(|| id.as_str().to_string(), |view| view.slug.clone())
+    }
+
+    pub fn remove(&mut self, id: &SessionId) {
+        self.views.retain(|view| &view.id != id);
+    }
+
     pub fn get(&self, id: &SessionId) -> Option<&SessionView> {
         self.views.iter().find(|view| &view.id == id)
     }
@@ -69,6 +78,13 @@ impl Sessions {
         self.views
             .iter()
             .filter(|view| !matches!(view.phase, PhaseView::Landed | PhaseView::Discarded))
+    }
+}
+
+pub fn repo_label(repo: &Path, missing: bool) -> String {
+    match missing {
+        true => format!("{} (missing)", repo_name(repo)),
+        false => repo_name(repo),
     }
 }
 

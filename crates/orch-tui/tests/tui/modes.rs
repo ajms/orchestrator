@@ -10,10 +10,6 @@ fn one_session() -> Harness {
     tui
 }
 
-fn statusline(tui: &mut Harness) -> String {
-    tui.lines().pop().unwrap()
-}
-
 #[test]
 fn the_client_starts_in_normal_mode_and_i_enters_insert_mode() {
     let mut tui = one_session();

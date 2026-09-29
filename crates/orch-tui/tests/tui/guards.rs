@@ -102,7 +102,7 @@ fn another_sessions_guard_hit_does_not_pop_up() {
 fn a_hidden_prompt_is_announced_and_comes_back_with_the_guard_command() {
     let mut tui = guarded();
     tui.press(KeyCode::Esc);
-    let status = tui.lines().pop().unwrap();
+    let status = statusline(&mut tui);
     assert!(status.contains("Guard prompt waiting"), "{status}");
 
     tui.command("guard");

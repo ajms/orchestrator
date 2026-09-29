@@ -1,11 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::{App, Call, Popup};
-use crate::discard::DiscardConfirm;
+use crate::discard::{DiscardConfirm, DiscardTarget};
 use crate::event::Effect;
 use crate::guard::{GuardAction, GuardId, action};
 use crate::land::LandAction;
 use crate::new_form::Outcome;
+use crate::reconcile::PickAction;
 
 pub(crate) fn guard_key(app: &mut App, guard: GuardId, key: KeyEvent) {
     match action(key) {
@@ -46,13 +47,33 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('n') | KeyCode::Esc => app.popup = None,
             _ => {}
         },
-        Popup::Discard(confirm) => {
-            let session = confirm.session.clone();
-            app.popup = None;
-            if DiscardConfirm::confirms(key) {
-                app.report(orch_protocol::Request::Discard { session });
+        Popup::Discard(_) => {
+            if let Some(Popup::Discard(confirm)) = app.popup.take()
+                && DiscardConfirm::confirms(key)
+            {
+                match confirm.target {
+                    DiscardTarget::Session(session) => {
+                        app.report(orch_protocol::Request::Discard { session })
+                    }
+                    DiscardTarget::Leftover { repo, leftover } => {
+                        app.send_fix(orch_protocol::Fix::RemoveLeftover { repo, leftover })
+                    }
+                }
             }
         }
+        Popup::Usage(_) => {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter) {
+                app.popup = None;
+            }
+        }
+        Popup::Retarget(picker) => match picker.key(key) {
+            PickAction::Stay => {}
+            PickAction::Cancel => app.popup = None,
+            PickAction::Pick(fix) => {
+                app.popup = None;
+                app.send_fix(fix);
+            }
+        },
     }
 }
 

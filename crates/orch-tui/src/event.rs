@@ -19,12 +19,6 @@ pub enum Event {
         message: FromDaemon,
     },
     Terminal(TermEvent),
-    RateLimits(RateLimits),
-    Ring {
-        session: SessionId,
-        title: String,
-        body: String,
-    },
     EditorClosed(Result<String, EditorError>),
     Review {
         session: SessionId,
@@ -38,12 +32,6 @@ pub enum Event {
         reason: String,
     },
     Notice(String),
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct RateLimits {
-    pub five_hour: Option<f64>,
-    pub seven_day: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

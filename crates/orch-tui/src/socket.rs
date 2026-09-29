@@ -41,7 +41,7 @@ impl SocketLink {
         let (outbox, pending) = unbounded_channel();
         let relay = events.clone();
         let reading = tokio::spawn(async move {
-            let reason = relay_loop(reader, daemon_event, &relay).await;
+            let reason = relay_loop(reader, Event::Daemon, &relay).await;
             let _ = relay.send(Event::Disconnected { reason });
         });
         let writing = tokio::spawn(write_loop(writer, pending));
@@ -70,11 +70,6 @@ impl SocketLink {
             let _ = pane.outbox.send(message);
         }
     }
-}
-
-// Map FromDaemon::Ring and FromDaemon::RateLimits to Event::Ring / Event::RateLimits here once the protocol has them.
-fn daemon_event(message: FromDaemon) -> Event {
-    Event::Daemon(message)
 }
 
 impl DaemonLink for SocketLink {

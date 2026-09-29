@@ -66,6 +66,13 @@ fn summary(app: &App) -> Line<'static> {
             spans.push(Span::raw(" "));
         }
     }
+    let findings = app.findings();
+    if findings > 0 {
+        spans.push(Span::styled(
+            format!("⚠ {findings} findings "),
+            Style::new().fg(Color::Yellow),
+        ));
+    }
     let unseen = app.sessions.unseen();
     if unseen > 0 {
         spans.push(Span::styled(

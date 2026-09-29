@@ -6,6 +6,7 @@ use crate::app::{App, Call, Focus, Mode, Prefix, Selection};
 use crate::clipboard::osc52;
 use crate::event::{Effect, ReviewPurpose};
 use crate::guard::GuardId;
+use crate::reconcile::ReconcileAction;
 use crate::review::ReviewAction;
 use crate::sessions::phase_label;
 
@@ -27,6 +28,7 @@ pub(crate) fn handle(app: &mut App, key: KeyEvent) {
         Mode::Insert => insert(app, key),
         Mode::CommandLine(_) => command_line(app, key),
         Mode::Visual(selection) => visual(app, *selection, key),
+        Mode::Normal if app.reconcile.is_some() => reconcile(app, key),
         Mode::Normal if app.review.is_some() => review(app, key),
         Mode::Normal => normal(app, key),
     }
@@ -40,6 +42,19 @@ fn mismatch(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('q') => app.push(Call::Local(Effect::Quit)),
         _ => {}
+    }
+}
+
+fn reconcile(app: &mut App, key: KeyEvent) {
+    app.message = None;
+    let Some(view) = &mut app.reconcile else {
+        return;
+    };
+    match view.key(key) {
+        ReconcileAction::Stay => {}
+        ReconcileAction::Close => app.reconcile = None,
+        ReconcileAction::CommandLine => app.mode = Mode::CommandLine(String::new()),
+        ReconcileAction::Apply(fix) => app.apply_fix(fix),
     }
 }
 

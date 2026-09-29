@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, BorderType, Paragraph};
 
 use super::style;
 use crate::app::{App, Focus};
-use crate::sessions::repo_name;
+use crate::sessions::repo_label;
 
 const SLUG_WIDTH: usize = 20;
 const SELECTED: Color = Color::Rgb(50, 50, 70);
@@ -19,14 +19,23 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
         if !lines.is_empty() {
             lines.push(Line::default());
         }
-        lines.push(
-            Line::from(format!(" {}", repo_name(repo)))
-                .bold()
-                .underlined(),
-        );
+        let missing = app
+            .sessions
+            .in_repo(repo)
+            .any(|view| view.flags.repo_missing);
+        lines.push(heading(repo, missing));
         for view in app.sessions.in_repo(repo) {
             let selected = app.selected.as_ref() == Some(&view.id);
             lines.extend(session_lines(view, width, selected));
+        }
+    }
+    let listed = app.sessions.repos();
+    for report in &app.reconcile_report.repos {
+        if report.missing && !listed.contains(&report.repo.as_path()) {
+            if !lines.is_empty() {
+                lines.push(Line::default());
+            }
+            lines.push(heading(&report.repo, true));
         }
     }
     let block = Block::bordered()
@@ -36,18 +45,28 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
+fn heading(repo: &std::path::Path, missing: bool) -> Line<'static> {
+    Line::from(format!(" {}", repo_label(repo, missing)))
+        .bold()
+        .underlined()
+}
+
 fn session_lines(view: &SessionView, width: usize, selected: bool) -> Vec<Line<'static>> {
     let marker = match view.flags.unseen {
         true => Span::styled("● ", Style::new().fg(Color::Yellow).bold()),
         false => Span::raw("  "),
     };
     let (label, colour) = style::status(view);
+    let (name, colour) = match view.flags.repo_missing {
+        true => (Style::new().fg(Color::DarkGray), Color::DarkGray),
+        false => (Style::new(), colour),
+    };
     let mut first = vec![
         marker,
-        Span::raw(format!(
-            "{:<SLUG_WIDTH$} ",
-            truncate(&view.slug, SLUG_WIDTH)
-        )),
+        Span::styled(
+            format!("{:<SLUG_WIDTH$} ", truncate(&view.slug, SLUG_WIDTH)),
+            name,
+        ),
         Span::styled(label, Style::new().fg(colour)),
     ];
     if let Some(percent) = view.context_used_percent {

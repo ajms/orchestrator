@@ -1,5 +1,6 @@
 mod pane;
 mod popup;
+mod reconcile;
 mod review;
 mod sidebar;
 mod statusline;
@@ -16,9 +17,11 @@ pub(crate) fn draw(app: &App, frame: &mut Frame) {
         return popup::mismatch(frame, message);
     }
     let areas = Areas::of(frame.area());
-    match &app.review {
-        Some(open) => review::draw(open, frame, areas.sidebar.union(areas.pane)),
-        None => {
+    let main = areas.sidebar.union(areas.pane);
+    match (&app.reconcile, &app.review) {
+        (Some(open), _) => reconcile::draw(open, frame, main),
+        (None, Some(open)) => review::draw(open, frame, main),
+        (None, None) => {
             sidebar::draw(app, frame, areas.sidebar);
             pane::draw(app, frame, areas.pane);
         }

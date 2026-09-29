@@ -126,7 +126,7 @@ fn a_failed_diff_is_reported() {
             stderr: "fatal: bad revision".into(),
         }),
     });
-    assert!(tui.lines().pop().unwrap().contains("fatal: bad revision"));
+    assert!(statusline(&mut tui).contains("fatal: bad revision"));
 }
 
 #[test]
