@@ -91,6 +91,11 @@ fn insert(app: &mut App, key: KeyEvent) {
         app.prefix = Some(Prefix::CtrlBackslash);
         return;
     }
+    if ctrl(key) && key.code == KeyCode::Char('h') {
+        app.mode = Mode::Normal;
+        app.focus = Focus::Sidebar;
+        return;
+    }
     send_key(app, key);
 }
 

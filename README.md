@@ -62,11 +62,12 @@ When the Agent is done, press `d` to review, then run `:land` to squash onto the
 
 ## Keymap
 
-The TUI is modal, like nvim's `:terminal`. In **Insert** mode every key, Esc included, goes to the Agent.
+The TUI is modal, like nvim's `:terminal`. In **Insert** mode every key except `Ctrl-h` goes to the Agent, Esc included.
 
 | Keys | Action |
 |---|---|
 | `Ctrl-\ Ctrl-n` | Insert → Normal mode |
+| `Ctrl-h` | Insert → Normal mode, focus sidebar |
 | `i` / `a` | Normal → Insert mode (focused Session) |
 | `j` / `k` | Sidebar: select a Session. Pane: scroll. |
 | `Ctrl-d` / `Ctrl-u`, `gg` / `G` | Scroll history |

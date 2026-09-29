@@ -63,6 +63,22 @@ fn ctrl_4_is_accepted_as_ctrl_backslash() {
 }
 
 #[test]
+fn ctrl_h_returns_to_normal_mode_and_focuses_the_sidebar() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![
+        session("webshop", "first"),
+        session("webshop", "second"),
+    ]);
+    tui.keys("i");
+    tui.ctrl('h');
+    assert!(statusline(&mut tui).contains("NORMAL"));
+    assert!(tui.daemon().input.is_empty());
+
+    tui.keys("j");
+    assert_eq!(tui.daemon().open_panes(), vec!["first", "second"]);
+}
+
+#[test]
 fn ctrl_backslash_followed_by_another_key_sends_both() {
     let mut tui = one_session();
     tui.keys("i");
