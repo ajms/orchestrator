@@ -73,6 +73,7 @@ impl Daemon {
         };
         let updated = self.update(&id, |live| {
             live.setup_output = Some(output);
+            live.launching = event == PhaseEvent::SetupSucceeded;
             live.transition(event)
         });
         if event == PhaseEvent::SetupSucceeded && updated.is_ok() {

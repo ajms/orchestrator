@@ -1,7 +1,8 @@
 use std::path::Path;
 
+use crate::cleanup::files_under;
 use crate::git::{git, head_ref};
-use crate::{Error, Repo, SessionWorktree};
+use crate::{Error, Leftover, Repo, SessionName, SessionWorktree};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Commit {
@@ -26,6 +27,33 @@ impl Repo {
             uncommitted,
             unlanded: self.unlanded_commits(&worktree.name.branch, &worktree.base)?,
         })
+    }
+
+    pub fn leftover_preview(
+        &self,
+        leftover: &Leftover,
+        base: &str,
+    ) -> Result<DiscardPreview, Error> {
+        match leftover {
+            Leftover::Worktree(path) => match self.worktree_branch(path)? {
+                Some(branch) => self.discard_preview(&SessionWorktree {
+                    path: path.clone(),
+                    name: SessionName {
+                        slug: String::new(),
+                        branch,
+                    },
+                    base: base.into(),
+                }),
+                None => Ok(DiscardPreview {
+                    uncommitted: files_under(path),
+                    unlanded: Vec::new(),
+                }),
+            },
+            Leftover::Branch(branch) => Ok(DiscardPreview {
+                uncommitted: Vec::new(),
+                unlanded: self.unlanded_commits(branch, base)?,
+            }),
+        }
     }
 
     fn unlanded_commits(&self, branch: &str, base: &str) -> Result<Vec<Commit>, Error> {

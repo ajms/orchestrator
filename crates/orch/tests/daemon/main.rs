@@ -8,6 +8,7 @@ mod lifecycle;
 mod panes;
 mod pr;
 mod preset;
+mod reconcile;
 mod recovery;
 mod setup;
 mod stacking;

@@ -1,4 +1,5 @@
 mod agents;
+mod cleanup;
 mod client;
 mod discard;
 mod draft;
@@ -8,6 +9,7 @@ mod lifecycle;
 mod outbox;
 mod pane;
 mod pr;
+mod reconcile;
 mod setup;
 mod state;
 mod store;
@@ -40,11 +42,13 @@ pub struct DaemonConfig {
     pub orch_program: PathBuf,
     pub idle_timeout: Duration,
     pub pr_poll_interval: Duration,
+    pub reconcile_interval: Duration,
 }
 
 impl DaemonConfig {
     pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
     pub const DEFAULT_PR_POLL: Duration = Duration::from_secs(60);
+    pub const DEFAULT_RECONCILE: Duration = Duration::from_secs(3 * 60);
 }
 
 pub fn run(config: DaemonConfig) -> io::Result<()> {
@@ -104,6 +108,7 @@ async fn serve(daemon: Arc<Daemon>, listener: UnixListener) -> io::Result<()> {
     tokio::spawn(daemon.clone().watch_idle());
     tokio::spawn(daemon.clone().tick_stalled());
     tokio::spawn(daemon.clone().poll_prs());
+    tokio::spawn(daemon.clone().reconcile_loop());
     loop {
         tokio::select! {
             accepted = listener.accept() => {

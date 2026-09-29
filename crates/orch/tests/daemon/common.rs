@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use orch_core::SessionId;
 use orch_protocol::{
-    Client, CreateSession, FromDaemon, Pane, Reply, Request, RequestError, SessionView, Size,
-    daemon_socket,
+    Client, CreateSession, Fix, FromDaemon, Pane, ReconcileReport, Reply, Request, RequestError,
+    SessionView, Size, daemon_socket,
 };
 use tempfile::TempDir;
 
@@ -178,6 +178,7 @@ case "$1 $2" in
     echo https://github.com/acme/app/pull/42 ;;
   'pr view') cat DIR/view.json ;;
   'pr edit') ;;
+  'pr list') cat DIR/list.json 2>/dev/null || echo '[]' ;;
   *) exit 1 ;;
 esac
 "#
@@ -208,8 +209,42 @@ esac
         std::fs::rename(staged, view).unwrap();
     }
 
+    pub fn gh_lists(&self, json: &str) {
+        std::fs::write(self.path("gh/list.json"), json).unwrap();
+    }
+
     pub fn gh_calls(&self) -> String {
         std::fs::read_to_string(self.path("gh/calls.log")).unwrap_or_default()
+    }
+
+    pub fn lose_state_db(&self) {
+        let dir = self.path("state/orchestrator");
+        for name in ["state.db", "state.db-wal", "state.db-shm"] {
+            let _ = std::fs::remove_file(dir.join(name));
+        }
+    }
+
+    pub fn hold(&self, session: &str, cwd: &Path) -> i32 {
+        self.hold_with(session, cwd, &[])
+    }
+
+    pub fn hold_with(&self, session: &str, cwd: &Path, args: &[&str]) -> i32 {
+        let output = self
+            .orch()
+            .args(["hold", "--session", session, "--runtime-dir"])
+            .arg(self.runtime_dir())
+            .arg("--cwd")
+            .arg(cwd)
+            .args(args)
+            .args(["--", env!("CARGO_BIN_EXE_orch"), "fake-agent", "--"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
     }
 
     pub fn holder_socket(&self, session: &SessionId) -> PathBuf {
@@ -340,6 +375,8 @@ pub struct TestClient {
     pub sessions: HashMap<SessionId, SessionView>,
     pub received_list: bool,
     pub history: Vec<SessionView>,
+    pub removed: Vec<SessionId>,
+    pub reports: Vec<ReconcileReport>,
 }
 
 impl From<Client> for TestClient {
@@ -349,6 +386,8 @@ impl From<Client> for TestClient {
             sessions: HashMap::new(),
             received_list: false,
             history: Vec::new(),
+            removed: Vec::new(),
+            reports: Vec::new(),
         }
     }
 }
@@ -366,6 +405,29 @@ impl TestClient {
             .await
             .expect("no response in time")
             .unwrap()
+    }
+
+    pub async fn reconcile(&mut self) -> ReconcileReport {
+        match self.request(Request::Reconcile).await {
+            Ok(Reply::Reconciled { report }) => *report,
+            other => panic!("reconcile failed: {other:?}"),
+        }
+    }
+
+    pub async fn fix(&mut self, fix: Fix) -> Result<Reply, RequestError> {
+        self.request(Request::Fix { fix }).await
+    }
+
+    pub async fn until_removed(&mut self, session: &SessionId) {
+        let deadline = Instant::now() + WAIT;
+        while !self.removed.contains(session) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let Ok(message) = tokio::time::timeout(remaining, self.client.recv()).await else {
+                panic!("Session {} was never removed", session.as_str());
+            };
+            let message = message.unwrap().expect("Daemon closed the connection");
+            self.apply(&message);
+        }
     }
 
     pub async fn create(&mut self, create: CreateSession) -> SessionId {
@@ -398,6 +460,11 @@ impl TestClient {
                 self.history.push(*session.clone());
                 self.sessions.insert(session.id.clone(), *session.clone());
             }
+            FromDaemon::SessionRemoved { session } => {
+                self.sessions.remove(session);
+                self.removed.push(session.clone());
+            }
+            FromDaemon::Reconciled { report } => self.reports.push(*report.clone()),
             _ => {}
         }
     }

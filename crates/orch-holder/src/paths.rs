@@ -17,10 +17,12 @@ pub fn default_runtime_dir() -> PathBuf {
     }
 }
 
+pub fn holders_dir(runtime_dir: &Path) -> PathBuf {
+    runtime_dir.join("holders")
+}
+
 pub fn socket_path(runtime_dir: &Path, session: &SessionId) -> PathBuf {
-    runtime_dir
-        .join("holders")
-        .join(format!("{}.sock", session.as_str()))
+    holders_dir(runtime_dir).join(format!("{}.sock", session.as_str()))
 }
 
 pub fn locate_socket(session: &SessionId) -> PathBuf {

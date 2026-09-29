@@ -39,6 +39,21 @@ impl Outbox {
         self.ready.notify_one();
     }
 
+    pub(crate) fn session_removed(&self, id: SessionId) {
+        let mut queue = self.queue();
+        if let Some(session) = queue.views.remove(&id) {
+            queue.changed.retain(|changed| *changed != id);
+            queue
+                .messages
+                .push_back(FromDaemon::SessionChanged { session });
+        }
+        queue
+            .messages
+            .push_back(FromDaemon::SessionRemoved { session: id });
+        drop(queue);
+        self.ready.notify_one();
+    }
+
     pub(crate) fn session_changed(&self, view: Box<SessionView>) {
         let mut queue = self.queue();
         let id = view.id.clone();

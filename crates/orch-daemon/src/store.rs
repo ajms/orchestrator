@@ -40,6 +40,10 @@ impl StoreHandle {
         answer.await.map_err(|_| gone())
     }
 
+    pub(crate) async fn flush(&self) {
+        let _ = self.call(|_| ()).await;
+    }
+
     pub(crate) fn call_blocking<T: Send + 'static>(
         &self,
         job: impl FnOnce(&mut Store) -> T + Send + 'static,

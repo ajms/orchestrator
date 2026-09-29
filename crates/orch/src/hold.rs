@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Args;
+use orch_config::PortBlock;
 use orch_core::SessionId;
 use orch_holder::{HoldConfig, Size, default_runtime_dir, socket_path};
 
@@ -16,6 +17,12 @@ pub struct HoldArgs {
     cwd: Option<PathBuf>,
     #[arg(long = "env", value_parser = parse_env)]
     env: Vec<(String, String)>,
+    #[arg(long)]
+    base: Option<String>,
+    #[arg(long, requires = "port_size")]
+    port_base: Option<u16>,
+    #[arg(long, requires = "port_base")]
+    port_size: Option<u16>,
     #[arg(long, default_value_t = Size::DEFAULT.rows)]
     rows: u16,
     #[arg(long, default_value_t = Size::DEFAULT.cols)]
@@ -52,6 +59,11 @@ pub fn run(args: HoldArgs) -> ExitCode {
     let socket = socket_path(&runtime_dir, &args.session);
     let mut config = HoldConfig::new(args.session, socket, cwd, args.argv);
     config.env = args.env;
+    config.base = args.base;
+    config.port_block = args
+        .port_base
+        .zip(args.port_size)
+        .map(|(base, size)| PortBlock { base, size });
     config.size = Size {
         rows: args.rows,
         cols: args.cols,

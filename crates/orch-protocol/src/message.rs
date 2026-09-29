@@ -4,9 +4,10 @@ use orch_core::SessionId;
 use orch_holder::{ScreenSnapshot, Size};
 use serde::{Deserialize, Serialize};
 
+use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -94,6 +95,14 @@ pub enum Request {
         session: SessionId,
         muted: bool,
     },
+    Reconcile,
+    LeftoverPreview {
+        repo: PathBuf,
+        leftover: LeftoverView,
+    },
+    Fix {
+        fix: Fix,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +170,12 @@ pub enum FromDaemon {
     SessionChanged {
         session: Box<SessionView>,
     },
+    SessionRemoved {
+        session: SessionId,
+    },
+    Reconciled {
+        report: Box<ReconcileReport>,
+    },
     Response {
         id: u64,
         result: Result<Reply, RequestError>,
@@ -203,6 +218,9 @@ pub enum Reply {
     DiscardPreview {
         uncommitted: Vec<String>,
         unlanded: Vec<CommitView>,
+    },
+    Reconciled {
+        report: Box<ReconcileReport>,
     },
 }
 

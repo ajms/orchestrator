@@ -17,6 +17,7 @@ use crate::state::{Daemon, Live, gate_message};
 
 pub(crate) const HOLDER_EXIT_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const PROMPT_FILE: &str = "prompt";
+const PORT_BASE_ENV: &str = "ORCH_PORT_BASE";
 
 pub(crate) struct Busy(Arc<Daemon>);
 
@@ -75,7 +76,7 @@ fn describe(item: &TrustItem) -> String {
     }
 }
 
-fn new_session_id() -> Result<SessionId, RequestError> {
+pub(crate) fn new_session_id() -> Result<SessionId, RequestError> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(refused)?;
     let id = uuid::Builder::from_random_bytes(bytes).into_uuid();
@@ -91,7 +92,7 @@ pub(crate) fn session_env(record: &SessionRecord) -> Vec<(String, String)> {
         ),
     ];
     if let Some(block) = record.port_block {
-        env.push(("ORCH_PORT_BASE".into(), block.base.to_string()));
+        env.push((PORT_BASE_ENV.into(), block.base.to_string()));
     }
     env
 }
@@ -173,6 +174,12 @@ impl Daemon {
         create: CreateSession,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
+        let inside = create.repo.clone();
+        let root = tokio::task::spawn_blocking(move || RepoRoot::resolve(&inside))
+            .await
+            .map_err(refused)?
+            .map_err(refused)?;
+        let _guard = self.repo_guard(root.path()).await;
         let daemon = self.clone();
         let live = tokio::task::spawn_blocking(move || daemon.prepare(create))
             .await
@@ -282,7 +289,11 @@ impl Daemon {
     }
 
     pub(crate) fn start_anyway(self: &Arc<Self>, id: &SessionId) -> Result<Reply, RequestError> {
-        self.update(id, |live| live.transition(PhaseEvent::SetupSkipped))?;
+        self.update(id, |live| {
+            live.transition(PhaseEvent::SetupSkipped)?;
+            live.launching = true;
+            Ok(())
+        })?;
         let daemon = self.clone();
         let id = id.clone();
         tokio::spawn(async move { daemon.launch_agent(&id, false).await });
@@ -293,8 +304,13 @@ impl Daemon {
         let _busy = Busy::new(self);
         let mut replaced = None;
         self.update(id, |live| {
+            if live.status.flags().worktree_missing {
+                return Err("the Worktree is missing; recreate it first".into());
+            }
             if live.status.phase() == Phase::Suspended {
-                return live.transition(PhaseEvent::Resumed);
+                live.transition(PhaseEvent::Resumed)?;
+                live.launching = true;
+                return Ok(());
             }
             let finished = matches!(
                 live.status.agent_state(),
@@ -305,6 +321,7 @@ impl Daemon {
             }
             replaced = live.replace_holder(None).1;
             live.last_error = None;
+            live.launching = true;
             Ok(())
         })?;
         if let Some(link) = replaced {
@@ -337,6 +354,7 @@ impl Daemon {
             if restart {
                 replaced = live.replace_holder(None).1;
                 live.last_error = None;
+                live.launching = true;
             }
             Ok(())
         })?;
@@ -359,6 +377,18 @@ impl Daemon {
 
     pub(crate) async fn launch_agent(self: &Arc<Self>, id: &SessionId, resume: bool) {
         let _busy = Busy::new(self);
+        self.set_launching(id, true);
+        self.launch(id, resume).await;
+        self.set_launching(id, false);
+    }
+
+    fn set_launching(&self, id: &SessionId, launching: bool) {
+        if let Some(live) = self.lock().sessions.get_mut(id) {
+            live.launching = launching;
+        }
+    }
+
+    async fn launch(self: &Arc<Self>, id: &SessionId, resume: bool) {
         let Some((record, repo)) = self.snapshot(id) else {
             return;
         };
@@ -444,7 +474,16 @@ impl Daemon {
             .arg("--runtime-dir")
             .arg(&self.config.runtime_dir)
             .arg("--cwd")
-            .arg(&record.worktree);
+            .arg(&record.worktree)
+            .arg("--base")
+            .arg(&record.base);
+        if let Some(block) = record.port_block {
+            command
+                .arg("--port-base")
+                .arg(block.base.to_string())
+                .arg("--port-size")
+                .arg(block.size.to_string());
+        }
         for (key, value) in session_env(record) {
             command.arg("--env").arg(format!("{key}={value}"));
         }
@@ -487,18 +526,44 @@ impl Daemon {
         for (id, phase) in daemon.load_sessions().await {
             match phase {
                 Phase::Active | Phase::PrOpen => {
-                    if daemon.attach(&id, Attach::Adopt).await.is_err() {
-                        let _ = daemon.update(&id, |live| {
-                            live.replace_holder(None);
-                            live.transition(PhaseEvent::Suspended)
-                        });
-                    }
+                    daemon.adopt_or_suspend(&id).await;
                 }
                 Phase::SettingUp => daemon.interrupted_setup(&id).await,
                 _ => {}
             }
         }
         daemon
+    }
+
+    pub(crate) async fn adopt_or_suspend(self: &Arc<Self>, id: &SessionId) -> bool {
+        if self.attach(id, Attach::Adopt).await.is_ok() {
+            return false;
+        }
+        let mut suspended = false;
+        let _ = self.update(id, |live| {
+            if live.has_holder()
+                || live.launching
+                || live.exclusive
+                || !live.status.phase().is_live()
+            {
+                return Ok(());
+            }
+            live.replace_holder(None);
+            suspended = live.transition(PhaseEvent::Suspended).is_ok();
+            Ok(())
+        });
+        suspended
+    }
+
+    pub(crate) async fn repo_adapter(&self, repo: &Path) -> Adapter {
+        match self.repo_config(repo).await {
+            Ok(config) => config
+                .agent()
+                .ok()
+                .and_then(|agent| adapter_for(agent).ok())
+                .unwrap_or_else(default_adapter),
+            Err(_) => default_adapter(),
+        }
     }
 
     async fn load_sessions(&self) -> Vec<(SessionId, Phase)> {
@@ -519,14 +584,7 @@ impl Daemon {
             let Some(repo) = repos.iter().find(|repo| repo.id == record.repo) else {
                 continue;
             };
-            let adapter = match self.repo_config(&repo.path).await {
-                Ok(config) => config
-                    .agent()
-                    .ok()
-                    .and_then(|agent| adapter_for(agent).ok())
-                    .unwrap_or_else(default_adapter),
-                Err(_) => default_adapter(),
-            };
+            let adapter = self.repo_adapter(&repo.path).await;
             let id = record.id.clone();
             let mut live = Live::new(record, repo.path.clone(), adapter);
             live.setup_output = self.read_setup_log(&id).await;
@@ -537,7 +595,10 @@ impl Daemon {
     }
 }
 
-fn select_preset(config: &RepoConfig, name: Option<&str>) -> Result<Preset, RequestError> {
+pub(crate) fn select_preset(
+    config: &RepoConfig,
+    name: Option<&str>,
+) -> Result<Preset, RequestError> {
     config.select_preset(name).map_err(|err| match err {
         PresetError::Unknown(name) => refused(format!("unknown Preset {name}")),
         PresetError::Untrusted(_) => untrusted(config),

@@ -51,6 +51,7 @@ impl Daemon {
                     let link = HolderLink {
                         outbox,
                         pid: hello.holder_pid,
+                        port_block: hello.port_block,
                         closed: closed_watch,
                     };
                     let (generation, _) = live.replace_holder(Some(link));

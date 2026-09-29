@@ -130,3 +130,31 @@ fn rebuilding_releases_blocks_of_ended_sessions_and_keeps_suspended_ones() {
         Some(block(4010))
     );
 }
+
+#[test]
+fn a_recovered_session_holds_the_block_it_uses_and_names_who_else_holds_it() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let a = fx.session(&repo, "a");
+    let b = fx.session(&repo, "b");
+    let c = fx.session(&repo, "c");
+    fx.store.allocate_port_block(&a.id, &RANGE).unwrap();
+
+    assert_eq!(
+        fx.store.hold_port_block(&b.id, block(4010)).unwrap(),
+        vec![]
+    );
+    assert_eq!(
+        fx.store.hold_port_block(&c.id, block(4000)).unwrap(),
+        vec![a.id.clone()]
+    );
+    assert_eq!(
+        fx.store.session(&c.id).unwrap().unwrap().port_block,
+        Some(block(4000))
+    );
+    let d = fx.session(&repo, "d");
+    assert_eq!(
+        fx.store.allocate_port_block(&d.id, &RANGE).unwrap(),
+        block(4020)
+    );
+}

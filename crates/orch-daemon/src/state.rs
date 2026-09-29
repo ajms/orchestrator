@@ -9,7 +9,9 @@ use orch_core::{
 };
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
-use orch_protocol::{FromDaemon, GuardKindView, GuardPrompt, SessionView, SubagentView};
+use orch_protocol::{
+    FlagsView, FromDaemon, GuardKindView, GuardPrompt, ReconcileReport, SessionView, SubagentView,
+};
 use orch_store::SessionRecord;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Notify, watch};
@@ -30,6 +32,8 @@ pub(crate) struct Daemon {
     pub(crate) store: StoreHandle,
     state: Mutex<State>,
     pub(crate) shutdown: Notify,
+    pub(crate) reconciling: tokio::sync::Mutex<()>,
+    repo_guards: Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 pub(crate) struct State {
@@ -38,6 +42,16 @@ pub(crate) struct State {
     clients: HashMap<ClientId, ClientLink>,
     next_id: u64,
     pub(crate) busy: usize,
+    pub(crate) report: Option<ReconcileReport>,
+    pub(crate) passes: Passes,
+}
+
+#[derive(Default)]
+pub(crate) struct Passes {
+    pub(crate) requested: u64,
+    pub(crate) full_requested: u64,
+    pub(crate) completed: u64,
+    pub(crate) full_completed: u64,
 }
 
 struct ClientLink {
@@ -58,6 +72,8 @@ pub(crate) struct Live {
     pub(crate) exclusive: bool,
     pub(crate) comments: CommentCursor,
     pub(crate) recheck: Recheck,
+    pub(crate) launching: bool,
+    pub(crate) repo_missing: bool,
     holder: Option<HolderLink>,
     generation: u64,
 }
@@ -103,6 +119,7 @@ pub(crate) struct Recheck {
 pub(crate) struct HolderLink {
     pub(crate) outbox: Sender<ToHolder>,
     pub(crate) pid: u32,
+    pub(crate) port_block: Option<orch_store::PortBlock>,
     pub(crate) closed: watch::Receiver<bool>,
 }
 
@@ -159,6 +176,8 @@ impl Live {
             exclusive: false,
             comments: CommentCursor::default(),
             recheck: Recheck::default(),
+            launching: false,
+            repo_missing: false,
             holder: None,
             generation: 0,
         }
@@ -190,6 +209,10 @@ impl Live {
     pub(crate) fn waits_on_pr(&self) -> bool {
         self.status.flags().pr.is_some()
             && matches!(self.status.phase(), Phase::PrOpen | Phase::Suspended)
+    }
+
+    pub(crate) fn holder_port_block(&self) -> Option<orch_store::PortBlock> {
+        self.holder.as_ref().and_then(|link| link.port_block)
     }
 
     pub(crate) fn has_holder(&self) -> bool {
@@ -280,7 +303,7 @@ impl Live {
             worktree: record.worktree.clone(),
             phase: self.status.phase().into(),
             agent: self.status.agent_state().map(Into::into),
-            flags: self.status.flags().into(),
+            flags: FlagsView::new(self.status.flags(), self.repo_missing),
             preset: record.preset.clone(),
             mode: record.last_mode.map(|mode| mode_name(mode).into()),
             conversation: record.latest_conversation().map(|id| id.as_str().into()),
@@ -385,9 +408,13 @@ impl Daemon {
                 clients: HashMap::new(),
                 next_id: 0,
                 busy: 0,
+                report: None,
+                passes: Passes::default(),
             }),
             store,
             shutdown: Notify::new(),
+            reconciling: tokio::sync::Mutex::new(()),
+            repo_guards: Mutex::new(HashMap::new()),
         }
     }
 
@@ -395,6 +422,20 @@ impl Daemon {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) async fn repo_guard(
+        &self,
+        repo: &std::path::Path,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        let guard = self
+            .repo_guards
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(repo.to_path_buf())
+            .or_default()
+            .clone();
+        guard.lock_owned().await
     }
 
     pub(crate) fn session_dir(&self, id: &SessionId) -> PathBuf {
@@ -465,6 +506,11 @@ impl State {
         let id = self.next_id();
         let sessions = self.sessions.values().map(Live::view).collect();
         outbox.send(FromDaemon::Sessions { sessions });
+        if let Some(report) = &self.report {
+            outbox.send(FromDaemon::Reconciled {
+                report: Box::new(report.clone()),
+            });
+        }
         self.clients.insert(
             id,
             ClientLink {
@@ -522,6 +568,27 @@ impl State {
         let view = Box::new(live.view());
         for client in self.clients.values() {
             client.outbox.session_changed(view.clone());
+        }
+    }
+
+    pub(crate) fn remove_session(&mut self, id: &SessionId) {
+        if self.sessions.remove(id).is_none() {
+            return;
+        }
+        for client in self.clients.values() {
+            client.outbox.session_removed(id.clone());
+        }
+    }
+
+    pub(crate) fn publish_report(&mut self, report: &ReconcileReport) {
+        if self.report.as_ref() == Some(report) {
+            return;
+        }
+        self.report = Some(report.clone());
+        for client in self.clients.values() {
+            client.outbox.send(FromDaemon::Reconciled {
+                report: Box::new(report.clone()),
+            });
         }
     }
 

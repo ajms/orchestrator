@@ -1,3 +1,4 @@
+mod cleanup;
 mod discard;
 mod error;
 mod git;
@@ -10,6 +11,7 @@ mod snapshot;
 mod stacking;
 mod worktree;
 
+pub use cleanup::{Cleaned, CleanupCheckpoint, InUse};
 pub use discard::{Commit, DiscardPreview};
 pub use error::Error;
 pub use git::GitVersion;

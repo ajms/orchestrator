@@ -45,6 +45,31 @@ impl Store {
         Ok(block)
     }
 
+    pub fn hold_port_block(
+        &mut self,
+        session: &SessionId,
+        block: PortBlock,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        let clashes = self
+            .sessions()?
+            .into_iter()
+            .filter(|other| {
+                other.id != *session
+                    && !other.phase.is_terminal()
+                    && other.port_block.is_some_and(|held| held.overlaps(block))
+            })
+            .map(|other| other.id)
+            .collect();
+        let changed = self.conn.execute(
+            "UPDATE sessions SET port_base = ?2, port_size = ?3 WHERE id = ?1",
+            params![session.as_str(), block.base, block.size],
+        )?;
+        match changed {
+            0 => Err(StoreError::UnknownSession),
+            _ => Ok(clashes),
+        }
+    }
+
     pub fn free_port_block(&mut self, session: &SessionId) -> Result<(), StoreError> {
         let changed = self.conn.execute(
             "UPDATE sessions SET port_base = NULL, port_size = NULL WHERE id = ?1",

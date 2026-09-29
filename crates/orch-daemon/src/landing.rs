@@ -6,6 +6,7 @@ use orch_git::{LandingError, Script};
 use orch_protocol::{Landing, Reply, RequestError};
 use orch_store::SessionRecord;
 
+use crate::cleanup::clean_up_ended;
 use crate::lifecycle::{Busy, HOLDER_EXIT_WAIT, refused, session_env, with_git};
 use crate::pr::retarget_pr;
 use crate::state::{Daemon, Live, gate_message, session_worktree};
@@ -83,6 +84,12 @@ impl Daemon {
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
         let (_claim, record, repo) = self.claim(id, |live| {
+            if live.status.flags().base_missing {
+                return Err(format!(
+                    "the Base branch {} is gone; retarget the Session first",
+                    live.record.base
+                ));
+            }
             live.status
                 .check_landing()
                 .map_err(|refusal| gate_message("Landing", refusal))
@@ -161,11 +168,7 @@ impl Daemon {
         let worktree = session_worktree(&record);
         let dir = self.session_dir(id);
         let removed = with_git(repo.clone(), move |git| {
-            let outcome = git.remove_session_worktree(&worktree, teardown.as_ref());
-            if outcome.is_ok() {
-                let _ = std::fs::remove_dir_all(dir);
-            }
-            outcome
+            clean_up_ended(git, &worktree, teardown.as_ref(), &dir)
         })
         .await?;
         match removed {
@@ -176,14 +179,8 @@ impl Daemon {
             Ok(_) => {}
             Err(err) => problems.push(format!("removing the Worktree and Branch failed: {err}")),
         }
-        let session = id.clone();
-        match self
-            .store
-            .call(move |store| store.free_port_block(&session))
-            .await?
-        {
-            Ok(()) => {}
-            Err(err) => problems.push(format!("freeing the Port block failed: {err}")),
+        if let Err(problem) = self.free_port_block(id).await {
+            problems.push(problem);
         }
         let problem = (!problems.is_empty()).then(|| problems.join("\n"));
         self.update(id, |live| {
@@ -195,10 +192,11 @@ impl Daemon {
             let stacked = self.retarget_stacked(&record);
             self.retarget_prs(&repo, stacked).await;
         }
+        self.forget_session(id).await;
         Ok(problem)
     }
 
-    async fn teardown_script(&self, repo: &Path) -> Result<Option<String>, String> {
+    pub(crate) async fn teardown_script(&self, repo: &Path) -> Result<Option<String>, String> {
         let config = self.repo_config(repo).await.map_err(skipped_teardown)?;
         config
             .teardown_script()

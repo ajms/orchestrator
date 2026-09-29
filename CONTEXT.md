@@ -125,6 +125,10 @@ _Avoid_: Port range, port offset
 A Worktree or Branch that looks like the Orchestrator's but belongs to no Session.
 _Avoid_: Orphan, stray, garbage
 
+**Unknown Holder**:
+A live Holder the Daemon has no Session record for.
+_Avoid_: Orphan, stray
+
 **Reconciliation**:
 The Daemon bringing its records back in line with what actually exists on disk, in git and on GitHub.
 _Avoid_: Sync, repair, recovery

@@ -1,5 +1,6 @@
 mod client;
 mod message;
+mod reconcile;
 mod view;
 
 pub use client::{
@@ -12,6 +13,7 @@ pub use message::{
     PROTOCOL_VERSION, Reply, Request, RequestError, ToDaemon,
 };
 pub use orch_holder::{ScreenSnapshot, Size};
+pub use reconcile::{Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, RepoReport};
 pub use view::{
     AgentStateView, FlagsView, GuardKindView, GuardPrompt, PhaseView, PrChecksView, PrReviewView,
     PrView, SessionView, SubagentView,

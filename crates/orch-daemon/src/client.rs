@@ -50,7 +50,7 @@ pub(crate) async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
             let outbox = outbox.clone();
             requests.spawn(async move {
                 let result = handle(&daemon, client, request).await;
-                let _persisted = daemon.store.call(|_| ()).await;
+                daemon.store.flush().await;
                 outbox.send(FromDaemon::Response { id, result });
             });
         }
@@ -118,6 +118,17 @@ async fn handle(
             detached(async move { daemon.set_preset(&session, preset).await }).await
         }
         Request::SetMuted { session, muted } => daemon.set_muted(&session, muted),
+        Request::Reconcile => {
+            let daemon = daemon.clone();
+            detached(async move { daemon.reconcile_now().await }).await
+        }
+        Request::LeftoverPreview { repo, leftover } => {
+            daemon.leftover_preview(repo, leftover).await
+        }
+        Request::Fix { fix } => {
+            let daemon = daemon.clone();
+            detached(async move { daemon.fix(fix).await }).await
+        }
     }
 }
 

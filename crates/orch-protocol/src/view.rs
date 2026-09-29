@@ -97,6 +97,8 @@ pub struct FlagsView {
     pub worktree_missing: bool,
     pub base_missing: bool,
     pub muted: bool,
+    #[serde(default)]
+    pub repo_missing: bool,
     pub pr_number: Option<u64>,
     #[serde(default)]
     pub pr: Option<PrView>,
@@ -150,8 +152,8 @@ impl From<&orch_core::PrStatus> for PrView {
     }
 }
 
-impl From<&orch_core::Flags> for FlagsView {
-    fn from(flags: &orch_core::Flags) -> Self {
+impl FlagsView {
+    pub fn new(flags: &orch_core::Flags, repo_missing: bool) -> Self {
         Self {
             unseen: flags.unseen,
             stalled: flags.stalled,
@@ -160,6 +162,7 @@ impl From<&orch_core::Flags> for FlagsView {
             worktree_missing: flags.worktree_missing,
             base_missing: flags.base_missing,
             muted: flags.muted,
+            repo_missing,
             pr_number: flags.pr.as_ref().map(|pr| pr.number),
             pr: flags.pr.as_ref().map(PrView::from),
         }

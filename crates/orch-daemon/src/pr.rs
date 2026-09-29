@@ -223,6 +223,25 @@ async fn gh(repo: &Path, args: &[&str], limit: Duration) -> Result<String, Strin
     subprocess::run(command, None, limit, &what).await
 }
 
+#[derive(Deserialize)]
+struct GhListed {
+    number: u64,
+}
+
+pub(crate) async fn open_pr_of(repo: &Path, branch: &str) -> Option<u64> {
+    let listed = gh(
+        repo,
+        &[
+            "pr", "list", "--head", branch, "--state", "open", "--json", "number", "--limit", "1",
+        ],
+        POLL_TIMEOUT,
+    )
+    .await
+    .ok()?;
+    let prs: Vec<GhListed> = serde_json::from_str(&listed).ok()?;
+    prs.first().map(|pr| pr.number)
+}
+
 pub(crate) async fn retarget_pr(repo: &Path, number: u64, base: &str) -> Result<(), String> {
     gh(
         repo,
@@ -358,28 +377,32 @@ impl Daemon {
     }
 
     pub(crate) async fn poll_prs(self: Arc<Self>) {
-        let limit = Arc::new(Semaphore::new(POLLS_AT_ONCE));
         loop {
-            let waiting: Vec<SessionId> = self
-                .lock()
-                .sessions
-                .values()
-                .filter(|live| live.waits_on_pr())
-                .map(|live| live.record.id.clone())
-                .collect();
-            let mut polls = JoinSet::new();
-            for id in waiting {
-                let daemon = self.clone();
-                let limit = limit.clone();
-                polls.spawn(async move {
-                    let _permit = limit.acquire_owned().await;
-                    if let Err(err) = daemon.refresh_pr(&id).await {
-                        eprintln!("orch daemon: polling the PR of {}: {err}", id.as_str());
-                    }
-                });
-            }
-            while polls.join_next().await.is_some() {}
+            self.poll_waiting_prs().await;
             tokio::time::sleep(self.config.pr_poll_interval).await;
         }
+    }
+
+    pub(crate) async fn poll_waiting_prs(self: &Arc<Self>) {
+        let limit = Arc::new(Semaphore::new(POLLS_AT_ONCE));
+        let waiting: Vec<SessionId> = self
+            .lock()
+            .sessions
+            .values()
+            .filter(|live| live.waits_on_pr())
+            .map(|live| live.record.id.clone())
+            .collect();
+        let mut polls = JoinSet::new();
+        for id in waiting {
+            let daemon = self.clone();
+            let limit = limit.clone();
+            polls.spawn(async move {
+                let _permit = limit.acquire_owned().await;
+                if let Err(err) = daemon.refresh_pr(&id).await {
+                    eprintln!("orch daemon: polling the PR of {}: {err}", id.as_str());
+                }
+            });
+        }
+        while polls.join_next().await.is_some() {}
     }
 }

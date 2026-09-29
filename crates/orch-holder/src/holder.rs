@@ -10,6 +10,7 @@ use std::time::Duration;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use orch_agent::GuardAnswer;
+use orch_config::PortBlock;
 use orch_core::SessionId;
 use orch_term::keys::encode_paste;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -35,6 +36,8 @@ pub struct HoldConfig {
     pub cwd: PathBuf,
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
+    pub base: Option<String>,
+    pub port_block: Option<PortBlock>,
     pub size: Size,
     pub guard_timeout: Duration,
     pub event_capacity: usize,
@@ -53,6 +56,8 @@ impl HoldConfig {
             cwd,
             argv,
             env: Vec::new(),
+            base: None,
+            port_block: None,
             size: Size::DEFAULT,
             guard_timeout: Self::DEFAULT_GUARD_TIMEOUT,
             event_capacity: Self::DEFAULT_EVENT_CAPACITY,
@@ -132,6 +137,9 @@ pub(crate) struct Shared {
 
 struct State {
     session: SessionId,
+    cwd: PathBuf,
+    base: Option<String>,
+    port_block: Option<PortBlock>,
     agent_pid: Option<u32>,
     emulator: Emulator,
     master: Box<dyn MasterPty + Send>,
@@ -172,6 +180,9 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
     let shared = Arc::new(Shared {
         state: Mutex::new(State {
             session: config.session.clone(),
+            cwd: config.cwd.clone(),
+            base: config.base.clone(),
+            port_block: config.port_block,
             agent_pid,
             emulator: Emulator::new(config.size, config.scrollback),
             master: pty.master,
@@ -350,6 +361,9 @@ impl State {
         Hello {
             version: PROTOCOL_VERSION,
             session: self.session.clone(),
+            cwd: Some(self.cwd.clone()),
+            base: self.base.clone(),
+            port_block: self.port_block,
             holder_pid: std::process::id(),
             agent_pid: self.agent_pid,
             agent: match &self.exit {

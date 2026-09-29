@@ -140,3 +140,16 @@ fn a_worktree_can_be_recreated_for_an_existing_branch() {
         "orch/work"
     );
 }
+
+#[test]
+fn the_branch_checked_out_in_a_worktree_is_known_by_its_path() {
+    let fixture = Fixture::new();
+    let repo = fixture.repo();
+    let worktree = repo.create_worktree(&name("fix-bug"), "main").unwrap();
+
+    assert_eq!(
+        repo.worktree_branch(&worktree.path).unwrap(),
+        Some("orch/fix-bug".to_string())
+    );
+    assert_eq!(repo.worktree_branch(fixture.outside()).unwrap(), None);
+}

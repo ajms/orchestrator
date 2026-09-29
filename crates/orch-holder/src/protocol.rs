@@ -1,4 +1,5 @@
 use orch_agent::GuardAnswer;
+use orch_config::PortBlock;
 use orch_core::SessionId;
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +82,12 @@ pub enum FromHolder {
 pub struct Hello {
     pub version: u32,
     pub session: SessionId,
+    #[serde(default)]
+    pub cwd: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub base: Option<String>,
+    #[serde(default)]
+    pub port_block: Option<PortBlock>,
     pub holder_pid: u32,
     pub agent_pid: Option<u32>,
     pub agent: AgentStatus,

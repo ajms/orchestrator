@@ -100,6 +100,17 @@ impl Repo {
             .is_ok_and(|entries| entries.iter().any(|entry| entry.path == path))
     }
 
+    pub fn worktree_branch(&self, path: &Path) -> Result<Option<String>, Error> {
+        let Ok(path) = path.canonicalize() else {
+            return Ok(None);
+        };
+        Ok(self
+            .worktree_entries()?
+            .into_iter()
+            .find(|entry| entry.path == path)
+            .and_then(|entry| entry.branch))
+    }
+
     pub fn remove_session_worktree(
         &self,
         worktree: &SessionWorktree,
