@@ -128,6 +128,7 @@ fn bookkeeping_events_keep_the_agent_state() {
         AgentEvent::GuardCheck {
             tool: "Bash".into(),
             input_json: "{}".into(),
+            cwd: None,
         },
     ];
     for event in events {

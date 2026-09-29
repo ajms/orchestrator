@@ -1,8 +1,29 @@
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SessionId(pub String);
+
+impl SessionId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConversationId(pub String);
+
+impl ConversationId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SubagentId(pub String);
+
+impl SubagentId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PermissionMode {
@@ -33,6 +54,7 @@ pub struct RateLimit {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UsageSample {
+    pub conversation: Option<ConversationId>,
     pub model: Option<String>,
     pub context_used_percent: Option<f64>,
     pub context_window_tokens: Option<u64>,
@@ -80,6 +102,7 @@ pub enum AgentEvent {
     GuardCheck {
         tool: String,
         input_json: String,
+        cwd: Option<String>,
     },
 }
 

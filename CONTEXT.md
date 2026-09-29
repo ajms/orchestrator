@@ -29,7 +29,7 @@ Where a Session is in its lifecycle: Setting up, Setup failed, Active, PR open, 
 _Avoid_: Stage, lifecycle state
 
 **Agent state**:
-What a live Session's Agent is doing right now: Starting, Working, Needs input, Idle, Errored or Exited.
+What a live Session's Agent is doing right now: Starting, Working, Needs input, Idle, Errored, Exited or Unknown. Unknown: the Agent runs but reports no state (its adapter lacks hooks).
 _Avoid_: Activity, run state
 
 **Needs input**:

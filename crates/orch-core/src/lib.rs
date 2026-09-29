@@ -8,8 +8,8 @@ mod subagent;
 
 pub use agent_state::AgentState;
 pub use event::{
-    AgentEvent, ConversationId, FailureKind, Observation, PermissionMode, RateLimit, SubagentId,
-    UsageSample,
+    AgentEvent, ConversationId, FailureKind, Observation, PermissionMode, RateLimit, SessionId,
+    SubagentId, UsageSample,
 };
 pub use flags::{
     Attention, ChecksState, DEFAULT_STALLED_AFTER, Effect, Flags, PrState, PrStatus, ReviewDecision,

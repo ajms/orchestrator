@@ -14,6 +14,7 @@ pub struct SessionStatus {
     phase: Phase,
     agent_state: Option<AgentState>,
     agent_process_alive: bool,
+    observed: bool,
     flags: Flags,
     watched: bool,
     last_activity: Option<Instant>,
@@ -35,6 +36,7 @@ impl SessionStatus {
             phase: Phase::SettingUp,
             agent_state: None,
             agent_process_alive: false,
+            observed: true,
             flags: Flags::default(),
             watched: false,
             last_activity: None,
@@ -42,6 +44,13 @@ impl SessionStatus {
             conversation: None,
             usage: None,
             subagents: Vec::new(),
+        }
+    }
+
+    pub fn unobserved() -> Self {
+        Self {
+            observed: false,
+            ..Self::new()
         }
     }
 
@@ -111,7 +120,9 @@ impl SessionStatus {
         }
 
         let before = self.agent_state;
-        let after = before.unwrap_or(AgentState::Starting).after(&observation);
+        let after = before
+            .unwrap_or(AgentState::Starting)
+            .after(&observation, self.observed);
         self.agent_state = Some(after);
 
         let turn_ended = observation == Observation::Agent(AgentEvent::TurnEnded);

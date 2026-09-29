@@ -8,12 +8,14 @@ pub enum AgentState {
     Idle,
     Errored,
     Exited,
+    Unknown,
 }
 
 impl AgentState {
-    pub(crate) fn after(self, observation: &Observation) -> AgentState {
+    pub(crate) fn after(self, observation: &Observation, observed: bool) -> AgentState {
         match observation {
-            Observation::Spawned => AgentState::Starting,
+            Observation::Spawned if observed => AgentState::Starting,
+            Observation::Spawned => AgentState::Unknown,
             Observation::Exited { code: Some(0) } => AgentState::Exited,
             Observation::Exited { .. } => AgentState::Errored,
             Observation::GuardPrompted => AgentState::NeedsInput,
