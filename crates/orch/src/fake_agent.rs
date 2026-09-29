@@ -9,8 +9,9 @@ use orch_holder::SESSION_ENV;
 
 use crate::subprocess::run_with_input;
 
-pub fn run(script: Option<&Path>) -> ExitCode {
+pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
     disable_echo();
+    announce(agent_args);
     let scripted = match script.map(std::fs::read_to_string).transpose() {
         Ok(text) => text.unwrap_or_default(),
         Err(err) => {
@@ -30,6 +31,26 @@ pub fn run(script: Option<&Path>) -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+fn announce(agent_args: &[String]) {
+    let mut args = agent_args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--settings" => {
+                args.next();
+            }
+            "--" => {
+                let prompt: Vec<&str> = args.by_ref().map(String::as_str).collect();
+                say(&format!("prompt> {}", prompt.join(" ")));
+            }
+            flag if flag.starts_with("--") => {
+                let value = args.next().map_or("", String::as_str);
+                say(&format!("{}> {value}", &flag[2..]));
+            }
+            other => say(&format!("arg> {other}")),
+        }
+    }
 }
 
 fn disable_echo() {

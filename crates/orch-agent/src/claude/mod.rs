@@ -89,11 +89,15 @@ impl AgentAdapter for ClaudeCode {
     }
 
     fn launch(&self, spec: &LaunchSpec) -> Argv {
-        self.interactive(
+        let mut argv = self.interactive(
             ["--session-id", spec.session.as_str()],
             spec,
             spec.preset.mode,
-        )
+        );
+        if let Some(prompt) = &spec.prompt {
+            argv.args.extend(["--".into(), prompt.clone()]);
+        }
+        argv
     }
 
     fn resume(

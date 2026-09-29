@@ -71,6 +71,17 @@ CREATE TABLE usage_daily (
     "
 ALTER TABLE repos ADD COLUMN head_branch TEXT;
 ",
+    "
+ALTER TABLE sessions ADD COLUMN agent_state TEXT;
+ALTER TABLE sessions ADD COLUMN guards_enabled INTEGER NOT NULL DEFAULT 1;
+CREATE TABLE guard_allowances (
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    target TEXT NOT NULL,
+    PRIMARY KEY (session_id, position)
+);
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {

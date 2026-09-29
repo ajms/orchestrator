@@ -166,3 +166,90 @@ fn session_ids_are_unique_and_unknown_sessions_are_reported() {
         Err(StoreError::UnknownSession)
     ));
 }
+
+#[test]
+fn a_new_session_has_guards_on_and_no_agent_state() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let created = fx.session(&repo, "s");
+    assert_eq!(created.agent_state, None);
+    assert!(created.guards_enabled);
+    assert!(created.guard_allowances.is_empty());
+}
+
+#[test]
+fn agent_state_guard_switch_and_allowances_persist_across_reopening() {
+    use orch_agent::{GuardHit, GuardKind};
+    use orch_core::AgentState;
+
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut session = fx.session(&repo, "s");
+    let allowances = vec![
+        GuardHit {
+            kind: GuardKind::WriteOutsideWorktree,
+            target: "/etc/hosts".into(),
+        },
+        GuardHit {
+            kind: GuardKind::BaseBranch,
+            target: "main".into(),
+        },
+    ];
+    for state in [
+        AgentState::Starting,
+        AgentState::Working,
+        AgentState::NeedsInput,
+        AgentState::Idle,
+        AgentState::Errored,
+        AgentState::Exited,
+        AgentState::Unknown,
+    ] {
+        session.agent_state = Some(state);
+        session.guards_enabled = false;
+        session.guard_allowances = allowances.clone();
+        fx.store.save_session(&session).unwrap();
+        fx.reopen();
+        let loaded = fx.store.session(&session.id).unwrap().unwrap();
+        assert_eq!(loaded.agent_state, Some(state));
+        assert!(!loaded.guards_enabled);
+        assert_eq!(loaded.guard_allowances, allowances);
+    }
+
+    session.guard_allowances.truncate(1);
+    session.agent_state = None;
+    fx.store.save_session(&session).unwrap();
+    let loaded = fx.store.session(&session.id).unwrap().unwrap();
+    assert_eq!(loaded.guard_allowances, allowances[..1]);
+    assert_eq!(loaded.agent_state, None);
+}
+
+#[test]
+fn a_deleted_session_is_gone_with_its_conversations_and_port_block() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let session = fx.session(&repo, "s");
+    fx.store
+        .record_conversation(&session.id, ConversationId("c1".into()))
+        .unwrap();
+    let range = orch_config::PortRange {
+        start: 20000,
+        end: 20009,
+        block_size: 10,
+    };
+    fx.store.allocate_port_block(&session.id, &range).unwrap();
+
+    fx.store.delete_session(&session.id).unwrap();
+    assert_eq!(fx.store.session(&session.id).unwrap(), None);
+    assert!(matches!(
+        fx.store.delete_session(&session.id),
+        Err(StoreError::UnknownSession)
+    ));
+    let other = fx.session(&repo, "t");
+    assert_eq!(
+        fx.store
+            .allocate_port_block(&other.id, &range)
+            .unwrap()
+            .base,
+        20000
+    );
+}

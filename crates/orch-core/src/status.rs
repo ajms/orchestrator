@@ -54,6 +54,16 @@ impl SessionStatus {
         }
     }
 
+    pub fn restore(&mut self, phase: Phase, flags: Flags) {
+        self.phase = phase;
+        self.flags = flags;
+    }
+
+    pub fn restore_agent(&mut self, state: AgentState, process_alive: bool) {
+        self.agent_state = Some(state);
+        self.agent_process_alive = process_alive;
+    }
+
     pub fn phase(&self) -> Phase {
         self.phase
     }

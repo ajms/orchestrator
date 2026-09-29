@@ -1,0 +1,13 @@
+[package]
+name = "orch-protocol"
+description = "Messages between Clients and the Daemon, and the Client side of the socket."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orch-core.workspace = true
+orch-holder.workspace = true
+serde.workspace = true
+base64 = "0.22"
+nix = { version = "0.30", features = ["process", "fs", "signal"] }
+tokio = { version = "1", features = ["rt", "net", "io-util", "time", "process"] }

@@ -198,3 +198,24 @@ fn resume_under_inherit_leaves_the_mode_to_claudes_own_restore() {
         .unwrap();
     assert_eq!(flag(&resume.args, "--permission-mode"), None);
 }
+
+#[test]
+fn launch_passes_the_initial_prompt_as_the_last_argument() {
+    let spec = spec(Preset::inherit()).with_prompt("fix the --flaky test");
+    let argv = ClaudeCode::default().launch(&spec);
+    assert_eq!(
+        argv.args.last().map(String::as_str),
+        Some("fix the --flaky test")
+    );
+    assert_eq!(argv.args[argv.args.len() - 2], "--");
+}
+
+#[test]
+fn resume_never_repeats_the_initial_prompt() {
+    let spec = spec(Preset::inherit()).with_prompt("fix the flaky test");
+    let conversation = ConversationId("c0ffee".into());
+    let argv = ClaudeCode::default()
+        .resume(&spec, &conversation, None)
+        .unwrap();
+    assert!(!argv.args.iter().any(|arg| arg.contains("flaky")));
+}

@@ -1,3 +1,4 @@
+mod daemon;
 mod fake_agent;
 mod hold;
 mod hook;
@@ -18,6 +19,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    Daemon(daemon::DaemonArgs),
     Hold(hold::HoldArgs),
     Hook {
         #[arg(long)]
@@ -31,6 +33,8 @@ enum Command {
     FakeAgent {
         #[arg(long)]
         script: Option<PathBuf>,
+        #[arg(last = true)]
+        agent_args: Vec<String>,
     },
 }
 
@@ -40,9 +44,12 @@ fn main() -> ExitCode {
             println!("orch {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        Some(Command::Daemon(args)) => daemon::run(args),
         Some(Command::Hold(args)) => hold::run(args),
         Some(Command::Hook { session }) => hook::run(&session),
         Some(Command::Tap { session }) => tap::run(&session),
-        Some(Command::FakeAgent { script }) => fake_agent::run(script.as_deref()),
+        Some(Command::FakeAgent { script, agent_args }) => {
+            fake_agent::run(script.as_deref(), &agent_args)
+        }
     }
 }

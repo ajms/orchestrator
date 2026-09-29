@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use orch_core::{ConversationId, Flags, PermissionMode, Phase, PrStatus, SessionId};
+use orch_agent::GuardHit;
+use orch_core::{AgentState, ConversationId, Flags, PermissionMode, Phase, PrStatus, SessionId};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
 use crate::codec::Stored;
@@ -33,6 +34,9 @@ pub struct SessionRecord {
     pub flags: Flags,
     pub preset: String,
     pub last_mode: Option<PermissionMode>,
+    pub agent_state: Option<AgentState>,
+    pub guards_enabled: bool,
+    pub guard_allowances: Vec<GuardHit>,
     pub conversations: Vec<ConversationId>,
     pub port_block: Option<PortBlock>,
     pub created_at: SystemTime,
@@ -52,7 +56,7 @@ impl SessionRecord {
 const COLUMNS: &str = "id, repo_id, slug, branch, base, worktree, phase, preset, last_mode,
     unseen, stalled, needs_rebase, recovered, worktree_missing, base_missing, muted,
     pr_number, pr_checks, pr_review, pr_new_comments, pr_state,
-    port_base, port_size, created_at, updated_at";
+    port_base, port_size, created_at, updated_at, agent_state, guards_enabled";
 
 fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
     let pr = match row.get::<_, Option<i64>>("pr_number")? {
@@ -87,6 +91,11 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         last_mode: row
             .get::<_, Option<Stored<PermissionMode>>>("last_mode")?
             .map(|mode| mode.0),
+        agent_state: row
+            .get::<_, Option<Stored<AgentState>>>("agent_state")?
+            .map(|state| state.0),
+        guards_enabled: row.get("guards_enabled")?,
+        guard_allowances: Vec::new(),
         conversations: Vec::new(),
         port_block: port_block_from(row)?,
         created_at: from_millis(row.get("created_at")?),
@@ -125,7 +134,7 @@ impl Store {
                 last_mode = ?8, unseen = ?9, stalled = ?10, needs_rebase = ?11, recovered = ?12,
                 worktree_missing = ?13, base_missing = ?14, muted = ?15, pr_number = ?16,
                 pr_checks = ?17, pr_review = ?18, pr_new_comments = ?19, pr_state = ?20,
-                updated_at = ?21
+                updated_at = ?21, agent_state = ?22, guards_enabled = ?23
              WHERE id = ?1",
             params![
                 session.id.as_str(),
@@ -149,12 +158,37 @@ impl Store {
                 pr.map(|pr| pr.new_comments),
                 pr.map(|pr| Stored(pr.state)),
                 now_millis().max(millis(session.updated_at)),
+                session.agent_state.map(Stored),
+                session.guards_enabled,
             ],
         )?;
         if changed == 0 {
             return Err(StoreError::UnknownSession);
         }
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "DELETE FROM guard_allowances WHERE session_id = ?1",
+            params![session.id.as_str()],
+        )?;
+        for (position, hit) in session.guard_allowances.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO guard_allowances (session_id, position, kind, target)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![session.id.as_str(), position, Stored(hit.kind), hit.target],
+            )?;
+        }
+        tx.commit()?;
         self.existing_session(&session.id)
+    }
+
+    pub fn delete_session(&mut self, id: &SessionId) -> Result<(), StoreError> {
+        let deleted = self
+            .conn
+            .execute("DELETE FROM sessions WHERE id = ?1", params![id.as_str()])?;
+        match deleted {
+            0 => Err(StoreError::UnknownSession),
+            _ => Ok(()),
+        }
     }
 
     pub fn record_conversation(
@@ -245,6 +279,17 @@ impl Store {
         session.conversations = statement
             .query_map(params![session.id.as_str()], |row| {
                 row.get(0).map(ConversationId)
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut statement = self.conn.prepare_cached(
+            "SELECT kind, target FROM guard_allowances WHERE session_id = ?1 ORDER BY position",
+        )?;
+        session.guard_allowances = statement
+            .query_map(params![session.id.as_str()], |row| {
+                Ok(GuardHit {
+                    kind: row.get::<_, Stored<_>>(0)?.0,
+                    target: row.get(1)?,
+                })
             })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(session)

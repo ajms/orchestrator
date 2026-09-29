@@ -245,3 +245,23 @@ fn unmuting_and_fixed_worktree_and_base_are_reflected_in_the_flags() {
     status.set_base_missing(false);
     assert_eq!(status.flags(), &Flags::default());
 }
+
+#[test]
+fn a_status_restored_from_records_keeps_phase_and_flags_until_observed_again() {
+    let flags = Flags {
+        unseen: true,
+        muted: true,
+        pr: Some(PrStatus::opened(7)),
+        ..Flags::default()
+    };
+    let mut status = SessionStatus::new();
+    status.restore(orch_core::Phase::PrOpen, flags.clone());
+    assert_eq!(status.phase(), orch_core::Phase::PrOpen);
+    assert_eq!(status.flags(), &flags);
+    assert_eq!(status.agent_state(), None);
+
+    status.feed(Observation::Spawned);
+    assert_eq!(status.agent_state(), Some(AgentState::Starting));
+    status.transition(PhaseEvent::PrMerged).unwrap();
+    assert_eq!(status.phase(), orch_core::Phase::Landed);
+}

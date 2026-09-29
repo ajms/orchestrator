@@ -197,3 +197,17 @@ fn observations_are_ignored_outside_live_phases() {
     status.feed(Observation::Spawned);
     assert_eq!(status.agent_state(), None);
 }
+
+#[test]
+fn an_adopted_agent_resumes_from_its_persisted_state() {
+    let mut status = active_session();
+    status.restore_agent(AgentState::Idle, true);
+    assert_eq!(status.agent_state(), Some(AgentState::Idle));
+    status.feed_event(AgentEvent::PromptSubmitted);
+    assert_eq!(status.agent_state(), Some(AgentState::Working));
+
+    let mut status = active_session();
+    status.restore_agent(AgentState::Idle, false);
+    status.feed_event(AgentEvent::PromptSubmitted);
+    assert_eq!(status.agent_state(), Some(AgentState::Idle));
+}

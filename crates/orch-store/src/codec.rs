@@ -1,5 +1,6 @@
+use orch_agent::GuardKind;
 use orch_agent::{mode_from_name, mode_name};
-use orch_core::{ChecksState, PermissionMode, Phase, PrState, ReviewDecision};
+use orch_core::{AgentState, ChecksState, PermissionMode, Phase, PrState, ReviewDecision};
 use rusqlite::ToSql;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 
@@ -73,6 +74,46 @@ impl Named for PrState {
         match self {
             PrState::Open => "open",
             PrState::Closed => "closed",
+        }
+    }
+}
+
+impl Named for AgentState {
+    const ALL: &'static [Self] = &[
+        AgentState::Starting,
+        AgentState::Working,
+        AgentState::NeedsInput,
+        AgentState::Idle,
+        AgentState::Errored,
+        AgentState::Exited,
+        AgentState::Unknown,
+    ];
+    fn name(self) -> &'static str {
+        match self {
+            AgentState::Starting => "starting",
+            AgentState::Working => "working",
+            AgentState::NeedsInput => "needs_input",
+            AgentState::Idle => "idle",
+            AgentState::Errored => "errored",
+            AgentState::Exited => "exited",
+            AgentState::Unknown => "unknown",
+        }
+    }
+}
+
+impl Named for GuardKind {
+    const ALL: &'static [Self] = &[
+        GuardKind::BaseBranch,
+        GuardKind::OtherRef,
+        GuardKind::WorktreeManagement,
+        GuardKind::WriteOutsideWorktree,
+    ];
+    fn name(self) -> &'static str {
+        match self {
+            GuardKind::BaseBranch => "base_branch",
+            GuardKind::OtherRef => "other_ref",
+            GuardKind::WorktreeManagement => "worktree_management",
+            GuardKind::WriteOutsideWorktree => "write_outside_worktree",
         }
     }
 }

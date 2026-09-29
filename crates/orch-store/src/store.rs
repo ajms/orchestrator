@@ -26,6 +26,7 @@ impl Store {
         let mut conn = Connection::open(path)?;
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         migrate(&mut conn)?;
         Ok(Self { conn })
     }

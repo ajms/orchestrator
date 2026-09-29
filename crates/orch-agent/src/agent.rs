@@ -45,6 +45,7 @@ pub struct LaunchSpec {
     pub session: SessionId,
     pub orch_program: String,
     pub preset: Preset,
+    pub prompt: Option<String>,
 }
 
 impl LaunchSpec {
@@ -53,6 +54,14 @@ impl LaunchSpec {
             session,
             orch_program: orch_program.into(),
             preset,
+            prompt: None,
+        }
+    }
+
+    pub fn with_prompt(self, prompt: impl Into<String>) -> Self {
+        Self {
+            prompt: Some(prompt.into()),
+            ..self
         }
     }
 }
