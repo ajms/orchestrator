@@ -86,6 +86,10 @@ impl Presets {
         Self { presets }
     }
 
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.presets.iter().map(|preset| preset.name.as_str())
+    }
+
     pub fn get(&self, name: &str) -> Option<&Preset> {
         self.presets.iter().find(|preset| preset.name == name)
     }

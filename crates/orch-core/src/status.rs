@@ -93,9 +93,22 @@ impl SessionStatus {
     }
 
     pub fn transition(&mut self, event: PhaseEvent) -> Result<Vec<Effect>, InvalidTransition> {
+        let pr_closed = self
+            .flags
+            .pr
+            .as_ref()
+            .is_some_and(|pr| pr.state == PrState::Closed);
+        if event == PhaseEvent::PrAbandoned && !pr_closed {
+            return Err(InvalidTransition {
+                from: self.phase,
+                event,
+            });
+        }
         self.phase = self.phase.after(event, self.has_pr())?;
-        if let PhaseEvent::PrOpened { number } = event {
-            self.flags.pr = Some(PrStatus::opened(number));
+        match event {
+            PhaseEvent::PrOpened { number } => self.flags.pr = Some(PrStatus::opened(number)),
+            PhaseEvent::PrAbandoned => self.flags.pr = None,
+            _ => {}
         }
         if !self.phase.is_live() {
             self.agent_state = None;
@@ -159,6 +172,10 @@ impl SessionStatus {
         }
     }
 
+    pub fn is_watched(&self) -> bool {
+        self.watched
+    }
+
     pub fn set_watched(&mut self, watched: bool) {
         self.watched = watched;
         if watched {
@@ -204,6 +221,10 @@ impl SessionStatus {
 
     pub fn set_base_missing(&mut self, missing: bool) {
         self.flags.base_missing = missing;
+    }
+
+    pub fn forget_permission_mode(&mut self) {
+        self.permission_mode = None;
     }
 
     pub fn set_muted(&mut self, muted: bool) {

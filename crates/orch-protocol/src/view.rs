@@ -42,6 +42,12 @@ pub enum PhaseView {
     Discarded,
 }
 
+impl PhaseView {
+    pub fn is_live(self) -> bool {
+        matches!(self, Self::Active | Self::PrOpen)
+    }
+}
+
 impl From<Phase> for PhaseView {
     fn from(phase: Phase) -> Self {
         match phase {

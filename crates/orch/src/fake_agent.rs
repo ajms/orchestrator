@@ -1,4 +1,4 @@
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitCode};
 use std::time::Duration;
@@ -10,6 +10,9 @@ use orch_holder::SESSION_ENV;
 use crate::subprocess::run_with_input;
 
 pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
+    if agent_args.iter().any(|arg| arg == "-p") {
+        return draft(agent_args);
+    }
     disable_echo();
     announce(agent_args);
     let scripted = match script.map(std::fs::read_to_string).transpose() {
@@ -30,6 +33,22 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
             return code;
         }
     }
+    ExitCode::SUCCESS
+}
+
+fn draft(agent_args: &[String]) -> ExitCode {
+    let mut instruction = String::new();
+    let _ = std::io::stdin().read_to_string(&mut instruction);
+    let conversation = agent_args
+        .iter()
+        .skip_while(|arg| *arg != "--resume")
+        .nth(1)
+        .map_or("nothing", String::as_str);
+    print!(
+        "Drafted from {conversation}\n\nargs: {}\n{}\n",
+        agent_args.join(" "),
+        instruction.trim()
+    );
     ExitCode::SUCCESS
 }
 

@@ -11,6 +11,8 @@ use orch_store::Store;
 pub struct DaemonArgs {
     #[arg(long, default_value_t = DaemonConfig::DEFAULT_IDLE_TIMEOUT.as_millis() as u64)]
     idle_timeout_ms: u64,
+    #[arg(long, hide = true, default_value_t = DaemonConfig::DEFAULT_PR_POLL.as_millis() as u64)]
+    pr_poll_ms: u64,
 }
 
 pub fn run(args: DaemonArgs) -> ExitCode {
@@ -33,6 +35,7 @@ pub fn run(args: DaemonArgs) -> ExitCode {
         loader,
         orch_program,
         idle_timeout: Duration::from_millis(args.idle_timeout_ms),
+        pr_poll_interval: Duration::from_millis(args.pr_poll_ms),
     };
     match orch_daemon::run(config) {
         Ok(()) => ExitCode::SUCCESS,

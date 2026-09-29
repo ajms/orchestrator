@@ -55,7 +55,19 @@ struct Connection {
     writer: OwnedWriteHalf,
 }
 
+pub async fn open_connection(
+    socket: &Path,
+    pane: Option<OpenPane>,
+) -> Result<(OwnedReadHalf, OwnedWriteHalf), ConnectError> {
+    let (reader, writer) = Connection::open(socket, pane).await?.into_split();
+    Ok((reader, writer))
+}
+
 impl Connection {
+    fn into_split(self) -> (OwnedReadHalf, OwnedWriteHalf) {
+        (self.reader, self.writer)
+    }
+
     async fn open(socket: &Path, pane: Option<OpenPane>) -> Result<Self, ConnectError> {
         let (reader, writer) = UnixStream::connect(socket).await?.into_split();
         let mut connection = Self { reader, writer };

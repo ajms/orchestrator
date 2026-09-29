@@ -73,6 +73,34 @@ fn saved_changes_persist_across_reopening() {
 }
 
 #[test]
+fn a_queued_prompt_for_the_agent_persists_until_cleared() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut session = fx.session(&repo, "stacked");
+    assert_eq!(session.queued_prompt, None);
+
+    session.queued_prompt = Some("Please rebase onto main.".into());
+    fx.store.save_session(&session).unwrap();
+    fx.reopen();
+    let loaded = fx.store.session(&session.id).unwrap().unwrap();
+    assert_eq!(
+        loaded.queued_prompt.as_deref(),
+        Some("Please rebase onto main.")
+    );
+
+    session.queued_prompt = None;
+    fx.store.save_session(&session).unwrap();
+    assert_eq!(
+        fx.store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .queued_prompt,
+        None
+    );
+}
+
+#[test]
 fn every_phase_and_mode_round_trips() {
     let mut fx = Fixture::new();
     let repo = fx.register("proj");

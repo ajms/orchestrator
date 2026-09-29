@@ -4,12 +4,12 @@ mod view;
 
 pub use client::{
     Client, ConnectError, DEFAULT_SPAWN_WAIT, Pane, connect_or_spawn, connect_or_spawn_daemon,
-    daemon_command, daemon_lock, daemon_socket, restart_daemon, restart_running_daemon,
-    spawn_detached, stop_daemon,
+    daemon_command, daemon_lock, daemon_socket, open_connection, restart_daemon,
+    restart_running_daemon, spawn_detached, stop_daemon,
 };
 pub use message::{
-    CreateSession, FromDaemon, GuardChoice, OpenPane, PROTOCOL_VERSION, Reply, Request,
-    RequestError, ToDaemon,
+    CommitView, CreateSession, FromDaemon, GuardChoice, Landing, LandingMode, OpenPane,
+    PROTOCOL_VERSION, Reply, Request, RequestError, ToDaemon,
 };
 pub use orch_holder::{ScreenSnapshot, Size};
 pub use view::{

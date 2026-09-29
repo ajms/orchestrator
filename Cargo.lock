@@ -1247,6 +1247,8 @@ dependencies = [
  "orch-holder",
  "orch-protocol",
  "orch-store",
+ "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]
@@ -1322,6 +1324,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "crossterm",
+ "orch-agent",
  "orch-core",
  "orch-git",
  "orch-holder",

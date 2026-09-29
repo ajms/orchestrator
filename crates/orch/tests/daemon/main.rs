@@ -1,9 +1,14 @@
 mod common;
+mod discard;
 mod guards;
 mod handshake;
 mod idle;
+mod landing;
 mod lifecycle;
 mod panes;
+mod pr;
+mod preset;
 mod recovery;
 mod setup;
+mod stacking;
 mod status;

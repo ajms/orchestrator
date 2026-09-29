@@ -129,6 +129,13 @@ impl Daemon {
         })
     }
 
+    pub(crate) async fn stop_setup(&self, id: &SessionId) {
+        let pid_file = self.session_dir(id).join(SETUP_PID);
+        let session = id.clone();
+        let _ =
+            tokio::task::spawn_blocking(move || kill_orphaned_script(&pid_file, &session)).await;
+    }
+
     pub(crate) async fn interrupted_setup(&self, id: &SessionId) {
         let dir = self.session_dir(id);
         let session = id.clone();

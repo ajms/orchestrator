@@ -108,3 +108,20 @@ fn inherit_is_reserved_and_cannot_be_redefined() {
         Err(ReservedPresetName("inherit".into()))
     );
 }
+
+#[test]
+fn preset_names_list_user_presets_then_built_ins() {
+    let presets = Presets::new(vec![
+        user_preset("careful", Some(PermissionMode::Default), &[], &[]),
+        user_preset("plan", Some(PermissionMode::Plan), &["Read"], &[]),
+    ])
+    .unwrap();
+    assert_eq!(
+        presets.names().collect::<Vec<_>>(),
+        ["careful", "plan", "ask", "edits", "auto", "inherit"]
+    );
+    assert_eq!(
+        Presets::default().names().collect::<Vec<_>>(),
+        ["plan", "ask", "edits", "auto", "inherit"]
+    );
+}

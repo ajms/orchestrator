@@ -35,7 +35,14 @@ pub struct Env {
 impl Env {
     pub fn new() -> Self {
         let dir = tempfile::Builder::new().prefix("od").tempdir().unwrap();
-        for sub in ["run", "state", "config/orchestrator", "home", "repos"] {
+        for sub in [
+            "run",
+            "state",
+            "config/orchestrator",
+            "home",
+            "repos",
+            "bin",
+        ] {
             std::fs::create_dir_all(dir.path().join(sub)).unwrap();
         }
         let env = Self { dir };
@@ -77,6 +84,7 @@ impl Env {
                 "ORCH_CLAUDE_MANAGED_SETTINGS",
                 self.path("managed-settings.json"),
             )
+            .env("PATH", self.search_path())
             .env_remove("XDG_RUNTIME_DIR")
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ORCH_HOLDER_SOCKET")
@@ -85,6 +93,11 @@ impl Env {
             .current_dir(self.path("home"))
             .stdin(Stdio::null());
         command
+    }
+
+    fn search_path(&self) -> String {
+        let inherited = std::env::var("PATH").unwrap_or_default();
+        format!("{}:{inherited}", self.path("bin").display())
     }
 
     pub fn daemon_command(&self, idle_timeout: Duration) -> Command {
@@ -103,7 +116,15 @@ impl Env {
     }
 
     pub async fn start_daemon_with(&self, idle_timeout: Duration) -> Daemon {
-        let child = self.daemon_command(idle_timeout).spawn().unwrap();
+        self.start_daemon_args(idle_timeout, &[]).await
+    }
+
+    pub async fn start_daemon_args(&self, idle_timeout: Duration, args: &[&str]) -> Daemon {
+        let child = self
+            .daemon_command(idle_timeout)
+            .args(args)
+            .spawn()
+            .unwrap();
         let daemon = Daemon { child };
         wait_until("daemon socket", || self.socket().exists()).await;
         daemon
@@ -134,6 +155,63 @@ impl Env {
         root
     }
 
+    pub fn remote(&self, repo: &Path) -> PathBuf {
+        let remote = self.path("remote.git");
+        git(
+            &self.path("repos"),
+            &["init", "-q", "--bare", remote.to_str().unwrap()],
+        );
+        git(repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(repo, &["push", "-q", "origin", "main"]);
+        remote
+    }
+
+    pub fn fake_gh(&self) {
+        let dir = self.path("gh");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = r#"#!/bin/sh
+printf '%s\n' "$PWD" "$@" >> DIR/calls.log
+case "$1 $2" in
+  'pr create')
+    [ -f DIR/slow ] && sleep 1
+    [ -f DIR/fail-create ] && { echo 'gh: permission denied' >&2; exit 1; }
+    echo https://github.com/acme/app/pull/42 ;;
+  'pr view') cat DIR/view.json ;;
+  'pr edit') ;;
+  *) exit 1 ;;
+esac
+"#
+        .replace("DIR", &dir.display().to_string());
+        let gh = self.path("bin/gh");
+        std::fs::write(&gh, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        self.gh_reports(
+            r#"{"state":"OPEN","statusCheckRollup":[],"reviewDecision":"","comments":[],"reviews":[]}"#,
+        );
+    }
+
+    pub fn gh_switch(&self, name: &str, on: bool) {
+        let flag = self.path("gh").join(name);
+        match on {
+            true => std::fs::write(flag, "").unwrap(),
+            false => {
+                let _ = std::fs::remove_file(flag);
+            }
+        }
+    }
+
+    pub fn gh_reports(&self, json: &str) {
+        let view = self.path("gh/view.json");
+        let staged = self.path("gh/view.json.new");
+        std::fs::write(&staged, json).unwrap();
+        std::fs::rename(staged, view).unwrap();
+    }
+
+    pub fn gh_calls(&self) -> String {
+        std::fs::read_to_string(self.path("gh/calls.log")).unwrap_or_default()
+    }
+
     pub fn holder_socket(&self, session: &SessionId) -> PathBuf {
         orch_holder::socket_path(&self.runtime_dir(), session)
     }
@@ -152,7 +230,7 @@ impl Env {
                         .any(|var| var == marker.as_bytes())
                 })
             })
-            .filter(|pid| !is_zombie(*pid))
+            .filter(|pid| !process_gone(*pid))
             .collect()
     }
 }
@@ -180,7 +258,7 @@ pub fn kill(pid: i32, signal: &str) {
         .status();
 }
 
-pub fn is_zombie(pid: i32) -> bool {
+pub fn process_gone(pid: i32) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/stat"))
         .map(|stat| {
             stat.rsplit_once(") ")
@@ -363,6 +441,7 @@ pub struct PaneView {
     pub parser: vt100::Parser,
     pub resizes: Vec<Size>,
     pub closed: Option<String>,
+    pub dropped: Vec<String>,
 }
 
 impl PaneView {
@@ -372,6 +451,7 @@ impl PaneView {
             parser: vt100::Parser::new(1, 1, 0),
             resizes: Vec::new(),
             closed: None,
+            dropped: Vec::new(),
         }
     }
 
@@ -396,6 +476,7 @@ impl PaneView {
                 self.parser.screen_mut().set_size(size.rows, size.cols);
             }
             Some(FromDaemon::PaneClosed { reason }) => self.closed = Some(reason),
+            Some(FromDaemon::InputDropped { reason }) => self.dropped.push(reason),
             Some(other) => panic!("unexpected pane message {other:?}"),
             None => self.closed = Some("eof".into()),
         }
@@ -454,6 +535,23 @@ pub async fn running_session(env: &Env, client: &mut TestClient, prompt: &str) -
         .until(&id, "running", |view| view.agent.is_some())
         .await;
     id
+}
+
+pub async fn idle_session(
+    env: &Env,
+    client: &mut TestClient,
+    prompt: &str,
+) -> (SessionId, PaneView) {
+    let id = running_session(env, client, prompt).await;
+    let mut pane = env.pane(&id, PANE).await;
+    pane.hook(&hook("SessionStart", r#""source":"startup""#))
+        .await;
+    client
+        .until(&id, "Idle", |view| {
+            view.agent == Some(orch_protocol::AgentStateView::Idle)
+        })
+        .await;
+    (id, pane)
 }
 
 pub async fn settled(client: &mut TestClient) {

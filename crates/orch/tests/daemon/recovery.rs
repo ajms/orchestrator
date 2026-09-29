@@ -115,7 +115,7 @@ async fn a_holder_that_died_while_the_daemon_was_down_leaves_its_session_suspend
     let holder = client.holder_pid(&id).unwrap();
     daemon.kill();
     kill(holder, "-KILL");
-    wait_until("the Holder to die", || is_zombie(holder)).await;
+    wait_until("the Holder to die", || process_gone(holder)).await;
 
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;

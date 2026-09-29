@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use orch_agent::{GuardHit, GuardKind, mode_name};
-use orch_core::{Phase, PhaseEvent, SessionId, SessionStatus};
+use orch_core::{
+    AgentState, Effect, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus,
+};
+use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
 use orch_protocol::{FromDaemon, GuardKindView, GuardPrompt, SessionView, SubagentView};
 use orch_store::SessionRecord;
@@ -52,8 +55,49 @@ pub(crate) struct Live {
     pub(crate) setup_output: Option<String>,
     pub(crate) last_error: Option<String>,
     pub(crate) panes: PaneSizes,
+    pub(crate) exclusive: bool,
+    pub(crate) comments: CommentCursor,
+    pub(crate) recheck: Recheck,
     holder: Option<HolderLink>,
     generation: u64,
+}
+
+#[derive(Default)]
+pub(crate) struct CommentCursor {
+    seen: Option<u32>,
+    total: u32,
+}
+
+impl CommentCursor {
+    pub(crate) fn opened() -> Self {
+        Self {
+            seen: Some(0),
+            total: 0,
+        }
+    }
+
+    fn unseen(&mut self, total: u32, persisted_unseen: u32, watched: bool) -> u32 {
+        let seen = self
+            .seen
+            .get_or_insert(total.saturating_sub(persisted_unseen));
+        if watched {
+            *seen = total;
+        }
+        self.total = total;
+        total.saturating_sub(*seen)
+    }
+
+    fn mark_seen(&mut self) {
+        if self.seen.is_some() {
+            self.seen = Some(self.total);
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Recheck {
+    pub(crate) running: bool,
+    pub(crate) again: bool,
 }
 
 pub(crate) struct HolderLink {
@@ -112,6 +156,9 @@ impl Live {
             setup_output: None,
             last_error: None,
             panes: PaneSizes::default(),
+            exclusive: false,
+            comments: CommentCursor::default(),
+            recheck: Recheck::default(),
             holder: None,
             generation: 0,
         }
@@ -140,6 +187,11 @@ impl Live {
         self.generation == generation
     }
 
+    pub(crate) fn waits_on_pr(&self) -> bool {
+        self.status.flags().pr.is_some()
+            && matches!(self.status.phase(), Phase::PrOpen | Phase::Suspended)
+    }
+
     pub(crate) fn has_holder(&self) -> bool {
         self.holder.is_some()
     }
@@ -152,6 +204,52 @@ impl Live {
         self.holder
             .as_ref()
             .is_some_and(|link| link.outbox.try_send(message).is_ok())
+    }
+
+    pub(crate) fn update_pr(&mut self, mut pr: PrStatus, comments: u32) -> Vec<Effect> {
+        let unseen = self
+            .status
+            .flags()
+            .pr
+            .as_ref()
+            .map_or(0, |pr| pr.new_comments);
+        pr.new_comments = self
+            .comments
+            .unseen(comments, unseen, self.status.is_watched());
+        self.status.update_pr(pr)
+    }
+
+    fn set_watched(&mut self, watched: bool) {
+        self.status.set_watched(watched);
+        if watched
+            && let Some(pr) = self.status.flags().pr.clone()
+            && pr.new_comments > 0
+        {
+            self.comments.mark_seen();
+            self.status.update_pr(PrStatus {
+                new_comments: 0,
+                ..pr
+            });
+        }
+    }
+
+    pub(crate) fn hand_back(&mut self, prompt: String) {
+        self.record.queued_prompt = Some(prompt);
+        self.deliver_prompt();
+    }
+
+    pub(crate) fn deliver_prompt(&mut self) -> bool {
+        let ready = self.status.agent_state() == Some(AgentState::Idle)
+            && self.has_holder()
+            && !self.exclusive;
+        let Some(prompt) = self.record.queued_prompt.take_if(|_| ready) else {
+            return false;
+        };
+        self.send_to_holder(ToHolder::Paste { text: prompt });
+        self.send_to_holder(ToHolder::Input {
+            bytes: b"\r".to_vec(),
+        });
+        true
     }
 
     pub(crate) fn apply_pane_size(&mut self) {
@@ -226,6 +324,42 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::OtherRef => GuardKindView::OtherRef,
         GuardKind::WorktreeManagement => GuardKindView::WorktreeManagement,
         GuardKind::WriteOutsideWorktree => GuardKindView::WriteOutsideWorktree,
+    }
+}
+
+pub(crate) fn session_worktree(record: &SessionRecord) -> SessionWorktree {
+    SessionWorktree {
+        path: record.worktree.clone(),
+        name: SessionName {
+            slug: record.slug.clone(),
+            branch: record.branch.clone(),
+        },
+        base: record.base.clone(),
+    }
+}
+
+pub(crate) fn gate_message(action: &str, refusal: GateRefusal) -> String {
+    match refusal {
+        GateRefusal::WrongPhase { phase } => format!(
+            "{action} is not possible while the Session is {}",
+            phase_name(phase)
+        ),
+        GateRefusal::AgentBusy { state } => format!(
+            "{action} needs the Agent to be Idle, Exited or Errored; it is {}",
+            state.map_or("not running", agent_state_name)
+        ),
+    }
+}
+
+fn agent_state_name(state: AgentState) -> &'static str {
+    match state {
+        AgentState::Starting => "Starting",
+        AgentState::Working => "Working",
+        AgentState::NeedsInput => "Needs input",
+        AgentState::Idle => "Idle",
+        AgentState::Errored => "Errored",
+        AgentState::Exited => "Exited",
+        AgentState::Unknown => "in an unknown state",
     }
 }
 
@@ -319,7 +453,7 @@ impl State {
             || self
                 .sessions
                 .values()
-                .any(|live| live.has_holder() || live.status.phase() == Phase::PrOpen)
+                .any(|live| live.has_holder() || live.waits_on_pr())
     }
 
     pub(crate) fn next_id(&mut self) -> u64 {
@@ -366,9 +500,9 @@ impl State {
             let Some(live) = self.sessions.get_mut(&id) else {
                 continue;
             };
-            let was_unseen = live.status.flags().unseen;
-            live.status.set_watched(watched);
-            if live.status.flags().unseen != was_unseen {
+            let before = live.status.flags().clone();
+            live.set_watched(watched);
+            if *live.status.flags() != before {
                 self.changed(&id);
             }
         }

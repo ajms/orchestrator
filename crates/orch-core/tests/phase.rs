@@ -150,3 +150,22 @@ fn leaving_a_live_phase_forgets_the_agent_state() {
     status.feed(Observation::Spawned);
     assert!(status.agent_state().is_some());
 }
+
+#[test]
+fn a_closed_pr_can_be_abandoned_to_return_the_session_to_active() {
+    let mut status = session_through(&[SetupSucceeded, OPEN_PR]);
+    assert!(status.transition(PrAbandoned).is_err());
+    assert_eq!(status.phase(), Phase::PrOpen);
+
+    let mut closed = orch_core::PrStatus::opened(42);
+    closed.state = orch_core::PrState::Closed;
+    status.update_pr(closed);
+    status.transition(PrAbandoned).unwrap();
+
+    assert_eq!(status.phase(), Phase::Active);
+    assert_eq!(status.flags().pr, None);
+    assert_eq!(
+        status.transition(Landed).map(|_| status.phase()),
+        Ok(Phase::Landed)
+    );
+}

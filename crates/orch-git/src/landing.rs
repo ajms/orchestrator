@@ -2,6 +2,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::git::{git, head_ref};
+use crate::snapshot::snapshot_commit;
 use crate::{Error, Repo, SessionWorktree};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +94,33 @@ impl Repo {
         Ok(Landed { commit })
     }
 
+    pub fn commit_worktree(
+        &self,
+        worktree: &SessionWorktree,
+        message: &str,
+    ) -> Result<Option<String>, Error> {
+        git(&worktree.path, ["add", "-A"]).run()?;
+        if git(&worktree.path, ["diff", "--cached", "--quiet"]).succeeds() {
+            return Ok(None);
+        }
+        git(&worktree.path, ["commit", "-q", "-m", message]).run()?;
+        git(&worktree.path, ["rev-parse", "HEAD"]).run().map(Some)
+    }
+
+    pub fn remote_has_branch(&self, branch: &str) -> Result<bool, Error> {
+        let listing = self.git(["ls-remote", "--exit-code", "--heads", "origin"]);
+        let command = listing.describe();
+        let output = listing.arg(head_ref(branch)).output()?;
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(2) => Ok(false),
+            _ => Err(Error::Git {
+                command,
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            }),
+        }
+    }
+
     pub fn push(&self, branch: &str) -> Result<(), Error> {
         let branch_ref = head_ref(branch);
         self.git(["push", "-q", "-u", "origin"])
@@ -161,32 +189,6 @@ impl Repo {
             .into()),
         }
     }
-}
-
-fn snapshot_commit(worktree: &Path) -> Result<String, Error> {
-    let scratch =
-        tempfile::tempdir().map_err(|error| Error::io("create temporary index", error))?;
-    let index = scratch.path().join("index");
-    let real_index = git(
-        worktree,
-        ["rev-parse", "--path-format=absolute", "--git-path", "index"],
-    )
-    .run()?;
-    if Path::new(&real_index).exists() {
-        std::fs::copy(&real_index, &index)
-            .map_err(|error| Error::io(format!("copy {real_index}"), error))?;
-    }
-    git(worktree, ["add", "-A"])
-        .env("GIT_INDEX_FILE", &index)
-        .run()?;
-    let tree = git(worktree, ["write-tree"])
-        .env("GIT_INDEX_FILE", &index)
-        .run()?;
-    git(
-        worktree,
-        ["commit-tree", &tree, "-p", "HEAD", "-m", "orch snapshot"],
-    )
-    .run()
 }
 
 fn update_would_clobber_local_changes(

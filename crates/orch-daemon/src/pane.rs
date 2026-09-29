@@ -5,6 +5,7 @@ use orch_core::{Observation, SessionId};
 use orch_holder::{FromHolder, HolderClient, Size, ToHolder, read_frame_async, write_frame_async};
 use orch_protocol::{FromDaemon, OpenPane, ToDaemon};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::mpsc;
 
 use crate::state::{Daemon, PaneId};
 
@@ -46,9 +47,19 @@ pub(crate) async fn serve(
     daemon.pane_activity(&session, pane, Activity::Opened(size));
     let (mut from_holder, mut to_holder) = holder.into_split();
 
+    let (notices, mut notice_queue) = mpsc::unbounded_channel::<FromDaemon>();
     let mut relay_out = tokio::spawn(async move {
         loop {
-            let message = match from_holder.recv().await {
+            let received = tokio::select! {
+                received = from_holder.recv() => received,
+                Some(notice) = notice_queue.recv() => {
+                    if write_frame_async(&mut writer, &notice).await.is_err() {
+                        return;
+                    }
+                    continue;
+                }
+            };
+            let message = match received {
                 Ok(Some(FromHolder::Screen(snapshot))) => FromDaemon::Screen(snapshot),
                 Ok(Some(FromHolder::Output { bytes })) => FromDaemon::Output { bytes },
                 Ok(Some(FromHolder::Resized(size))) => FromDaemon::Resized(size),
@@ -76,6 +87,12 @@ pub(crate) async fn serve(
                 ToDaemon::Resize(size) => (None, Activity::Resized(size)),
                 _ => continue,
             };
+            if forward.is_some() && relay_daemon.is_being_ended(&relay_session) {
+                let _ = notices.send(FromDaemon::InputDropped {
+                    reason: "the Session is being Landed or Discarded; input is ignored until that finishes".into(),
+                });
+                continue;
+            }
             if let Some(forward) = forward
                 && write_frame_async(&mut to_holder, &forward).await.is_err()
             {
@@ -92,6 +109,13 @@ pub(crate) async fn serve(
 }
 
 impl Daemon {
+    fn is_being_ended(&self, id: &SessionId) -> bool {
+        self.lock()
+            .sessions
+            .get(id)
+            .is_some_and(|live| live.exclusive)
+    }
+
     fn pane_activity(&self, id: &SessionId, pane: PaneId, activity: Activity) {
         let mut state = self.lock();
         let Some(live) = state.sessions.get_mut(id) else {

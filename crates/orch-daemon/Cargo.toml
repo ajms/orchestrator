@@ -13,6 +13,8 @@ orch-holder.workspace = true
 orch-protocol = { path = "../orch-protocol" }
 orch-store = { path = "../orch-store" }
 getrandom = "0.3"
+serde.workspace = true
+serde_json.workspace = true
 nix = { version = "0.30", features = ["fs", "signal", "process"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros", "process", "signal"] }
 uuid = "1"

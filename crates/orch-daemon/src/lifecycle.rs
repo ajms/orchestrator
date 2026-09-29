@@ -13,9 +13,9 @@ use orch_store::{NewSession, RepoRoot, SessionRecord};
 
 use crate::agents::{Adapter, adapter_for, default_adapter, default_program};
 use crate::holder::Attach;
-use crate::state::{Daemon, Live};
+use crate::state::{Daemon, Live, gate_message};
 
-const HOLDER_EXIT_WAIT: Duration = Duration::from_secs(5);
+pub(crate) const HOLDER_EXIT_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const PROMPT_FILE: &str = "prompt";
 
 pub(crate) struct Busy(Arc<Daemon>);
@@ -33,13 +33,26 @@ impl Drop for Busy {
     }
 }
 
+pub(crate) async fn with_git<T, E>(
+    repo: PathBuf,
+    work: impl FnOnce(&orch_git::Repo) -> Result<T, E> + Send + 'static,
+) -> Result<Result<T, E>, RequestError>
+where
+    T: Send + 'static,
+    E: From<orch_git::Error> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || work(&orch_git::Repo::open(&repo)?))
+        .await
+        .map_err(refused)
+}
+
 pub(crate) fn refused(err: impl std::fmt::Display) -> RequestError {
     RequestError::Refused {
         message: err.to_string(),
     }
 }
 
-fn untrusted(config: &RepoConfig) -> RequestError {
+pub(crate) fn untrusted(config: &RepoConfig) -> RequestError {
     match config.trust_request() {
         Some(request) => RequestError::Untrusted {
             hash: request.hash.as_str().into(),
@@ -298,6 +311,49 @@ impl Daemon {
             self.release_holder(link, HOLDER_EXIT_WAIT).await;
         }
         self.launch_agent(id, true).await;
+        Ok(Reply::Done)
+    }
+
+    pub(crate) async fn set_preset(
+        self: &Arc<Self>,
+        id: &SessionId,
+        name: String,
+    ) -> Result<Reply, RequestError> {
+        let _busy = Busy::new(self);
+        let (_claim, _, repo) = self.claim(id, |live| {
+            live.status
+                .check_preset_change()
+                .map_err(|refusal| gate_message("Changing the Preset", refusal))
+        })?;
+        let config = self.repo_config(&repo).await?;
+        let preset = select_preset(&config, Some(&name))?;
+        let mut restart = false;
+        let mut replaced = None;
+        self.update(id, |live| {
+            live.record.preset = preset.name;
+            live.record.last_mode = None;
+            live.status.forget_permission_mode();
+            restart = live.status.phase().is_live();
+            if restart {
+                replaced = live.replace_holder(None).1;
+                live.last_error = None;
+            }
+            Ok(())
+        })?;
+        if let Some(link) = replaced {
+            self.release_holder(link, HOLDER_EXIT_WAIT).await;
+        }
+        if restart {
+            self.launch_agent(id, true).await;
+        }
+        Ok(Reply::Done)
+    }
+
+    pub(crate) fn set_muted(&self, id: &SessionId, muted: bool) -> Result<Reply, RequestError> {
+        self.update(id, |live| {
+            live.status.set_muted(muted);
+            Ok(())
+        })?;
         Ok(Reply::Done)
     }
 

@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use orch_agent::{GuardAnswer, GuardContext, GuardDecision, evaluate_guard};
-use orch_core::{AgentEvent, AgentState, ConversationId, Observation, PhaseEvent, SessionId};
+use orch_core::{
+    AgentEvent, AgentState, ConversationId, Effect, Observation, PhaseEvent, SessionId,
+};
 use orch_holder::{
     AgentExit, AgentStatus, FromHolder, HolderClient, HolderEvent, HolderReader, ToHolder,
     socket_path, write_frame_async,
@@ -39,41 +41,49 @@ impl Daemon {
     pub(crate) async fn attach(self: &Arc<Self>, id: &SessionId, how: Attach) -> io::Result<()> {
         let mut client = HolderClient::connect(&self.holder_socket(id)).await?;
         let hello = client.attach().await?;
-        let (reader, writer) = client.into_split();
+        let (reader, mut writer) = client.into_split();
         let (outbox, inbox) = mpsc::channel(HOLDER_QUEUE);
         let (closed, closed_watch) = watch::channel(false);
         let generation = {
             let mut state = self.lock();
-            let live = state
-                .sessions
-                .get_mut(id)
-                .ok_or_else(|| io::Error::other("unknown Session"))?;
-            let link = HolderLink {
-                outbox,
-                pid: hello.holder_pid,
-                closed: closed_watch,
-            };
-            let (generation, _) = live.replace_holder(Some(link));
-            let running = hello.agent == AgentStatus::Running;
-            let now = Instant::now();
-            match (how, live.record.agent_state) {
-                (Attach::Reattach { .. }, _) => {}
-                (Attach::Adopt, Some(persisted)) => live.status.restore_agent(persisted, running),
-                _ => {
-                    live.status.observe(Observation::Spawned, now);
+            match state.sessions.get_mut(id) {
+                Some(live) if !live.status.phase().is_terminal() => {
+                    let link = HolderLink {
+                        outbox,
+                        pid: hello.holder_pid,
+                        closed: closed_watch,
+                    };
+                    let (generation, _) = live.replace_holder(Some(link));
+                    let running = hello.agent == AgentStatus::Running;
+                    let now = Instant::now();
+                    match (how, live.record.agent_state) {
+                        (Attach::Reattach { .. }, _) => {}
+                        (Attach::Adopt, Some(persisted)) => {
+                            live.status.restore_agent(persisted, running)
+                        }
+                        _ => {
+                            live.status.observe(Observation::Spawned, now);
+                        }
+                    }
+                    if let AgentStatus::Exited(exit) = &hello.agent
+                        && !matches!(
+                            live.status.agent_state(),
+                            Some(AgentState::Exited | AgentState::Errored)
+                        )
+                    {
+                        live.status.observe(exit_observation(exit), now);
+                    }
+                    live.apply_pane_size();
+                    live.deliver_prompt();
+                    state.changed(id);
+                    Some(generation)
                 }
+                _ => None,
             }
-            if let AgentStatus::Exited(exit) = &hello.agent
-                && !matches!(
-                    live.status.agent_state(),
-                    Some(AgentState::Exited | AgentState::Errored)
-                )
-            {
-                live.status.observe(exit_observation(exit), now);
-            }
-            live.apply_pane_size();
-            state.changed(id);
-            generation
+        };
+        let Some(generation) = generation else {
+            let _ = write_frame_async(&mut writer, &ToHolder::Shutdown).await;
+            return Err(io::Error::other("the Session has ended"));
         };
         let last_seq = match how {
             Attach::Reattach { last_seq } => last_seq,
@@ -99,7 +109,10 @@ impl Daemon {
             match message {
                 FromHolder::Event { seq, event } if seq > last_seq => {
                     last_seq = seq;
-                    self.on_holder_event(&id, generation, event, seq);
+                    let effects = self.on_holder_event(&id, generation, event, seq);
+                    if effects.contains(&Effect::RecheckRebase) {
+                        self.request_recheck(&id);
+                    }
                 }
                 FromHolder::Superseded => break,
                 _ => {}
@@ -154,37 +167,43 @@ impl Daemon {
         }
     }
 
-    fn on_holder_event(&self, id: &SessionId, generation: u64, event: HolderEvent, seq: u64) {
+    fn on_holder_event(
+        &self,
+        id: &SessionId,
+        generation: u64,
+        event: HolderEvent,
+        seq: u64,
+    ) -> Vec<Effect> {
         let mut state = self.lock();
         let Some(live) = state.sessions.get_mut(id) else {
-            return;
+            return Vec::new();
         };
         if !live.is_current(generation) {
-            return;
+            return Vec::new();
         }
         let now = Instant::now();
         let mut conversations = Vec::new();
         let mut usage = Vec::new();
-        match event {
-            HolderEvent::Spawned { .. } => {
-                live.status.observe(Observation::Spawned, now);
-            }
+        let effects = match event {
+            HolderEvent::Spawned { .. } => live.status.observe(Observation::Spawned, now),
             HolderEvent::Exited(exit) => {
                 live.prompts.clear();
-                live.status.observe(exit_observation(&exit), now);
+                live.status.observe(exit_observation(&exit), now)
             }
             HolderEvent::Hook { payload, guard } => {
                 let events = live.adapter.map_hook(&payload).unwrap_or_default();
-                observe(live, &events, now, &mut conversations, &mut usage);
+                let effects = observe(live, &events, now, &mut conversations, &mut usage);
                 if let Some(guard) = guard {
                     decide_guard(live, guard, &events, now);
                 }
+                effects
             }
             HolderEvent::Tap { payload } => {
                 let events = live.adapter.map_tap(&payload).unwrap_or_default();
-                observe(live, &events, now, &mut conversations, &mut usage);
+                observe(live, &events, now, &mut conversations, &mut usage)
             }
-        }
+        };
+        live.deliver_prompt();
         let first_conversation = live.record.conversations.is_empty() && !conversations.is_empty();
         for conversation in &conversations {
             if live.record.latest_conversation() != Some(conversation) {
@@ -211,6 +230,7 @@ impl Daemon {
                 let _ = ack.try_send(ToHolder::Ack { through: seq });
             }
         });
+        effects
     }
 
     pub(crate) fn answer_guard(
@@ -257,15 +277,17 @@ fn observe(
     now: Instant,
     conversations: &mut Vec<ConversationId>,
     usage: &mut Vec<orch_core::UsageSample>,
-) {
+) -> Vec<Effect> {
+    let mut effects = Vec::new();
     for event in events {
         match event {
             AgentEvent::ConversationChanged { id } => conversations.push(id.clone()),
             AgentEvent::UsageSample(sample) => usage.push(sample.clone()),
             _ => {}
         }
-        live.status.observe(Observation::Agent(event.clone()), now);
+        effects.extend(live.status.observe(Observation::Agent(event.clone()), now));
     }
+    effects
 }
 
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {

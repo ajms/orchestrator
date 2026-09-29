@@ -1,12 +1,17 @@
 mod agents;
 mod client;
+mod discard;
+mod draft;
 mod holder;
+mod landing;
 mod lifecycle;
 mod outbox;
 mod pane;
+mod pr;
 mod setup;
 mod state;
 mod store;
+mod subprocess;
 
 use std::fs::File;
 use std::io::{self, Write};
@@ -34,10 +39,12 @@ pub struct DaemonConfig {
     pub loader: ConfigLoader,
     pub orch_program: PathBuf,
     pub idle_timeout: Duration,
+    pub pr_poll_interval: Duration,
 }
 
 impl DaemonConfig {
     pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+    pub const DEFAULT_PR_POLL: Duration = Duration::from_secs(60);
 }
 
 pub fn run(config: DaemonConfig) -> io::Result<()> {
@@ -96,6 +103,7 @@ async fn serve(daemon: Arc<Daemon>, listener: UnixListener) -> io::Result<()> {
     let mut terminate = signal(SignalKind::terminate())?;
     tokio::spawn(daemon.clone().watch_idle());
     tokio::spawn(daemon.clone().tick_stalled());
+    tokio::spawn(daemon.clone().poll_prs());
     loop {
         tokio::select! {
             accepted = listener.accept() => {

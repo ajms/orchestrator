@@ -4,6 +4,7 @@ mod landing;
 mod leftovers;
 mod removal;
 mod repo;
+mod review;
 mod slug;
 mod stacking;
 mod worktree;

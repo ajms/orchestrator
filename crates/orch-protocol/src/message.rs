@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -66,6 +66,54 @@ pub enum Request {
         session: Option<SessionId>,
         focused: bool,
     },
+    Draft {
+        session: SessionId,
+        mode: LandingMode,
+    },
+    Land {
+        session: SessionId,
+        landing: Landing,
+    },
+    RefreshPr {
+        session: SessionId,
+    },
+    AbandonPr {
+        session: SessionId,
+    },
+    DiscardPreview {
+        session: SessionId,
+    },
+    Discard {
+        session: SessionId,
+    },
+    SetPreset {
+        session: SessionId,
+        preset: String,
+    },
+    SetMuted {
+        session: SessionId,
+        muted: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LandingMode {
+    Squash,
+    Pr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum Landing {
+    Squash { message: String },
+    Pr { title: String, body: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitView {
+    pub id: String,
+    pub subject: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,13 +174,36 @@ pub enum FromDaemon {
     PaneClosed {
         reason: String,
     },
+    InputDropped {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "reply", rename_all = "snake_case")]
 pub enum Reply {
-    Created { session: SessionId },
+    Created {
+        session: SessionId,
+    },
     Done,
+    Drafted {
+        title: String,
+        body: String,
+    },
+    Landed {
+        commit: String,
+        #[serde(default)]
+        warning: Option<String>,
+    },
+    PrOpened {
+        number: u64,
+        #[serde(default)]
+        committed_changes: bool,
+    },
+    DiscardPreview {
+        uncommitted: Vec<String>,
+        unlanded: Vec<CommitView>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +212,7 @@ pub enum RequestError {
     Untrusted { hash: String, items: Vec<String> },
     UnknownSession,
     Refused { message: String },
+    Conflict { paths: Vec<String> },
 }
 
 impl std::fmt::Display for RequestError {
@@ -151,6 +223,7 @@ impl std::fmt::Display for RequestError {
             }
             Self::UnknownSession => f.write_str("no such Session"),
             Self::Refused { message } => f.write_str(message),
+            Self::Conflict { paths } => write!(f, "conflict in: {}", paths.join(", ")),
         }
     }
 }

@@ -98,6 +98,26 @@ async fn handle(
             choice,
         } => daemon.answer_guard(&session, guard, choice),
         Request::SetGuards { session, enabled } => daemon.set_guards(&session, enabled),
+        Request::Draft { session, mode } => daemon.draft(&session, mode).await,
+        Request::Land { session, landing } => {
+            let daemon = daemon.clone();
+            detached(async move { daemon.land(&session, landing).await }).await
+        }
+        Request::RefreshPr { session } => {
+            let daemon = daemon.clone();
+            detached(async move { daemon.refresh_pr(&session).await }).await
+        }
+        Request::AbandonPr { session } => daemon.abandon_pr(&session),
+        Request::DiscardPreview { session } => daemon.discard_preview(&session).await,
+        Request::Discard { session } => {
+            let daemon = daemon.clone();
+            detached(async move { daemon.discard(&session).await }).await
+        }
+        Request::SetPreset { session, preset } => {
+            let daemon = daemon.clone();
+            detached(async move { daemon.set_preset(&session, preset).await }).await
+        }
+        Request::SetMuted { session, muted } => daemon.set_muted(&session, muted),
     }
 }
 
