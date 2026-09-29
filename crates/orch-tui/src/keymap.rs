@@ -3,7 +3,6 @@ use orch_protocol::{AgentStateView, PhaseView};
 use orch_term::keys::{encode_key, is_ctrl_backslash};
 
 use crate::app::{App, Call, Focus, Mode, Prefix, Selection};
-use crate::clipboard::osc52;
 use crate::event::{Effect, ReviewPurpose};
 use crate::guard::GuardId;
 use crate::reconcile::ReconcileAction;
@@ -213,7 +212,7 @@ fn visual(app: &mut App, mut selection: Selection, key: KeyEvent) {
         KeyCode::Char('y') => {
             let text = selected_text(pane, selection, last_col);
             let lines = text.lines().count();
-            app.push(Call::Local(Effect::WriteTerminal(osc52(&text))));
+            app.copy(&text);
             app.message = Some(format!("yanked {lines} line(s)"));
             app.mode = Mode::Normal;
             return;

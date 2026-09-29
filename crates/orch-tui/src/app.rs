@@ -9,6 +9,7 @@ use orch_protocol::{
     UsageReport,
 };
 
+use crate::clipboard::copy_effects;
 pub use crate::config::TuiConfig;
 use crate::discard::{DiscardConfirm, DiscardTarget};
 use crate::event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};
@@ -571,6 +572,12 @@ impl App {
 
     pub fn push(&mut self, call: Call) {
         self.calls.push(call);
+    }
+
+    pub fn copy(&mut self, text: &str) {
+        for effect in copy_effects(&self.config.display, text) {
+            self.push(Call::Local(effect));
+        }
     }
 
     pub fn report(&mut self, request: Request) {

@@ -84,6 +84,11 @@ pub enum Effect {
     Quit,
     RestartDaemon,
     WriteTerminal(Vec<u8>),
+    CopyCommand {
+        program: String,
+        args: Vec<String>,
+        text: String,
+    },
     EditText {
         text: String,
     },

@@ -20,7 +20,7 @@ mod runtime;
 mod sessions;
 mod socket;
 
-pub use config::TuiConfig;
+pub use config::{Display, TuiConfig};
 pub use event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};
 pub use git::load_review;
 pub use link::{DaemonLink, RequestId, Tui};

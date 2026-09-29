@@ -1,6 +1,6 @@
 use std::io::{self, Stdout, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc as std_mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -62,6 +62,18 @@ async fn event_loop(
             match effect {
                 Effect::Quit => return Ok(()),
                 Effect::WriteTerminal(bytes) => screen.write(&bytes)?,
+                Effect::CopyCommand {
+                    program,
+                    args,
+                    text,
+                } => {
+                    let events = events.clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(err) = copy(&program, &args, &text) {
+                            let _ = events.send(Event::Notice(format!("copy: {err}")));
+                        }
+                    });
+                }
                 Effect::EditText { text } => {
                     let result = screen
                         .suspend(input, move || edit(&text))
@@ -165,6 +177,26 @@ fn edit(text: &str) -> Result<String, EditorError> {
         return Err(EditorError::Exited { editor, status });
     }
     Ok(std::fs::read_to_string(file.path())?)
+}
+
+fn copy(program: &str, args: &[String], text: &str) -> io::Result<()> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| io::Error::new(err.kind(), format!("{program}: {err}")))?;
+    let written = child
+        .stdin
+        .take()
+        .map_or(Ok(()), |mut stdin| stdin.write_all(text.as_bytes()));
+    let status = child.wait()?;
+    written?;
+    match status.success() {
+        true => Ok(()),
+        false => Err(io::Error::other(format!("{program} exited with {status}"))),
+    }
 }
 
 fn shell(command: &str, cwd: &Path, env: &[(String, String)]) -> io::Result<()> {

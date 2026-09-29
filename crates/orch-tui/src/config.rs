@@ -11,6 +11,13 @@ pub struct TuiConfig {
     pub presets: Presets,
     pub branch_prefix: String,
     pub review_command: String,
+    pub display: Display,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Display {
+    pub wayland: Option<String>,
+    pub x11: Option<String>,
 }
 
 impl Default for TuiConfig {
@@ -21,6 +28,7 @@ impl Default for TuiConfig {
             presets: Presets::default(),
             branch_prefix: orch_git::DEFAULT_BRANCH_PREFIX.into(),
             review_command: DEFAULT_REVIEW_COMMAND.into(),
+            display: Display::default(),
         }
     }
 }

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use orch_holder::default_runtime_dir;
-use orch_tui::{Options, TuiConfig};
+use orch_tui::{Display, Options, TuiConfig};
 
 use crate::client::{self, ClientError};
 
@@ -31,7 +31,10 @@ fn start() -> Result<(), String> {
     let options = Options {
         runtime_dir: default_runtime_dir(),
         orch_program,
-        config: tui_config(cwd.as_deref()),
+        config: TuiConfig {
+            display: display_from(|key| std::env::var(key).ok()),
+            ..tui_config(cwd.as_deref())
+        },
     };
     client::block_on(orch_tui::run(options))
         .map_err(|err: ClientError| err.to_string())?
@@ -45,6 +48,14 @@ pub fn tui_config(cwd: Option<&Path>) -> TuiConfig {
     TuiConfig {
         cwd_repo,
         ..TuiConfig::default()
+    }
+}
+
+fn display_from(var: impl Fn(&str) -> Option<String>) -> Display {
+    let set = |key| var(key).filter(|value| !value.is_empty());
+    Display {
+        wayland: set("WAYLAND_DISPLAY"),
+        x11: set("DISPLAY"),
     }
 }
 
@@ -124,6 +135,34 @@ mod tests {
         let config = tui_config(Some(&worktree));
 
         assert_eq!(config.cwd_repo, Some(repo));
+    }
+
+    fn env<'a>(vars: &'a [(&str, &str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        |key| {
+            vars.iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| value.to_string())
+        }
+    }
+
+    #[test]
+    fn the_display_comes_from_wayland_display_and_display() {
+        let display = display_from(env(&[("WAYLAND_DISPLAY", "wayland-1"), ("DISPLAY", ":0")]));
+
+        assert_eq!(
+            display,
+            Display {
+                wayland: Some("wayland-1".into()),
+                x11: Some(":0".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn an_empty_display_variable_counts_as_unset() {
+        let display = display_from(env(&[("WAYLAND_DISPLAY", ""), ("DISPLAY", "")]));
+
+        assert_eq!(display, Display::default());
     }
 
     #[test]

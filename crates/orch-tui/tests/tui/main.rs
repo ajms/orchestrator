@@ -1,4 +1,5 @@
 mod attention;
+mod clipboard;
 mod commands;
 mod common;
 mod daemon_events;
