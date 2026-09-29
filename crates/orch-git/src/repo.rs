@@ -54,6 +54,22 @@ impl Repo {
         self.git(["symbolic-ref", "--short", "HEAD"]).run()
     }
 
+    pub fn head_branch(&self) -> Result<Option<String>, Error> {
+        let command = self.git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+        let description = command.describe();
+        let output = command.output()?;
+        match output.status.code() {
+            Some(0) => Ok(Some(
+                String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            )),
+            Some(1) => Ok(None),
+            _ => Err(Error::Git {
+                command: description,
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            }),
+        }
+    }
+
     pub fn branch_exists(&self, name: &str) -> bool {
         self.git(["show-ref", "--verify", "--quiet", &head_ref(name)])
             .succeeds()

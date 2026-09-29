@@ -151,3 +151,24 @@ fn git_older_than_2_40_is_rejected_with_a_clear_error() {
         .is_ok()
     );
 }
+
+#[test]
+fn head_branch_is_the_main_checkouts_current_branch() {
+    let fixture = Fixture::new();
+    assert_eq!(
+        fixture.repo().head_branch().unwrap().as_deref(),
+        Some("main")
+    );
+    git(&fixture.root, &["switch", "-q", "-c", "develop"]);
+    assert_eq!(
+        fixture.repo().head_branch().unwrap().as_deref(),
+        Some("develop")
+    );
+}
+
+#[test]
+fn head_branch_of_a_detached_main_checkout_is_none() {
+    let fixture = Fixture::new();
+    git(&fixture.root, &["switch", "-q", "--detach"]);
+    assert_eq!(fixture.repo().head_branch().unwrap(), None);
+}
