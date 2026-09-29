@@ -3,6 +3,7 @@ mod event;
 mod flags;
 mod gate;
 mod phase;
+mod stacking;
 mod status;
 mod subagent;
 
@@ -16,5 +17,6 @@ pub use flags::{
 };
 pub use gate::{DiscardPlan, GateRefusal};
 pub use phase::{InvalidTransition, Phase, PhaseEvent};
+pub use stacking::{Retarget, retarget};
 pub use status::SessionStatus;
 pub use subagent::Subagent;
