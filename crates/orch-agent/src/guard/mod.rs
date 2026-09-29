@@ -45,6 +45,7 @@ pub struct GuardContext<'a> {
     pub base_branch: &'a str,
     pub enabled: bool,
     pub allowed: &'a [GuardHit],
+    pub agent_dirs: &'a [PathBuf],
 }
 
 pub fn evaluate_guard(
@@ -93,6 +94,7 @@ fn other_ref(target: &str) -> GuardHit {
 
 struct GuardScope<'a> {
     worktree: PathBuf,
+    agent_dirs: Vec<PathBuf>,
     branch: &'a str,
     base_branch: &'a str,
 }
@@ -101,13 +103,21 @@ impl<'a> GuardScope<'a> {
     fn new(context: &GuardContext<'a>) -> Self {
         Self {
             worktree: paths::resolve(Path::new("/"), &context.worktree.to_string_lossy()),
+            agent_dirs: context
+                .agent_dirs
+                .iter()
+                .map(|dir| paths::resolve(Path::new("/"), &dir.to_string_lossy()))
+                .collect(),
             branch: context.branch,
             base_branch: context.base_branch,
         }
     }
 
     fn outside(&self, path: &Path) -> bool {
-        !path.starts_with(&self.worktree) && !paths::is_harmless(path)
+        !path.starts_with(&self.worktree)
+            && !self.agent_dirs.iter().any(|dir| path.starts_with(dir))
+            && !paths::is_harmless(path)
+            && !paths::is_temp(path)
     }
 
     fn write(&self, cwd: &Path, raw: &str) -> Option<GuardHit> {

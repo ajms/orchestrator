@@ -296,6 +296,7 @@ fn observe(
 
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
     let check = guard_check(live.adapter.capabilities(), events);
+    let agent_dirs = live.adapter.agent_dirs(&orch_config::xdg::process_env);
     let decision = check.map(|(tool, input_json, cwd)| {
         let context = GuardContext {
             worktree: &live.record.worktree,
@@ -303,6 +304,7 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
             base_branch: &live.record.base,
             enabled: live.record.guards_enabled,
             allowed: &live.record.guard_allowances,
+            agent_dirs: &agent_dirs,
         };
         let decision = evaluate_guard(tool, input_json, cwd.as_deref().map(Path::new), &context);
         (tool.clone(), decision)

@@ -19,13 +19,18 @@ impl ClaudeCode {
     }
 }
 
-fn settings_files(cwd: &Path, lookup: impl Fn(&str) -> Option<String>) -> Vec<PathBuf> {
-    let var = |key| lookup(key).filter(|value| !value.is_empty());
-    let managed = var(MANAGED_SETTINGS_ENV).map_or_else(|| MANAGED_SETTINGS.into(), PathBuf::from);
-    let user = var("CLAUDE_CONFIG_DIR")
+pub(super) fn config_dir(lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let var = |key| lookup(key).filter(|value: &String| !value.is_empty());
+    var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .or_else(|| var("HOME").map(|home| Path::new(&home).join(".claude")))
-        .map(|dir| dir.join("settings.json"));
+}
+
+fn settings_files(cwd: &Path, lookup: impl Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    let managed = lookup(MANAGED_SETTINGS_ENV)
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| MANAGED_SETTINGS.into(), PathBuf::from);
+    let user = config_dir(&lookup).map(|dir| dir.join("settings.json"));
     [
         Some(managed),
         Some(cwd.join(".claude/settings.local.json")),

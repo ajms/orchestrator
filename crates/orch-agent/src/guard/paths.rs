@@ -18,6 +18,13 @@ pub(super) fn is_harmless(path: &Path) -> bool {
         .any(|target| path == Path::new(target))
 }
 
+pub(super) fn is_temp(path: &Path) -> bool {
+    [PathBuf::from("/tmp"), std::env::temp_dir()]
+        .iter()
+        .map(|root| resolve(Path::new("/"), &root.to_string_lossy()))
+        .any(|root| path.starts_with(root))
+}
+
 fn normalize(path: &Path) -> PathBuf {
     let mut normal = PathBuf::new();
     for component in path.components() {
