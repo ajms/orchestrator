@@ -1,0 +1,6 @@
+[package]
+name = "orch-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
