@@ -30,8 +30,8 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
         Some(pane) => {
             let inner = block.inner(area);
             frame.render_widget(PseudoTerminal::new(pane.screen()).block(block), area);
-            if let Mode::Visual(selection) = &app.mode {
-                highlight(frame, inner, selection, pane);
+            if let Some(selection) = shown_selection(app) {
+                highlight(frame, inner, &selection, pane);
             }
         }
         None => {
@@ -46,6 +46,17 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
                 area,
             );
         }
+    }
+}
+
+fn shown_selection(app: &App) -> Option<Selection> {
+    match &app.mode {
+        Mode::Visual(selection) => Some(*selection),
+        _ => app.pane_selection.span().map(|(anchor, cursor)| Selection {
+            linewise: false,
+            anchor,
+            cursor,
+        }),
     }
 }
 

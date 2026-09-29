@@ -14,6 +14,7 @@ mod reconcile;
 mod repo_settings;
 mod review;
 mod scroll;
+mod selection;
 mod sidebar;
 mod socket_link;
 mod statusline;

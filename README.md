@@ -78,6 +78,8 @@ The TUI is modal, like nvim's `:terminal`. In **Insert** mode every key except `
 
 The mouse works the same in Insert and Normal mode and never switches between them. When the Agent asks for the mouse (Claude Code's fullscreen renderer does), clicks, drags, the wheel and motion over the Session pane go to the Agent, so its own selection, copy, scrolling and links work as in a plain terminal. A drag that starts in the pane stays with the pane until you release, even if it wanders onto the sidebar. Hold Shift while dragging to get your terminal's native selection instead; it spans the whole window, sidebar included.
 
+Otherwise the pane has its own selection. Drag to select; dragging past the top or bottom edge scrolls the history. The selection is copied to the clipboard and PRIMARY when you release. Double-click selects a word, triple-click a line. The wheel scrolls the history.
+
 Commands:
 
 - `:new`

@@ -1,9 +1,11 @@
-use crossterm::event::{MouseEvent, MouseEventKind};
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use vt100::MouseProtocolMode;
 
-use crate::app::{App, Call};
+use crate::app::{App, Call, Mode};
 use crate::passthrough;
+
+const WHEEL_LINES: isize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Region {
@@ -22,7 +24,7 @@ pub(crate) struct PanePoint {
 
 pub(crate) fn handle(app: &mut App, event: MouseEvent) {
     if overlaid(app) {
-        app.gesture = None;
+        app.end_gesture();
         return;
     }
     match owner(app, event) {
@@ -94,7 +96,48 @@ fn clamped(body: Rect, event: MouseEvent) -> PanePoint {
     }
 }
 
-fn pane_selection(_app: &mut App, _event: MouseEvent, _point: PanePoint) {}
+fn pane_selection(app: &mut App, event: MouseEvent, point: PanePoint) {
+    let row = i32::from(event.row) - i32::from(app.areas().pane_body().y);
+    let now = (app.clock)();
+    if app.shown_pane().is_none() {
+        return;
+    }
+    let (Some(pane), selector) = (app.pane.as_mut(), &mut app.pane_selection) else {
+        return;
+    };
+    match event.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if matches!(app.mode, Mode::Visual(_)) {
+                app.mode = Mode::Normal;
+            }
+            selector.press(pane, point.col, row, now);
+        }
+        MouseEventKind::Drag(MouseButton::Left) if app.gesture.is_some() => {
+            selector.extend(pane, point.col, row)
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            if let Some(text) = selector.release(pane) {
+                app.copy(&text);
+            }
+        }
+        MouseEventKind::ScrollUp => pane.scroll_by(WHEEL_LINES),
+        MouseEventKind::ScrollDown => pane.scroll_by(-WHEEL_LINES),
+        _ => {}
+    }
+}
+
+pub(crate) fn auto_scrolling(app: &App) -> bool {
+    app.gesture == Some(Region::Pane) && app.pane_selection.auto_scrolling()
+}
+
+pub(crate) fn tick(app: &mut App) {
+    if !auto_scrolling(app) {
+        return;
+    }
+    if let Some(pane) = app.pane.as_mut() {
+        app.pane_selection.tick(pane);
+    }
+}
 
 fn pane_links(_app: &mut App, _event: MouseEvent, _point: PanePoint) {}
 

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
@@ -22,6 +23,7 @@ use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
 use crate::review::ReviewView;
+use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
 
 pub(crate) const NO_SESSION: &str = "no Session selected";
@@ -176,6 +178,8 @@ pub(crate) struct App {
     pub reconcile_report: ReconcileReport,
     pub mismatch: Option<String>,
     pub gesture: Option<Region>,
+    pub pane_selection: Selector,
+    pub clock: Box<dyn Fn() -> Instant>,
     size: Size,
     guards: Guards,
     select_when_listed: Option<SessionId>,
@@ -207,6 +211,8 @@ impl App {
             reconcile_report: ReconcileReport::default(),
             mismatch: None,
             gesture: None,
+            pane_selection: Selector::default(),
+            clock: Box::new(Instant::now),
             size,
             guards: Guards::default(),
             select_when_listed: None,
@@ -234,13 +240,14 @@ impl App {
             } => self.review_loaded(session, purpose, result),
             Event::VersionMismatch { message } => self.mismatch = Some(message),
             Event::Notice(text) => self.message = Some(text),
+            Event::Tick => crate::mouse::tick(self),
             Event::Disconnected { reason } => {
                 self.message = Some(format!("lost the Daemon: {reason}"));
             }
         }
         self.tell_focus();
         if self.calls.iter().any(Call::suspends) {
-            self.gesture = None;
+            self.end_gesture();
         }
         std::mem::take(&mut self.calls)
     }
@@ -406,8 +413,14 @@ impl App {
             return;
         };
         match message {
-            FromDaemon::Screen(snapshot) => mirror.restore(&snapshot),
-            FromDaemon::Output { bytes } => mirror.output(&bytes),
+            FromDaemon::Screen(snapshot) => {
+                mirror.restore(&snapshot);
+                self.pane_selection.clear();
+            }
+            FromDaemon::Output { bytes } => match mirror.output(&bytes) {
+                Some(grown) => self.pane_selection.shift(grown),
+                None => self.pane_selection.clear(),
+            },
             FromDaemon::Resized(size) => mirror.resized(size),
             FromDaemon::InputDropped { reason } => {
                 self.message = Some(format!("input not sent: {reason}"));
@@ -440,7 +453,7 @@ impl App {
     fn terminal_focus(&mut self, focused: bool) {
         self.terminal_focused = focused;
         if !focused {
-            self.gesture = None;
+            self.end_gesture();
         }
     }
 
@@ -623,6 +636,11 @@ impl App {
             self.reveal_guards();
         }
         self.follow_selection();
+    }
+
+    pub fn end_gesture(&mut self) {
+        self.gesture = None;
+        self.pane_selection.let_go();
     }
 
     pub fn push(&mut self, call: Call) {
@@ -913,6 +931,7 @@ impl App {
         let Some((session, holder_pid)) = wanted else {
             return;
         };
+        self.pane_selection.clear();
         self.next_pane += 1;
         let id = PaneId(self.next_pane);
         let size = self.pane_size();

@@ -187,6 +187,7 @@ fn start_visual(app: &mut App, linewise: bool) {
         return;
     };
     let cursor = pane.cursor_line();
+    app.pane_selection.clear();
     app.focus = Focus::Pane;
     app.mode = Mode::Visual(Selection {
         linewise,

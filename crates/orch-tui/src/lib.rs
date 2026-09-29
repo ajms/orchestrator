@@ -19,6 +19,7 @@ mod reconcile;
 mod render;
 mod review;
 mod runtime;
+mod selection;
 mod sessions;
 mod socket;
 

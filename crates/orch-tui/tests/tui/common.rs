@@ -1,5 +1,8 @@
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{
     Event as TermEvent, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -149,6 +152,18 @@ pub struct Harness {
     pub tui: Tui<FakeDaemon>,
     pub terminal: Terminal<TestBackend>,
     pub effects: Vec<Effect>,
+    clock: Rc<Cell<Instant>>,
+}
+
+fn tui_with_clock(config: TuiConfig, daemon: FakeDaemon) -> (Tui<FakeDaemon>, Rc<Cell<Instant>>) {
+    let size = Size {
+        rows: HEIGHT,
+        cols: WIDTH,
+    };
+    let clock = Rc::new(Cell::new(Instant::now()));
+    let now = clock.clone();
+    let tui = Tui::new(config, daemon, size).with_clock(move || now.get());
+    (tui, clock)
 }
 
 impl Harness {
@@ -169,26 +184,22 @@ impl Harness {
     }
 
     pub fn unfocused() -> Self {
-        let size = Size {
-            rows: HEIGHT,
-            cols: WIDTH,
-        };
+        let (tui, clock) = tui_with_clock(TuiConfig::default(), FakeDaemon::default());
         Self {
-            tui: Tui::new(TuiConfig::default(), FakeDaemon::default(), size),
+            tui,
             terminal: Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap(),
             effects: Vec::new(),
+            clock,
         }
     }
 
     fn build(config: TuiConfig, daemon: FakeDaemon) -> Self {
-        let size = Size {
-            rows: HEIGHT,
-            cols: WIDTH,
-        };
+        let (tui, clock) = tui_with_clock(config, daemon);
         let mut harness = Self {
-            tui: Tui::new(config, daemon, size),
+            tui,
             terminal: Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap(),
             effects: Vec::new(),
+            clock,
         };
         harness.send(Event::Terminal(TermEvent::FocusGained));
         harness
@@ -276,6 +287,15 @@ impl Harness {
 
     pub fn wheel(&mut self, kind: MouseEventKind, column: u16, row: u16) {
         self.mouse(kind, column, row, KeyModifiers::NONE);
+    }
+
+    pub fn later(&mut self, millis: u64) {
+        self.clock
+            .set(self.clock.get() + Duration::from_millis(millis));
+    }
+
+    pub fn tick(&mut self) {
+        self.send(Event::Tick);
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {

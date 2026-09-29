@@ -4,6 +4,7 @@ use orch_term::keys::InputModes;
 use vt100::{MouseProtocolEncoding, MouseProtocolMode};
 
 use crate::event::PaneId;
+use crate::selection::{Grid, Row};
 
 const SCROLLBACK: usize = 10_000;
 
@@ -37,9 +38,33 @@ impl PaneMirror {
         self.closed = None;
     }
 
-    pub fn output(&mut self, bytes: &[u8]) {
+    pub fn output(&mut self, bytes: &[u8]) -> Option<i64> {
+        let before = self.history();
+        let ends = (before == SCROLLBACK).then(|| self.history_ends());
         self.parser.process(bytes);
         self.focus.scan(bytes);
+        let after = self.history();
+        if after < SCROLLBACK {
+            return Some(after as i64 - before as i64);
+        }
+        let unchanged = ends.is_some_and(|ends| ends == self.history_ends());
+        unchanged.then_some(0)
+    }
+
+    fn history(&mut self) -> usize {
+        self.with_scroll(usize::MAX, |mirror| mirror.scrollback())
+    }
+
+    fn history_ends(&mut self) -> (Row, Row) {
+        (self.row(-(SCROLLBACK as i64)), self.row(-1))
+    }
+
+    fn with_scroll<T>(&mut self, offset: usize, read: impl FnOnce(&Self) -> T) -> T {
+        let kept = self.scrollback();
+        self.set_scroll(offset);
+        let value = read(self);
+        self.set_scroll(kept);
+        value
     }
 
     pub fn resized(&mut self, size: Size) {
@@ -149,18 +174,69 @@ impl PaneMirror {
     }
 
     pub fn text_of_lines(&mut self, start: (i64, u16), end: (i64, u16)) -> String {
-        let kept = self.scrollback();
         let cols = self.parser.screen().size().1;
         let mut text = Vec::new();
         for line in start.0..=end.0 {
-            self.set_scroll(usize::try_from(-line).unwrap_or(0));
-            let row = self.row_of(line).max(0) as u16;
             let from = if line == start.0 { start.1 } else { 0 };
             let to = if line == end.0 { end.1 } else { cols };
-            let contents = self.parser.screen().contents_between(row, from, row, to);
+            let contents = self.with_scroll(offset_of(line), |mirror| {
+                let row = mirror.row_of(line).max(0) as u16;
+                mirror.screen().contents_between(row, from, row, to)
+            });
             text.push(contents.trim_end().to_string());
         }
-        self.set_scroll(kept);
         text.join("\n")
     }
+}
+
+impl Grid for PaneMirror {
+    fn height(&self) -> u16 {
+        self.rows()
+    }
+
+    fn width(&self) -> u16 {
+        self.parser.screen().size().1
+    }
+
+    fn line_at(&self, row: u16) -> i64 {
+        self.line_of(row)
+    }
+
+    fn scroll(&mut self, lines: isize) {
+        self.scroll_by(lines);
+    }
+
+    fn row(&mut self, line: i64) -> Row {
+        let row = self.with_scroll(offset_of(line), |mirror| {
+            let row = mirror.row_of(line);
+            (0..i64::from(mirror.rows()))
+                .contains(&row)
+                .then(|| mirror.cells_of(row as u16))
+        });
+        row.unwrap_or(Row {
+            cells: Vec::new(),
+            wrapped: false,
+        })
+    }
+}
+
+impl PaneMirror {
+    fn cells_of(&self, row: u16) -> Row {
+        let screen = self.parser.screen();
+        let cells = (0..screen.size().1)
+            .map(|col| match screen.cell(row, col) {
+                Some(cell) if cell.is_wide_continuation() => String::new(),
+                Some(cell) if cell.has_contents() => cell.contents().to_string(),
+                _ => " ".to_string(),
+            })
+            .collect();
+        Row {
+            cells,
+            wrapped: screen.row_wrapped(row),
+        }
+    }
+}
+
+fn offset_of(line: i64) -> usize {
+    usize::try_from(-line).unwrap_or(0)
 }

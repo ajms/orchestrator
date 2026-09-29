@@ -32,6 +32,7 @@ pub enum Event {
         reason: String,
     },
     Notice(String),
+    Tick,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
