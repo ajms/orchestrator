@@ -117,6 +117,14 @@ _Avoid_: Terminal mode, passthrough
 The input mode in which keystrokes go to the Orchestrator itself.
 _Avoid_: Command mode, orchestrator mode
 
+**Mouse passthrough**:
+The Session pane forwarding mouse events to the Agent because the Agent asked for the mouse.
+_Avoid_: Mouse capture, mouse mode
+
+**Pane selection**:
+Text the Orchestrator itself highlights and copies: in a Session pane when the Agent has not asked for the mouse or via Visual mode, and in the Review view's diff.
+_Avoid_: Highlight, copy mode
+
 **Port block**:
 A contiguous range of ports reserved for one live Session so parallel Sessions don't collide.
 _Avoid_: Port range, port offset
