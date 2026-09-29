@@ -26,16 +26,17 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
         return;
     };
     block = block.title(title(view));
-    match &app.pane {
-        Some(pane) if pane.session == view.id && pane.closed.is_none() => {
+    match app.shown_pane() {
+        Some(pane) => {
             let inner = block.inner(area);
             frame.render_widget(PseudoTerminal::new(pane.screen()).block(block), area);
             if let Mode::Visual(selection) = &app.mode {
                 highlight(frame, inner, selection, pane);
             }
         }
-        pane => {
-            let closed = pane
+        None => {
+            let closed = app
+                .pane
                 .as_ref()
                 .filter(|pane| pane.session == view.id)
                 .and_then(|pane| pane.closed.clone());

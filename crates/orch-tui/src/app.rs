@@ -17,6 +17,7 @@ use crate::guard::{GuardId, Guards};
 use crate::land::LandForm;
 use crate::layout::Areas;
 use crate::link::RequestId;
+use crate::mouse::Region;
 use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
@@ -39,6 +40,22 @@ pub(crate) enum Call {
     Paste(String),
     ResizePane(Size),
     Local(Effect),
+}
+
+impl Call {
+    fn suspends(&self) -> bool {
+        matches!(
+            self,
+            Call::Local(Effect::EditText { .. } | Effect::RunExternal { .. })
+        )
+    }
+}
+
+fn focus_report(focused: bool) -> Vec<u8> {
+    match focused {
+        true => b"\x1b[I".to_vec(),
+        false => b"\x1b[O".to_vec(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +175,7 @@ pub(crate) struct App {
     pub reconcile: Option<ReconcileView>,
     pub reconcile_report: ReconcileReport,
     pub mismatch: Option<String>,
+    pub gesture: Option<Region>,
     size: Size,
     guards: Guards,
     select_when_listed: Option<SessionId>,
@@ -188,6 +206,7 @@ impl App {
             reconcile: None,
             reconcile_report: ReconcileReport::default(),
             mismatch: None,
+            gesture: None,
             size,
             guards: Guards::default(),
             select_when_listed: None,
@@ -218,6 +237,10 @@ impl App {
             Event::Disconnected { reason } => {
                 self.message = Some(format!("lost the Daemon: {reason}"));
             }
+        }
+        self.tell_focus();
+        if self.calls.iter().any(Call::suspends) {
+            self.gesture = None;
         }
         std::mem::take(&mut self.calls)
     }
@@ -405,12 +428,34 @@ impl App {
                 crate::keymap::handle(self, key)
             }
             TermEvent::Paste(text) => crate::keymap::paste(self, text),
-            TermEvent::FocusGained => self.terminal_focused = true,
-            TermEvent::FocusLost => self.terminal_focused = false,
+            TermEvent::Mouse(event) => crate::mouse::handle(self, event),
+            TermEvent::FocusGained => self.terminal_focus(true),
+            TermEvent::FocusLost => self.terminal_focus(false),
             TermEvent::Resize(cols, rows) => self.resize(Size { rows, cols }),
             _ => {}
         }
         self.follow_selection();
+    }
+
+    fn terminal_focus(&mut self, focused: bool) {
+        self.terminal_focused = focused;
+        if !focused {
+            self.gesture = None;
+        }
+    }
+
+    fn tell_focus(&mut self) {
+        let focused = self.terminal_focused;
+        let wanted = self.shown_pane().is_some_and(PaneMirror::wants_focus);
+        let Some(pane) = self.pane.as_mut() else {
+            return;
+        };
+        if !wanted {
+            pane.told_focused = false;
+        } else if pane.told_focused != focused {
+            pane.told_focused = focused;
+            self.calls.push(Call::Input(focus_report(focused)));
+        }
     }
 
     fn resize(&mut self, size: Size) {
@@ -509,8 +554,18 @@ impl App {
         self.request(request, Pending::Fix(fix));
     }
 
+    pub fn areas(&self) -> Areas {
+        Areas::for_size(self.size)
+    }
+
     pub fn pane_size(&self) -> Size {
-        Areas::for_size(self.size).pane_inner()
+        self.areas().pane_inner()
+    }
+
+    pub fn shown_pane(&self) -> Option<&PaneMirror> {
+        self.pane
+            .as_ref()
+            .filter(|pane| self.selected.as_ref() == Some(&pane.session) && pane.closed.is_none())
     }
 
     pub fn inserting(&self) -> bool {
@@ -849,7 +904,10 @@ impl App {
         if wanted == current {
             return;
         }
-        if self.pane.take().is_some() {
+        if let Some(left) = self.pane.take() {
+            if left.told_focused {
+                self.calls.push(Call::Input(focus_report(false)));
+            }
             self.calls.push(Call::ClosePane);
         }
         let Some((session, holder_pid)) = wanted else {

@@ -1,6 +1,7 @@
 use orch_core::SessionId;
 use orch_protocol::{ScreenSnapshot, Size};
 use orch_term::keys::InputModes;
+use vt100::{MouseProtocolEncoding, MouseProtocolMode};
 
 use crate::event::PaneId;
 
@@ -11,6 +12,8 @@ pub struct PaneMirror {
     pub session: SessionId,
     pub holder_pid: Option<u32>,
     parser: vt100::Parser,
+    focus: FocusRequest,
+    pub told_focused: bool,
     pub closed: Option<String>,
 }
 
@@ -21,17 +24,22 @@ impl PaneMirror {
             session,
             holder_pid,
             parser: vt100::Parser::new(size.rows, size.cols, SCROLLBACK),
+            focus: FocusRequest::default(),
+            told_focused: false,
             closed: None,
         }
     }
 
     pub fn restore(&mut self, snapshot: &ScreenSnapshot) {
         self.parser = snapshot.restore(SCROLLBACK);
+        self.focus = FocusRequest::default();
+        self.focus.scan(&snapshot.input_modes);
         self.closed = None;
     }
 
     pub fn output(&mut self, bytes: &[u8]) {
         self.parser.process(bytes);
+        self.focus.scan(bytes);
     }
 
     pub fn resized(&mut self, size: Size) {
@@ -47,6 +55,48 @@ impl PaneMirror {
         InputModes {
             application_cursor: screen.application_cursor(),
             bracketed_paste: screen.bracketed_paste(),
+        }
+    }
+
+    pub fn mouse_mode(&self) -> MouseProtocolMode {
+        self.parser.screen().mouse_protocol_mode()
+    }
+
+    pub fn mouse_encoding(&self) -> MouseProtocolEncoding {
+        self.parser.screen().mouse_protocol_encoding()
+    }
+
+    pub fn wants_focus(&self) -> bool {
+        self.focus.reporting.requested
+    }
+}
+
+#[derive(Default)]
+struct FocusRequest {
+    parser: vte::Parser,
+    reporting: FocusReporting,
+}
+
+impl FocusRequest {
+    fn scan(&mut self, bytes: &[u8]) {
+        self.parser.advance(&mut self.reporting, bytes);
+    }
+}
+
+#[derive(Default)]
+struct FocusReporting {
+    requested: bool,
+}
+
+impl vte::Perform for FocusReporting {
+    fn csi_dispatch(&mut self, params: &vte::Params, intermediates: &[u8], _: bool, action: char) {
+        let on = match (intermediates, action) {
+            (b"?", 'h') => true,
+            (b"?", 'l') => false,
+            _ => return,
+        };
+        if params.iter().any(|param| param == [1004]) {
+            self.requested = on;
         }
     }
 }

@@ -1,5 +1,5 @@
 use orch_protocol::Size;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 
 pub const SIDEBAR_WIDTH: u16 = 40;
 
@@ -27,10 +27,15 @@ impl Areas {
         Self::of(Rect::new(0, 0, size.cols, size.rows))
     }
 
+    pub fn pane_body(&self) -> Rect {
+        self.pane.inner(Margin::new(1, 1))
+    }
+
     pub fn pane_inner(&self) -> Size {
+        let body = self.pane_body();
         Size {
-            rows: self.pane.height.saturating_sub(2).max(1),
-            cols: self.pane.width.saturating_sub(2).max(1),
+            rows: body.height.max(1),
+            cols: body.width.max(1),
         }
     }
 }

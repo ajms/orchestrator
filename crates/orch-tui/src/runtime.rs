@@ -6,7 +6,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crossterm::event::{
-    DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+    DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -266,6 +267,7 @@ fn start() -> io::Result<()> {
     let entered = execute!(
         io::stdout(),
         EnterAlternateScreen,
+        EnableMouseCapture,
         EnableFocusChange,
         EnableBracketedPaste
     );
@@ -280,6 +282,7 @@ fn leave() -> io::Result<()> {
         io::stdout(),
         DisableBracketedPaste,
         DisableFocusChange,
+        DisableMouseCapture,
         LeaveAlternateScreen
     );
     disable_raw_mode()?;

@@ -1339,6 +1339,7 @@ dependencies = [
  "tokio",
  "tui-term",
  "vt100",
+ "vte",
 ]
 
 [[package]]

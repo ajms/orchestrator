@@ -7,6 +7,7 @@ mod git_review;
 mod guards;
 mod landing;
 mod modes;
+mod mouse;
 mod navigation;
 mod new_session;
 mod reconcile;
