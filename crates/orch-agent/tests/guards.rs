@@ -439,6 +439,31 @@ fn shell_writes_outside_the_worktree_ask_best_effort() {
 }
 
 #[test]
+fn writing_temp_files_is_allowed() {
+    let temp = std::env::temp_dir();
+    for path in [
+        "/tmp/notes.md".to_string(),
+        "/tmp/claude-1000/project/session/scratchpad/plan.md".to_string(),
+        temp.join("scratch.txt").to_string_lossy().into_owned(),
+    ] {
+        assert_eq!(
+            decide("Write", json!({ "file_path": path })),
+            GuardDecision::Allow,
+            "{path}"
+        );
+    }
+    assert_allowed(&[
+        "cargo test > /tmp/test.log 2>&1",
+        "mkdir -p /tmp/claude-1000/x && touch /tmp/claude-1000/x/y",
+    ]);
+    assert_asks(&[(
+        "echo x > /tmp/../etc/motd",
+        GuardKind::WriteOutsideWorktree,
+        "/etc/motd",
+    )]);
+}
+
+#[test]
 fn quoted_text_is_not_mistaken_for_commands_or_redirections() {
     assert_allowed(&[
         r#"git commit -m "fix > redirect; git push origin main""#,
@@ -466,7 +491,8 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let root = std::env::temp_dir().join(format!("orch-guards-{name}-{}", std::process::id()));
+        let root = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("orch-guards-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("repo/.orchestrator/worktrees/wt")).unwrap();
         std::fs::create_dir_all(root.join("elsewhere")).unwrap();

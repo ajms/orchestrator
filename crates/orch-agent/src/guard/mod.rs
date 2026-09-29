@@ -107,7 +107,7 @@ impl<'a> GuardScope<'a> {
     }
 
     fn outside(&self, path: &Path) -> bool {
-        !path.starts_with(&self.worktree) && !paths::is_harmless(path)
+        !path.starts_with(&self.worktree) && !paths::is_harmless(path) && !paths::is_temp(path)
     }
 
     fn write(&self, cwd: &Path, raw: &str) -> Option<GuardHit> {
