@@ -8,6 +8,7 @@ use tui_term::widget::PseudoTerminal;
 
 use super::style;
 use crate::app::{App, Focus, Mode, Selection};
+use crate::pane::PaneMirror;
 
 const SELECTION: Color = Color::Rgb(70, 70, 110);
 use crate::sessions::repo_name;
@@ -30,7 +31,7 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
             let inner = block.inner(area);
             frame.render_widget(PseudoTerminal::new(pane.screen()).block(block), area);
             if let Mode::Visual(selection) = &app.mode {
-                highlight(frame, inner, selection);
+                highlight(frame, inner, selection, pane);
             }
         }
         pane => {
@@ -47,15 +48,19 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
     }
 }
 
-fn highlight(frame: &mut Frame, inner: Rect, selection: &Selection) {
+fn highlight(frame: &mut Frame, inner: Rect, selection: &Selection, pane: &PaneMirror) {
     let (start, end) = selection.ordered();
     let buffer = frame.buffer_mut();
-    for row in start.0..=end.0.min(inner.height.saturating_sub(1)) {
+    let first = pane.row_of(start.0).max(0);
+    let last = pane.row_of(end.0).min(i64::from(inner.height) - 1);
+    for row in first..=last {
+        let line = pane.line_of(row as u16);
+        let row = row as u16;
         let (from, to) = match selection.linewise {
             true => (0, inner.width.saturating_sub(1)),
             false => (
-                if row == start.0 { start.1 } else { 0 },
-                if row == end.0 {
+                if line == start.0 { start.1 } else { 0 },
+                if line == end.0 {
                     end.1
                 } else {
                     inner.width.saturating_sub(1)

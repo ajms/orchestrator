@@ -38,10 +38,15 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
                 LandAction::Edit(text) => app.push(Call::Local(Effect::EditText { text })),
             }
         }
-        Popup::Trust(_) => match key.code {
+        Popup::Trust(prompt) => match key.code {
             KeyCode::Char('y') => {
                 if let Some(Popup::Trust(prompt)) = app.popup.take() {
                     app.approve_trust(prompt);
+                }
+            }
+            KeyCode::Char('s') if prompt.skipping_teardown().is_some() => {
+                if let Some(Popup::Trust(prompt)) = app.popup.take() {
+                    app.skip_teardown(prompt);
                 }
             }
             KeyCode::Char('n') | KeyCode::Esc => app.popup = None,
@@ -53,7 +58,10 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
             {
                 match confirm.target {
                     DiscardTarget::Session(session) => {
-                        app.report(orch_protocol::Request::Discard { session })
+                        app.report(orch_protocol::Request::Discard {
+                            session,
+                            skip_teardown: false,
+                        })
                     }
                     DiscardTarget::Leftover { repo, leftover } => {
                         app.send_fix(orch_protocol::Fix::RemoveLeftover { repo, leftover })
@@ -86,6 +94,6 @@ fn new_form(app: &mut App, outcome: Outcome) {
             app.create_session(create);
         }
         Outcome::Edit(text) => app.push(Call::Local(Effect::EditText { text })),
-        Outcome::RepoChanged => app.refresh_base_candidates(),
+        Outcome::RepoChanged => app.form_repo_changed(),
     }
 }

@@ -4,7 +4,7 @@ use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, BorderType, Paragraph};
 
-use crate::reconcile::{ReconcileView, Row, fix_label};
+use crate::reconcile::{ReconcileView, Row};
 
 const SELECTED: Color = Color::Rgb(50, 50, 70);
 
@@ -21,7 +21,7 @@ pub(super) fn draw(view: &ReconcileView, frame: &mut Frame, area: Rect) {
             }
             Row::Finding(text) => lines.push(Line::from(format!("   {text}")).yellow()),
             Row::Fix(fix) => {
-                let line = Line::from(format!("     → {}", fix_label(fix)));
+                let line = Line::from(format!("     → {}", fix.label()));
                 lines.push(match fix_index == view.selected {
                     true => line.style(Style::new().bg(SELECTED)),
                     false => line,

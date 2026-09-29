@@ -90,9 +90,15 @@ async fn a_committed_setup_script_runs_only_once_the_repo_is_trusted() {
     let refused = client
         .request(Request::CreateSession(CreateSession::new(&repo, "Task")))
         .await;
-    let Err(RequestError::Untrusted { hash, items }) = refused else {
+    let Err(RequestError::Untrusted {
+        repo: untrusted,
+        hash,
+        items,
+    }) = refused
+    else {
         panic!("expected an Untrusted refusal, got {refused:?}");
     };
+    assert_eq!(untrusted, repo);
     assert_eq!(items, ["Setup script: touch setup-ran"]);
     assert!(!repo.join(".orchestrator/worktrees").exists());
 
@@ -111,7 +117,7 @@ async fn a_committed_setup_script_runs_only_once_the_repo_is_trusted() {
 }
 
 #[tokio::test]
-async fn a_changed_setup_script_lapses_trust_and_fails_setup_on_retry() {
+async fn a_changed_setup_script_lapses_trust_and_refuses_the_retry() {
     let env = Env::new();
     let repo = env.repo("app");
     commit(&repo, ".orchestrator.toml", "setup = \"false\"\n");
@@ -142,19 +148,17 @@ async fn a_changed_setup_script_lapses_trust_and_fails_setup_on_retry() {
         "setup = \"touch sneaky\"\n",
     )
     .unwrap();
-    client
+    let retried = client
         .request(Request::RetrySetup {
             session: id.clone(),
         })
-        .await
-        .unwrap();
-    let failed = client
-        .until(&id, "Setup failed as untrusted", |view| {
-            view.setup_output
-                .as_deref()
-                .is_some_and(|output| output.contains("not trusted"))
-        })
         .await;
+    assert!(
+        matches!(&retried, Err(RequestError::Untrusted { items, .. }) if items == &["Setup script: touch sneaky"]),
+        "{retried:?}"
+    );
+    settled(&mut client).await;
+    let failed = client.sessions[&id].clone();
     assert_eq!(failed.phase, PhaseView::SetupFailed);
     assert!(!failed.worktree.join("sneaky").exists());
 }

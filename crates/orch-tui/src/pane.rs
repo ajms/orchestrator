@@ -65,13 +65,52 @@ impl PaneMirror {
         self.parser.screen().size().0
     }
 
-    pub fn cursor(&self) -> (u16, u16) {
-        self.parser.screen().cursor_position()
+    pub fn scrollback(&self) -> usize {
+        self.parser.screen().scrollback()
     }
 
-    pub fn text_between(&self, start: (u16, u16), end: (u16, u16)) -> String {
-        self.parser
-            .screen()
-            .contents_between(start.0, start.1, end.0, end.1)
+    pub fn cursor_line(&self) -> (i64, u16) {
+        let (row, col) = self.parser.screen().cursor_position();
+        let line = i64::from(row);
+        match self.row_of(line) < i64::from(self.rows()) {
+            true => (line, col),
+            false => (self.line_of(0), 0),
+        }
+    }
+
+    pub fn line_of(&self, row: u16) -> i64 {
+        i64::from(row) - self.scrollback() as i64
+    }
+
+    pub fn row_of(&self, line: i64) -> i64 {
+        line + self.scrollback() as i64
+    }
+
+    pub fn reveal(&mut self, line: i64) -> i64 {
+        let last_row = i64::from(self.rows().saturating_sub(1));
+        let row = self.row_of(line);
+        if row < 0 {
+            self.scroll_by(-row as isize);
+        } else if row > last_row {
+            self.scroll_by(-((row - last_row) as isize));
+        }
+        let row = self.row_of(line).clamp(0, last_row);
+        self.line_of(row as u16)
+    }
+
+    pub fn text_of_lines(&mut self, start: (i64, u16), end: (i64, u16)) -> String {
+        let kept = self.scrollback();
+        let cols = self.parser.screen().size().1;
+        let mut text = Vec::new();
+        for line in start.0..=end.0 {
+            self.set_scroll(usize::try_from(-line).unwrap_or(0));
+            let row = self.row_of(line).max(0) as u16;
+            let from = if line == start.0 { start.1 } else { 0 };
+            let to = if line == end.0 { end.1 } else { cols };
+            let contents = self.parser.screen().contents_between(row, from, row, to);
+            text.push(contents.trim_end().to_string());
+        }
+        self.set_scroll(kept);
+        text.join("\n")
     }
 }

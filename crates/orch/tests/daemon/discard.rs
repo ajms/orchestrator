@@ -23,6 +23,7 @@ async fn discard(client: &mut TestClient, id: &SessionId) {
     let reply = client
         .request(Request::Discard {
             session: id.clone(),
+            skip_teardown: false,
         })
         .await;
     assert_eq!(reply, Ok(Reply::Done));

@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use orch_core::SessionId;
 use std::path::PathBuf;
 
-use orch_protocol::{Finding, Fix, LeftoverView, Problem, ReconcileReport};
+use orch_protocol::{Finding, Fix, LeftoverView, ReconcileReport};
 
 use crate::sessions::{Sessions, repo_label};
 
@@ -87,50 +87,8 @@ impl ReconcileView {
 
 fn push_findings(rows: &mut Vec<Row>, findings: &[Finding], slug: &impl Fn(&SessionId) -> String) {
     for finding in findings {
-        rows.push(Row::Finding(describe(&finding.problem, slug)));
+        rows.push(Row::Finding(finding.problem.describe(slug)));
         rows.extend(finding.fixes.iter().cloned().map(Row::Fix));
-    }
-}
-
-pub(crate) fn describe(problem: &Problem, slug: &impl Fn(&SessionId) -> String) -> String {
-    match problem {
-        Problem::RepoMissing => "Repo missing".into(),
-        Problem::WorktreeMissing { session } => format!("Worktree missing: {}", slug(session)),
-        Problem::BaseMissing { session, base } => {
-            format!("Base {base} missing: {}", slug(session))
-        }
-        Problem::Leftover { leftover } => format!("Leftover {}", leftover_label(leftover)),
-        Problem::CleanupFailed { session, message } => {
-            format!("cleanup failed for {}: {message}", slug(session))
-        }
-        Problem::UnknownHolder {
-            session,
-            holder_pid,
-            ..
-        } => format!("unknown Holder {} (pid {holder_pid})", session.as_str()),
-        Problem::PortBlockClash { session, other } => {
-            format!("Port block clash: {} and {}", slug(session), slug(other))
-        }
-    }
-}
-
-pub(crate) fn leftover_label(leftover: &LeftoverView) -> String {
-    match leftover {
-        LeftoverView::Worktree { path } => format!("Worktree {}", path.display()),
-        LeftoverView::Branch { branch } => format!("Branch {branch}"),
-    }
-}
-
-pub(crate) fn fix_label(fix: &Fix) -> String {
-    match fix {
-        Fix::RecreateWorktree { .. } => "recreate the Worktree".into(),
-        Fix::DiscardRecord { .. } => "discard the Session record".into(),
-        Fix::Retarget { base, .. } => format!("retarget onto {base} (pick a Branch)"),
-        Fix::ForgetRepo { .. } => "forget the Repo".into(),
-        Fix::AdoptLeftover { .. } => "adopt as a Session".into(),
-        Fix::RemoveLeftover { .. } => "remove (shows what is lost first)".into(),
-        Fix::ShutdownUnknownHolder { .. } => "shut the Holder down".into(),
-        Fix::ReassignPortBlock { .. } => "reassign the Port block".into(),
     }
 }
 

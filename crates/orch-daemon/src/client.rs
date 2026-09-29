@@ -88,8 +88,8 @@ async fn handle(
             detached(async move { daemon.create_session(create).await }).await
         }
         Request::ApproveTrust { repo, hash } => daemon.approve_trust(repo, hash).await,
-        Request::RetrySetup { session } => daemon.retry_setup(&session),
-        Request::StartAnyway { session } => daemon.start_anyway(&session),
+        Request::RetrySetup { session } => daemon.retry_setup(&session).await,
+        Request::StartAnyway { session } => daemon.start_anyway(&session).await,
         Request::Resume { session } => {
             let daemon = daemon.clone();
             detached(async move { daemon.resume(&session).await }).await
@@ -101,9 +101,13 @@ async fn handle(
         } => daemon.answer_guard(&session, guard, choice),
         Request::SetGuards { session, enabled } => daemon.set_guards(&session, enabled),
         Request::Draft { session, mode } => daemon.draft(&session, mode).await,
-        Request::Land { session, landing } => {
+        Request::Land {
+            session,
+            landing,
+            skip_teardown,
+        } => {
             let daemon = daemon.clone();
-            detached(async move { daemon.land(&session, landing).await }).await
+            detached(async move { daemon.land(&session, landing, skip_teardown).await }).await
         }
         Request::RefreshPr { session } => {
             let daemon = daemon.clone();
@@ -111,9 +115,12 @@ async fn handle(
         }
         Request::AbandonPr { session } => daemon.abandon_pr(&session),
         Request::DiscardPreview { session } => daemon.discard_preview(&session).await,
-        Request::Discard { session } => {
+        Request::Discard {
+            session,
+            skip_teardown,
+        } => {
             let daemon = daemon.clone();
-            detached(async move { daemon.discard(&session).await }).await
+            detached(async move { daemon.discard(&session, skip_teardown).await }).await
         }
         Request::SetPreset { session, preset } => {
             let daemon = daemon.clone();
@@ -127,6 +134,12 @@ async fn handle(
         Request::Usage => daemon.usage().await,
         Request::LeftoverPreview { repo, leftover } => {
             daemon.leftover_preview(repo, leftover).await
+        }
+        Request::Repos => daemon.repos().await,
+        Request::RepoSettings { repo } => daemon.repo_settings(repo).await,
+        Request::MoveRepo { from, to } => {
+            let daemon = daemon.clone();
+            detached(async move { daemon.move_repo(from, to).await }).await
         }
         Request::Fix { fix } => {
             let daemon = daemon.clone();

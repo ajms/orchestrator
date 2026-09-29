@@ -18,7 +18,7 @@ use crate::layout::Areas;
 use crate::link::RequestId;
 use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
-use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, fix_label, leftover_label, plan};
+use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
 use crate::review::ReviewView;
 use crate::sessions::{Sessions, phase_label, repo_name};
 
@@ -57,12 +57,12 @@ pub(crate) enum Mode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Selection {
     pub linewise: bool,
-    pub anchor: (u16, u16),
-    pub cursor: (u16, u16),
+    pub anchor: (i64, u16),
+    pub cursor: (i64, u16),
 }
 
 impl Selection {
-    pub fn ordered(&self) -> ((u16, u16), (u16, u16)) {
+    pub fn ordered(&self) -> ((i64, u16), (i64, u16)) {
         match self.anchor <= self.cursor {
             true => (self.anchor, self.cursor),
             false => (self.cursor, self.anchor),
@@ -77,11 +77,14 @@ pub(crate) enum Prefix {
     G,
 }
 
-enum Pending {
+pub(crate) enum Pending {
     ReportFailure,
+    Repos,
+    FormSettings(PathBuf),
+    ReviewSettings(SessionId),
     Resume(SessionId),
-    Create(CreateSession),
-    Trust(CreateSession),
+    Create,
+    Trust(Box<Retry>),
     Draft(SessionId, LandingMode),
     Land,
     DiscardPreview(SessionId),
@@ -94,10 +97,40 @@ enum Pending {
     Fix(Fix),
 }
 
+pub(crate) struct Retry {
+    request: Request,
+    pending: Pending,
+}
+
 pub(crate) struct TrustPrompt {
-    pub create: CreateSession,
+    pub repo: PathBuf,
     pub hash: String,
     pub items: Vec<String>,
+    retry: Box<Retry>,
+}
+
+impl TrustPrompt {
+    pub fn skipping_teardown(&self) -> Option<Request> {
+        match &self.retry.request {
+            Request::Discard {
+                session,
+                skip_teardown: false,
+            } => Some(Request::Discard {
+                session: session.clone(),
+                skip_teardown: true,
+            }),
+            Request::Land {
+                session,
+                landing,
+                skip_teardown: false,
+            } => Some(Request::Land {
+                session: session.clone(),
+                landing: landing.clone(),
+                skip_teardown: true,
+            }),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) enum Popup {
@@ -132,7 +165,8 @@ pub(crate) struct App {
     reported_view: Option<(Option<SessionId>, bool)>,
     next_request: u64,
     next_pane: u64,
-    pending: HashMap<RequestId, Pending>,
+    external_review_command: Option<String>,
+    pending: HashMap<RequestId, (Request, Pending)>,
     calls: Vec<Call>,
 }
 
@@ -161,6 +195,7 @@ impl App {
             reported_view: None,
             next_request: 0,
             next_pane: 0,
+            external_review_command: None,
             pending: HashMap::new(),
             calls: Vec::new(),
         }
@@ -191,6 +226,7 @@ impl App {
             FromDaemon::Sessions { sessions } => {
                 self.mismatch = None;
                 self.sessions.replace(sessions);
+                self.request(Request::Repos, Pending::Repos);
             }
             FromDaemon::SessionChanged { session } => self.sessions.upsert(*session),
             FromDaemon::SessionRemoved { session } => self.remove_session(&session),
@@ -211,8 +247,8 @@ impl App {
             }
             FromDaemon::Focus { session } => self.focus_session(session),
             FromDaemon::Response { id, result } => {
-                if let Some(pending) = self.pending.remove(&RequestId(id)) {
-                    self.answered(pending, result);
+                if let Some((request, pending)) = self.pending.remove(&RequestId(id)) {
+                    self.answered(request, pending, result);
                 }
             }
             _ => {}
@@ -220,19 +256,56 @@ impl App {
         self.follow_selection();
     }
 
-    fn answered(&mut self, pending: Pending, result: Result<Reply, RequestError>) {
-        match (pending, result) {
-            (Pending::Create(create), Err(RequestError::Untrusted { hash, items })) => {
+    fn answered(
+        &mut self,
+        request: Request,
+        pending: Pending,
+        result: Result<Reply, RequestError>,
+    ) {
+        let retriable = !matches!(
+            pending,
+            Pending::Trust(_) | Pending::Draft(..) | Pending::FormSettings(_)
+        );
+        let result = match result {
+            Err(RequestError::Untrusted { repo, hash, items }) if retriable => {
+                let retry = Box::new(Retry { request, pending });
                 self.popup = Some(Popup::Trust(TrustPrompt {
-                    create,
+                    repo,
                     hash,
                     items,
+                    retry,
                 }));
+                return;
             }
-            (Pending::Create(_), Ok(Reply::Created { session })) => {
+            result => result,
+        };
+        match (pending, result) {
+            (Pending::Repos, Ok(Reply::Repos { repos })) => self.config.repos = repos,
+            (Pending::FormSettings(repo), Ok(Reply::RepoSettings(settings))) => {
+                if let Some(Popup::New(form)) = &mut self.popup
+                    && form.repo_path() == Some(repo)
+                {
+                    form.apply(settings);
+                }
+            }
+            (Pending::FormSettings(_), _) => {}
+            (Pending::ReviewSettings(session), result) => {
+                let command = match result {
+                    Ok(Reply::RepoSettings(settings)) => settings.review_command,
+                    Err(err) => {
+                        self.message = Some(format!("using the default review command: {err}"));
+                        None
+                    }
+                    Ok(_) => None,
+                };
+                self.external_review_command =
+                    Some(command.unwrap_or_else(|| self.config.review_command.clone()));
+                self.start_review(&session, ReviewPurpose::External);
+            }
+            (Pending::Create, Ok(Reply::Created { session })) => {
                 self.select_when_listed = Some(session);
             }
-            (Pending::Trust(create), Ok(_)) => self.create_session(create),
+            (Pending::Trust(retry), Ok(_)) => self.request(retry.request, retry.pending),
             (Pending::Draft(session, mode), result) => self.drafted(&session, mode, result),
             (Pending::Land, Ok(Reply::Landed { commit, warning })) => {
                 self.message = Some(match warning {
@@ -280,7 +353,7 @@ impl App {
                     unlanded,
                 }),
             ) => {
-                let question = format!("Remove the Leftover {}?", leftover_label(&leftover));
+                let question = format!("Remove the Leftover {}?", leftover.label());
                 let target = DiscardTarget::Leftover { repo, leftover };
                 let confirm = DiscardConfirm::new(target, question, uncommitted, unlanded);
                 self.popup = Some(Popup::Discard(confirm));
@@ -290,7 +363,7 @@ impl App {
                 self.reconciled(*report, true)
             }
             (Pending::Fix(fix), Ok(_)) => {
-                self.message = Some(format!("done: {}", fix_label(&fix)));
+                self.message = Some(format!("Done: {}", fix.label()));
                 self.request_reconcile();
             }
             (Pending::Resume(session), Err(err)) => {
@@ -507,7 +580,7 @@ impl App {
     fn request(&mut self, request: Request, pending: Pending) {
         self.next_request += 1;
         let id = RequestId(self.next_request);
-        self.pending.insert(id, pending);
+        self.pending.insert(id, (request.clone(), pending));
         self.calls.push(Call::Request(id, request));
     }
 
@@ -533,18 +606,21 @@ impl App {
     }
 
     pub fn create_session(&mut self, create: CreateSession) {
-        self.request(
-            Request::CreateSession(create.clone()),
-            Pending::Create(create),
-        );
+        self.request(Request::CreateSession(create), Pending::Create);
     }
 
     pub fn approve_trust(&mut self, prompt: TrustPrompt) {
         let request = Request::ApproveTrust {
-            repo: prompt.create.repo.clone(),
+            repo: prompt.repo,
             hash: prompt.hash,
         };
-        self.request(request, Pending::Trust(prompt.create));
+        self.request(request, Pending::Trust(prompt.retry));
+    }
+
+    pub fn skip_teardown(&mut self, prompt: TrustPrompt) {
+        if let Some(request) = prompt.skipping_teardown() {
+            self.request(request, prompt.retry.pending);
+        }
     }
 
     pub fn open_new_form(&mut self) {
@@ -567,7 +643,18 @@ impl App {
         let presets = self.config.presets.names().map(String::from).collect();
         let form = NewForm::new(repos, preselect, presets, &self.config.branch_prefix);
         self.popup = Some(Popup::New(form));
+        self.form_repo_changed();
+    }
+
+    pub fn form_repo_changed(&mut self) {
         self.refresh_base_candidates();
+        let Some(Popup::New(form)) = &self.popup else {
+            return;
+        };
+        if let Some(repo) = form.repo_path().filter(|_| !form.other_selected()) {
+            let request = Request::RepoSettings { repo: repo.clone() };
+            self.request(request, Pending::FormSettings(repo));
+        }
     }
 
     pub fn refresh_base_candidates(&mut self) {
@@ -631,7 +718,14 @@ impl App {
 
     pub fn land(&mut self, session: SessionId, landing: orch_protocol::Landing) {
         self.message = Some("Landing…".into());
-        self.request(Request::Land { session, landing }, Pending::Land);
+        self.request(
+            Request::Land {
+                session,
+                landing,
+                skip_teardown: false,
+            },
+            Pending::Land,
+        );
     }
 
     pub fn load_discard_preview(&mut self) {
@@ -648,6 +742,22 @@ impl App {
     pub fn load_review(&mut self, purpose: ReviewPurpose) {
         let Some(view) = self.selected_view() else {
             self.message = Some(NO_SESSION.into());
+            return;
+        };
+        let session = view.id.clone();
+        match purpose {
+            ReviewPurpose::BuiltIn => self.start_review(&session, purpose),
+            ReviewPurpose::External => {
+                let request = Request::RepoSettings {
+                    repo: view.repo.clone(),
+                };
+                self.request(request, Pending::ReviewSettings(session));
+            }
+        }
+    }
+
+    fn start_review(&mut self, session: &SessionId, purpose: ReviewPurpose) {
+        let Some(view) = self.sessions.get(session) else {
             return;
         };
         let effect = Effect::LoadReview {
@@ -687,8 +797,12 @@ impl App {
                 self.review = Some(ReviewView::new(view.base.clone(), data.files));
             }
             ReviewPurpose::External => {
+                let command = self
+                    .external_review_command
+                    .take()
+                    .unwrap_or_else(|| self.config.review_command.clone());
                 let effect = Effect::RunExternal {
-                    command: self.config.review_command.clone(),
+                    command,
                     cwd: view.worktree.clone(),
                     env: vec![
                         ("ORCH_BASE".into(), view.base.clone()),

@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEvent, KeyModifiers};
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView, FlagsView, FromDaemon, PhaseView, Reply, Request, RequestError, ScreenSnapshot,
-    SessionView, Size,
+    AgentStateView, FlagsView, FromDaemon, PhaseView, Reply, RepoSettings, Request, RequestError,
+    ScreenSnapshot, SessionView, Size,
 };
 use orch_tui::{DaemonLink, Effect, Event, PaneId, RequestId, Tui, TuiConfig};
 use ratatui::Terminal;
@@ -26,6 +26,8 @@ pub struct FakeDaemon {
     pub pastes: Vec<String>,
     pub resizes: Vec<Size>,
     pub screens: Vec<(SessionId, ScreenSnapshot)>,
+    pub repos: Option<Vec<PathBuf>>,
+    pub settings: Vec<RepoSettings>,
     replies: VecDeque<Result<Reply, RequestError>>,
     outbox: VecDeque<Event>,
 }
@@ -77,8 +79,20 @@ impl FakeDaemon {
 
 impl DaemonLink for FakeDaemon {
     fn request(&mut self, id: RequestId, request: Request) {
+        let result = match &request {
+            Request::Repos => Ok(self
+                .repos
+                .clone()
+                .map_or(Reply::Done, |repos| Reply::Repos { repos })),
+            Request::RepoSettings { repo } => Ok(self
+                .settings
+                .iter()
+                .find(|settings| &settings.repo == repo)
+                .cloned()
+                .map_or(Reply::Done, Reply::RepoSettings)),
+            _ => self.replies.pop_front().unwrap_or(Ok(Reply::Done)),
+        };
         self.requests.push((id, request));
-        let result = self.replies.pop_front().unwrap_or(Ok(Reply::Done));
         self.outbox
             .push_back(Event::Daemon(FromDaemon::Response { id: id.0, result }));
     }

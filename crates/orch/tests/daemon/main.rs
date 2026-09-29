@@ -1,3 +1,4 @@
+mod cli;
 mod common;
 mod discard;
 mod guards;
@@ -11,7 +12,9 @@ mod pr;
 mod preset;
 mod reconcile;
 mod recovery;
+mod repo_settings;
 mod setup;
 mod stacking;
 mod status;
+mod trust;
 mod usage;

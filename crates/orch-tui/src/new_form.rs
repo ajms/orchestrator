@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use orch_git::slugify;
-use orch_protocol::CreateSession;
+use orch_protocol::{CreateSession, RepoSettings};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
@@ -39,6 +39,8 @@ pub struct NewForm {
     branch_edited: bool,
     branch_prefix: String,
     pub base: String,
+    pub default_base: Option<String>,
+    pub default_preset: Option<String>,
     pub base_candidates: Vec<String>,
     base_choice: usize,
     pub presets: Vec<String>,
@@ -58,6 +60,8 @@ impl NewForm {
             branch_edited: false,
             branch_prefix: prefix.to_string(),
             base: String::new(),
+            default_base: None,
+            default_preset: None,
             base_candidates: Vec::new(),
             base_choice: 0,
             presets,
@@ -82,6 +86,15 @@ impl NewForm {
 
     pub fn set_prompt(&mut self, prompt: String) {
         self.prompt = prompt;
+        self.prefill_branch();
+    }
+
+    pub fn apply(&mut self, settings: RepoSettings) {
+        self.presets = settings.presets;
+        self.preset = None;
+        self.default_preset = settings.default_preset;
+        self.default_base = settings.default_base;
+        self.branch_prefix = settings.branch_prefix;
         self.prefill_branch();
     }
 

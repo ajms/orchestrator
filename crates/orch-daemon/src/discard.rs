@@ -26,7 +26,11 @@ impl Daemon {
         })
     }
 
-    pub(crate) async fn discard(self: &Arc<Self>, id: &SessionId) -> Result<Reply, RequestError> {
+    pub(crate) async fn discard(
+        self: &Arc<Self>,
+        id: &SessionId,
+        skip_teardown: bool,
+    ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
         let (_claim, _, _) = self.claim(id, |live| {
             live.status
@@ -34,6 +38,10 @@ impl Daemon {
                 .map(drop)
                 .map_err(|refusal| gate_message("Discarding", refusal))
         })?;
+        if !skip_teardown {
+            let (_, repo) = self.snapshot(id).ok_or(RequestError::UnknownSession)?;
+            self.check_teardown(&repo).await?;
+        }
         self.end_session(id, PhaseEvent::Discarded).await?;
         Ok(Reply::Done)
     }

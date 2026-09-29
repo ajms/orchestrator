@@ -92,6 +92,13 @@ impl Repo {
         Ok(path)
     }
 
+    pub fn repair_worktrees(&self, paths: &[PathBuf]) -> Result<(), Error> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        self.git(["worktree", "repair"]).args(paths).run().map(drop)
+    }
+
     pub fn worktree_exists(&self, path: &Path) -> bool {
         let Ok(path) = path.canonicalize() else {
             return false;

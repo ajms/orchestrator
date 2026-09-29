@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
-use orch_agent::{GuardAnswer, GuardContext, GuardDecision, evaluate_guard};
+use orch_agent::{Capabilities, GuardAnswer, GuardContext, GuardDecision, evaluate_guard};
 use orch_core::{
     AgentEvent, AgentState, ConversationId, Effect, Observation, PhaseEvent, SessionId,
 };
@@ -295,14 +295,7 @@ fn observe(
 }
 
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
-    let check = events.iter().find_map(|event| match event {
-        AgentEvent::GuardCheck {
-            tool,
-            input_json,
-            cwd,
-        } => Some((tool, input_json, cwd)),
-        _ => None,
-    });
+    let check = guard_check(live.adapter.capabilities(), events);
     let decision = check.map(|(tool, input_json, cwd)| {
         let context = GuardContext {
             worktree: &live.record.worktree,
@@ -333,6 +326,22 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
     }
 }
 
+type GuardCheck<'a> = (&'a String, &'a String, &'a Option<String>);
+
+fn guard_check(capabilities: Capabilities, events: &[AgentEvent]) -> Option<GuardCheck<'_>> {
+    if !capabilities.guards_available() {
+        return None;
+    }
+    events.iter().find_map(|event| match event {
+        AgentEvent::GuardCheck {
+            tool,
+            input_json,
+            cwd,
+        } => Some((tool, input_json, cwd)),
+        _ => None,
+    })
+}
+
 fn exit_observation(exit: &AgentExit) -> Observation {
     let code = match exit.signal {
         Some(_) => None,
@@ -346,5 +355,37 @@ async fn write_loop(mut writer: OwnedWriteHalf, mut inbox: Receiver<ToHolder>) {
         if write_frame_async(&mut writer, &message).await.is_err() {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check() -> Vec<AgentEvent> {
+        vec![AgentEvent::GuardCheck {
+            tool: "Bash".into(),
+            input_json: "{}".into(),
+            cwd: None,
+        }]
+    }
+
+    #[test]
+    fn guard_checks_are_evaluated_when_the_agent_has_hooks_and_guards() {
+        let capabilities = Capabilities {
+            hooks: true,
+            guards: true,
+            ..Capabilities::default()
+        };
+        assert!(guard_check(capabilities, &check()).is_some());
+    }
+
+    #[test]
+    fn guard_checks_are_ignored_for_an_agent_without_guards() {
+        let capabilities = Capabilities {
+            hooks: true,
+            ..Capabilities::default()
+        };
+        assert!(guard_check(capabilities, &check()).is_none());
     }
 }

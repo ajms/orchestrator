@@ -17,7 +17,12 @@ use crate::sessions::repo_name;
 pub(super) fn draw(app: &App, frame: &mut Frame) {
     match &app.popup {
         Some(Popup::New(form)) => new_form(frame, form),
-        Some(Popup::Trust(prompt)) => trust(frame, &prompt.create.repo, &prompt.items),
+        Some(Popup::Trust(prompt)) => trust(
+            frame,
+            &prompt.repo,
+            &prompt.items,
+            prompt.skipping_teardown().is_some(),
+        ),
         Some(Popup::Land(form)) => {
             if let Some(view) = app.sessions.get(&form.session) {
                 land(frame, view, form);
@@ -62,9 +67,10 @@ fn new_form(frame: &mut Frame, form: &NewForm) {
         label(Field::Branch, "Branch"),
         Span::raw(format!("{}{}", form.branch, cursor(Field::Branch))),
     ]));
-    let base = match form.base.is_empty() {
-        true => "(Repo default)".to_string(),
-        false => form.base.clone(),
+    let base = match (form.base.is_empty(), &form.default_base) {
+        (false, _) => form.base.clone(),
+        (true, Some(default)) => format!("{default} (Repo default)"),
+        (true, None) => "(Repo default)".to_string(),
     };
     let mut base_line = vec![
         label(Field::Base, "Base"),
@@ -76,7 +82,10 @@ fn new_form(frame: &mut Frame, form: &NewForm) {
     lines.push(Line::from(base_line));
     let preset = match form.preset {
         Some(at) => format!("◂ {} ▸", form.presets[at]),
-        None => "◂ (Repo default) ▸".to_string(),
+        None => match &form.default_preset {
+            Some(default) => format!("◂ {default} (Repo default) ▸"),
+            None => "◂ (Repo default) ▸".to_string(),
+        },
     };
     lines.push(Line::from(vec![
         label(Field::Preset, "Preset"),
@@ -221,7 +230,7 @@ pub(super) fn mismatch(frame: &mut Frame, message: &str) {
     show(frame, " Daemon version mismatch ", Color::Yellow, lines, 90);
 }
 
-fn trust(frame: &mut Frame, repo: &std::path::Path, items: &[String]) {
+fn trust(frame: &mut Frame, repo: &std::path::Path, items: &[String], skippable: bool) {
     let mut lines = vec![
         Line::from(format!(
             " {} brings scripts or Presets that need your Trust:",
@@ -235,7 +244,11 @@ fn trust(frame: &mut Frame, repo: &std::path::Path, items: &[String]) {
             .map(|item| Line::from(format!("   {item}")).yellow()),
     );
     lines.push(Line::default());
-    lines.push(Line::from(" y trust and create · n cancel").dark_gray());
+    let keys = match skippable {
+        true => " y trust and continue · s skip the Teardown · n cancel",
+        false => " y trust and continue · n cancel",
+    };
+    lines.push(Line::from(keys).dark_gray());
     show(frame, " Trust ", Color::Yellow, lines, 84);
 }
 

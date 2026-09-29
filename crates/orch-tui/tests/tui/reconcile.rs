@@ -125,16 +125,16 @@ fn reconcile_lists_findings_per_repo_with_their_fixes() {
     for expected in [
         "webshop",
         "Worktree missing: first",
-        "recreate the Worktree",
-        "discard the Session record",
+        "Recreate the Worktree",
+        "Discard the Session record",
         "Leftover Branch orch/abandoned-idea",
         "Base orch/landed missing: first",
         "Port block clash: first and second",
-        "reassign the Port block",
+        "Reassign the Port block",
         "vanished",
         "Repo missing",
-        "forget the Repo",
-        "unknown Holder ghost (pid 4242)",
+        "Forget the Repo",
+        "Unknown Holder ghost (pid 4242)",
     ] {
         assert!(
             screen.contains(expected),
@@ -234,7 +234,7 @@ fn a_broadcast_report_with_findings_is_flagged_in_the_statusline() {
 fn q_closes_the_reconciliation_view() {
     let mut tui = reconciling();
     tui.keys("q");
-    assert!(!tui.screen().contains("recreate the Worktree"));
+    assert!(!tui.screen().contains("Recreate the Worktree"));
 }
 
 #[test]

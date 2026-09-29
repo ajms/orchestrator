@@ -23,6 +23,7 @@ async fn open_pr(env: &Env, client: &mut TestClient) -> (SessionId, PaneView) {
                 title: "Add caching".into(),
                 body: "Caches things.".into(),
             },
+            skip_teardown: false,
         })
         .await;
     assert_eq!(
@@ -219,6 +220,7 @@ async fn land_pr(
                 title: title.into(),
                 body: String::new(),
             },
+            skip_teardown: false,
         })
         .await
 }
@@ -330,6 +332,7 @@ async fn landing_the_base_of_a_stacked_pr_retargets_that_pr_on_github() {
             landing: Landing::Squash {
                 message: "Lower".into(),
             },
+            skip_teardown: false,
         })
         .await;
 
@@ -398,6 +401,7 @@ async fn a_closed_pr_can_be_reopened_on_github_or_abandoned_for_a_squash() {
             landing: Landing::Squash {
                 message: "Add caching".into(),
             },
+            skip_teardown: false,
         })
         .await;
     assert!(matches!(landed, Ok(Reply::Landed { .. })), "{landed:?}");

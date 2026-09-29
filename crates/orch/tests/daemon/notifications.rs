@@ -240,6 +240,7 @@ async fn looking_at_a_session_or_discarding_it_dismisses_its_notification() {
     client
         .request(Request::Discard {
             session: discarded.clone(),
+            skip_teardown: false,
         })
         .await
         .unwrap();

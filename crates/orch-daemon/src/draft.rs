@@ -42,7 +42,7 @@ impl Daemon {
             return Ok(self.default_draft(id, &record.slug).await);
         };
         let config = self.repo_config(&repo).await?;
-        let agent = config.agent().map_err(|_| untrusted(&config))?;
+        let agent = config.agent().map_err(|_| untrusted(&repo, &config))?;
         let adapter = adapter_for(agent).map_err(refused)?;
         let Some(Argv { program, args }) = adapter.draft(&conversation) else {
             return Ok(self.default_draft(id, &record.slug).await);

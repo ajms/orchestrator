@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -74,6 +74,8 @@ pub enum Request {
     Land {
         session: SessionId,
         landing: Landing,
+        #[serde(default)]
+        skip_teardown: bool,
     },
     RefreshPr {
         session: SessionId,
@@ -86,6 +88,8 @@ pub enum Request {
     },
     Discard {
         session: SessionId,
+        #[serde(default)]
+        skip_teardown: bool,
     },
     SetPreset {
         session: SessionId,
@@ -103,6 +107,14 @@ pub enum Request {
     },
     Fix {
         fix: Fix,
+    },
+    Repos,
+    RepoSettings {
+        repo: PathBuf,
+    },
+    MoveRepo {
+        from: PathBuf,
+        to: PathBuf,
     },
 }
 
@@ -236,6 +248,37 @@ pub enum Reply {
         report: Box<ReconcileReport>,
     },
     Usage(UsageReport),
+    Repos {
+        repos: Vec<PathBuf>,
+    },
+    RepoSettings(RepoSettings),
+    RepoMoved {
+        repo: PathBuf,
+        stale_overrides: StaleOverrides,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoSettings {
+    pub repo: PathBuf,
+    pub presets: Vec<String>,
+    pub default_preset: Option<String>,
+    pub default_base: Option<String>,
+    pub review_command: Option<String>,
+    pub branch_prefix: String,
+    pub trust: Option<TrustNeeded>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustNeeded {
+    pub hash: String,
+    pub items: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StaleOverrides {
+    pub keys: Vec<String>,
+    pub unreadable: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -262,11 +305,21 @@ pub struct UsageTotalsView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "error", rename_all = "snake_case")]
 pub enum RequestError {
-    Untrusted { hash: String, items: Vec<String> },
+    Untrusted {
+        repo: PathBuf,
+        hash: String,
+        items: Vec<String>,
+    },
     UnknownSession,
-    Refused { message: String },
-    Conflict { paths: Vec<String> },
-    Internal { message: String },
+    Refused {
+        message: String,
+    },
+    Conflict {
+        paths: Vec<String>,
+    },
+    Internal {
+        message: String,
+    },
 }
 
 impl std::fmt::Display for RequestError {

@@ -31,6 +31,7 @@ async fn landing_a_stacked_base_retargets_the_session_and_hands_it_the_rebase_on
             landing: Landing::Squash {
                 message: "Lower".into(),
             },
+            skip_teardown: false,
         })
         .await;
     assert!(matches!(landed, Ok(Reply::Landed { .. })), "{landed:?}");
@@ -74,6 +75,7 @@ async fn a_retargeted_base_is_remembered_across_a_daemon_restart() {
             landing: Landing::Squash {
                 message: "Lower".into(),
             },
+            skip_teardown: false,
         })
         .await
         .unwrap();
@@ -116,6 +118,7 @@ async fn a_queued_rebase_prompt_survives_a_daemon_restart() {
             landing: Landing::Squash {
                 message: "Lower".into(),
             },
+            skip_teardown: false,
         })
         .await
         .unwrap();

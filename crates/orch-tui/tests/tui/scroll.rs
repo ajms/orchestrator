@@ -122,3 +122,50 @@ fn the_visual_selection_is_highlighted_in_the_pane() {
     assert_ne!(tui.background_of("line 100"), ratatui::style::Color::Reset);
     assert_eq!(tui.background_of("line 098"), ratatui::style::Color::Reset);
 }
+
+fn lines(from: u32, to: u32) -> String {
+    (from..=to)
+        .map(|n| format!("line {n:03}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn k_at_the_top_edge_scrolls_the_history_while_selecting() {
+    let mut tui = long_history();
+    tui.keys("V");
+    tui.keys(&"k".repeat(30));
+
+    assert!(visible(&mut tui, "line 070"));
+    assert!(!visible(&mut tui, "line 100"));
+    assert_ne!(tui.background_of("line 070"), ratatui::style::Color::Reset);
+}
+
+#[test]
+fn a_yank_spans_more_than_one_screen_of_history() {
+    let mut tui = long_history();
+    tui.keys("V");
+    tui.keys(&"k".repeat(40));
+    tui.keys("y");
+
+    assert_eq!(
+        clipboard(&tui.take_effects()).as_deref(),
+        Some(lines(60, 100).as_str())
+    );
+}
+
+#[test]
+fn j_at_the_bottom_edge_scrolls_back_towards_the_live_screen() {
+    let mut tui = long_history();
+    tui.keys("gg");
+    tui.keys("V");
+    tui.keys(&"j".repeat(40));
+
+    assert!(visible(&mut tui, "line 041"));
+    assert!(!visible(&mut tui, "line 001"));
+    tui.keys("y");
+    assert_eq!(
+        clipboard(&tui.take_effects()).as_deref(),
+        Some(lines(1, 41).as_str())
+    );
+}

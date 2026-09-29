@@ -3,12 +3,14 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orch_agent::{Argv, LaunchSpec, Preset};
+use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset};
 use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted};
-use orch_core::{AgentState, Observation, Phase, PhaseEvent, SessionId};
+use orch_core::{
+    AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
+};
 use orch_git::{SessionName, slugify};
 use orch_holder::SESSION_ENV;
-use orch_protocol::{CreateSession, Reply, RequestError};
+use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
 use crate::agents::{Adapter, adapter_for, default_adapter, default_program};
@@ -54,14 +56,22 @@ pub(crate) fn refused(err: impl std::fmt::Display) -> RequestError {
     }
 }
 
-pub(crate) fn untrusted(config: &RepoConfig) -> RequestError {
-    match config.trust_request() {
-        Some(request) => RequestError::Untrusted {
-            hash: request.hash.as_str().into(),
-            items: request.items.iter().map(describe).collect(),
+pub(crate) fn untrusted(repo: &Path, config: &RepoConfig) -> RequestError {
+    match trust_needed(config) {
+        Some(TrustNeeded { hash, items }) => RequestError::Untrusted {
+            repo: repo.to_path_buf(),
+            hash,
+            items,
         },
         None => refused(Untrusted),
     }
+}
+
+pub(crate) fn trust_needed(config: &RepoConfig) -> Option<TrustNeeded> {
+    config.trust_request().map(|request| TrustNeeded {
+        hash: request.hash.as_str().into(),
+        items: request.items.iter().map(describe).collect(),
+    })
 }
 
 fn describe(item: &TrustItem) -> String {
@@ -207,11 +217,13 @@ impl Daemon {
             .loader
             .repo(root.path(), approval.as_ref())
             .map_err(refused)?;
-        let preset = select_preset(&config, create.preset.as_deref())?;
+        let preset = select_preset(root.path(), &config, create.preset.as_deref())?;
         if config.setup_script().is_err() {
-            return Err(untrusted(&config));
+            return Err(untrusted(root.path(), &config));
         }
-        let agent = config.agent().map_err(|_| untrusted(&config))?;
+        let agent = config
+            .agent()
+            .map_err(|_| untrusted(root.path(), &config))?;
         let adapter = adapter_for(agent).map_err(refused)?;
         let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
@@ -279,7 +291,33 @@ impl Daemon {
         Ok(Live::new(record, repo.path, adapter))
     }
 
-    pub(crate) fn retry_setup(self: &Arc<Self>, id: &SessionId) -> Result<Reply, RequestError> {
+    pub(crate) async fn check_launch(&self, repo: &Path, preset: &str) -> Result<(), RequestError> {
+        let config = self.repo_config(repo).await?;
+        config.agent().map_err(|_| untrusted(repo, &config))?;
+        select_preset(repo, &config, Some(preset)).map(drop)
+    }
+
+    pub(crate) async fn check_teardown(&self, repo: &Path) -> Result<(), RequestError> {
+        let config = self.repo_config(repo).await?;
+        config
+            .teardown_script()
+            .map(drop)
+            .map_err(|_| untrusted(repo, &config))
+    }
+
+    fn session_repo(&self, id: &SessionId) -> Result<(SessionRecord, PathBuf), RequestError> {
+        self.snapshot(id).ok_or(RequestError::UnknownSession)
+    }
+
+    pub(crate) async fn retry_setup(
+        self: &Arc<Self>,
+        id: &SessionId,
+    ) -> Result<Reply, RequestError> {
+        let (_, repo) = self.session_repo(id)?;
+        let config = self.repo_config(&repo).await?;
+        config
+            .setup_script()
+            .map_err(|_| untrusted(&repo, &config))?;
         self.update(id, |live| {
             live.transition(PhaseEvent::SetupRetried)?;
             live.setup_output = None;
@@ -289,7 +327,12 @@ impl Daemon {
         Ok(Reply::Done)
     }
 
-    pub(crate) fn start_anyway(self: &Arc<Self>, id: &SessionId) -> Result<Reply, RequestError> {
+    pub(crate) async fn start_anyway(
+        self: &Arc<Self>,
+        id: &SessionId,
+    ) -> Result<Reply, RequestError> {
+        let (record, repo) = self.session_repo(id)?;
+        self.check_launch(&repo, &record.preset).await?;
         self.update(id, |live| {
             live.transition(PhaseEvent::SetupSkipped)?;
             live.launching = true;
@@ -303,6 +346,8 @@ impl Daemon {
 
     pub(crate) async fn resume(self: &Arc<Self>, id: &SessionId) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
+        let (record, repo) = self.session_repo(id)?;
+        self.check_launch(&repo, &record.preset).await?;
         let mut replaced = None;
         self.update(id, |live| {
             if live.status.flags().worktree_missing {
@@ -344,7 +389,8 @@ impl Daemon {
                 .map_err(|refusal| gate_message("Changing the Preset", refusal))
         })?;
         let config = self.repo_config(&repo).await?;
-        let preset = select_preset(&config, Some(&name))?;
+        let preset = select_preset(&repo, &config, Some(&name))?;
+        config.agent().map_err(|_| untrusted(&repo, &config))?;
         let mut restart = false;
         let mut replaced = None;
         self.update(id, |live| {
@@ -402,7 +448,7 @@ impl Daemon {
             .ok()
             .flatten();
         let launch = match self.repo_config(&repo).await {
-            Ok(config) => self.agent_argv(&config, &record, prompt, resume),
+            Ok(config) => self.agent_argv(&repo, &config, &record, prompt, resume),
             Err(err) => Err(err.to_string()),
         };
         let spawned = match launch {
@@ -440,6 +486,7 @@ impl Daemon {
 
     fn agent_argv(
         &self,
+        repo: &Path,
         config: &RepoConfig,
         record: &SessionRecord,
         prompt: Option<String>,
@@ -447,7 +494,8 @@ impl Daemon {
     ) -> Result<(Adapter, Vec<String>), String> {
         let agent = config.agent().map_err(|err| err.to_string())?;
         let adapter = adapter_for(agent)?;
-        let preset = select_preset(config, Some(&record.preset)).map_err(|err| err.to_string())?;
+        let preset =
+            select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
         let mut spec = LaunchSpec::new(
             record.id.clone(),
             self.config.orch_program.to_string_lossy(),
@@ -456,16 +504,11 @@ impl Daemon {
         if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
             spec = spec.with_prompt(prompt);
         }
-        let Argv { program, args } = match (resume, record.latest_conversation()) {
-            (true, Some(conversation)) => {
-                adapter.restart(&spec, Some(conversation), record.last_mode)
-            }
-            _ => adapter.launch(&spec),
+        let resume = match (resume, record.latest_conversation()) {
+            (true, Some(conversation)) => Some((conversation, record.last_mode)),
+            _ => None,
         };
-        let argv = std::iter::once(program)
-            .chain(agent.args.iter().cloned())
-            .chain(args)
-            .collect();
+        let argv = agent_command(adapter.as_ref(), &agent.args, spec, resume);
         Ok((adapter, argv))
     }
 
@@ -602,11 +645,75 @@ impl Daemon {
 }
 
 pub(crate) fn select_preset(
+    repo: &Path,
     config: &RepoConfig,
     name: Option<&str>,
 ) -> Result<Preset, RequestError> {
     config.select_preset(name).map_err(|err| match err {
         PresetError::Unknown(name) => refused(format!("unknown Preset {name}")),
-        PresetError::Untrusted(_) => untrusted(config),
+        PresetError::Untrusted(_) => untrusted(repo, config),
     })
+}
+
+pub(crate) fn agent_command(
+    adapter: &dyn AgentAdapter,
+    agent_args: &[String],
+    spec: LaunchSpec,
+    resume: Option<(&ConversationId, Option<PermissionMode>)>,
+) -> Vec<String> {
+    let spec = LaunchSpec {
+        preset: adapter.capabilities().effective_preset(spec.preset.clone()),
+        ..spec
+    };
+    let Argv { program, args } = match resume {
+        Some((conversation, mode)) => adapter.restart(&spec, Some(conversation), mode),
+        None => adapter.launch(&spec),
+    };
+    std::iter::once(program)
+        .chain(agent_args.iter().cloned())
+        .chain(args)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use orch_agent::{Capabilities, Presets};
+
+    use super::*;
+
+    struct PresetEcho(Capabilities);
+
+    impl AgentAdapter for PresetEcho {
+        fn capabilities(&self) -> Capabilities {
+            self.0
+        }
+
+        fn launch(&self, spec: &LaunchSpec) -> Argv {
+            Argv {
+                program: "agent".into(),
+                args: vec![spec.preset.name.clone()],
+            }
+        }
+    }
+
+    fn launched_preset(capabilities: Capabilities) -> String {
+        let plan = Presets::default().get("plan").unwrap().clone();
+        let spec = LaunchSpec::new(SessionId("s".into()), "orch", plan);
+        let argv = agent_command(&PresetEcho(capabilities), &[], spec, None);
+        argv.last().unwrap().clone()
+    }
+
+    #[test]
+    fn an_agent_without_modes_is_launched_with_the_inherit_preset() {
+        assert_eq!(launched_preset(Capabilities::default()), "inherit");
+    }
+
+    #[test]
+    fn an_agent_with_modes_is_launched_with_the_chosen_preset() {
+        let modes = Capabilities {
+            modes: true,
+            ..Capabilities::default()
+        };
+        assert_eq!(launched_preset(modes), "plan");
+    }
 }

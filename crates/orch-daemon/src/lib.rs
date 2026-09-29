@@ -13,6 +13,7 @@ mod pr;
 mod rate_limits;
 mod recency;
 mod reconcile;
+mod repos;
 mod setup;
 mod state;
 mod store;
@@ -44,7 +45,7 @@ pub struct DaemonConfig {
     pub sessions_dir: PathBuf,
     pub loader: ConfigLoader,
     pub orch_program: PathBuf,
-    pub idle_timeout: Duration,
+    pub idle_timeout: Option<Duration>,
     pub pr_poll_interval: Duration,
     pub reconcile_interval: Duration,
     pub notifications: NotificationTarget,

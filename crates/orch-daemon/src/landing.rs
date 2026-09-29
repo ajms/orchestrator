@@ -81,6 +81,7 @@ impl Daemon {
         self: &Arc<Self>,
         id: &SessionId,
         landing: Landing,
+        skip_teardown: bool,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
         let (_claim, record, repo) = self.claim(id, |live| {
@@ -95,7 +96,12 @@ impl Daemon {
                 .map_err(|refusal| gate_message("Landing", refusal))
         })?;
         match landing {
-            Landing::Squash { message } => self.land_squash(id, record, repo, message).await,
+            Landing::Squash { message } => {
+                if !skip_teardown {
+                    self.check_teardown(&repo).await?;
+                }
+                self.land_squash(id, record, repo, message).await
+            }
             Landing::Pr { title, body } => self.open_pr(id, record, repo, title, body).await,
         }
     }

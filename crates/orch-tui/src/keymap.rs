@@ -182,7 +182,7 @@ fn start_visual(app: &mut App, linewise: bool) {
     let Some(pane) = &app.pane else {
         return;
     };
-    let cursor = pane.cursor();
+    let cursor = pane.cursor_line();
     app.focus = Focus::Pane;
     app.mode = Mode::Visual(Selection {
         linewise,
@@ -192,18 +192,17 @@ fn start_visual(app: &mut App, linewise: bool) {
 }
 
 fn visual(app: &mut App, mut selection: Selection, key: KeyEvent) {
-    let Some(pane) = &app.pane else {
+    let last_col = app.pane_size().cols.saturating_sub(1);
+    let Some(pane) = &mut app.pane else {
         app.mode = Mode::Normal;
         return;
     };
-    let last_row = pane.rows().saturating_sub(1);
-    let last_col = app.pane_size().cols.saturating_sub(1);
-    let (row, col) = &mut selection.cursor;
+    let (line, col) = &mut selection.cursor;
     match key.code {
         KeyCode::Char('h') | KeyCode::Left => *col = col.saturating_sub(1),
         KeyCode::Char('l') | KeyCode::Right => *col = (*col + 1).min(last_col),
-        KeyCode::Char('k') | KeyCode::Up => *row = row.saturating_sub(1),
-        KeyCode::Char('j') | KeyCode::Down => *row = (*row + 1).min(last_row),
+        KeyCode::Char('k') | KeyCode::Up => *line = pane.reveal(*line - 1),
+        KeyCode::Char('j') | KeyCode::Down => *line = pane.reveal(*line + 1),
         KeyCode::Char('0') => *col = 0,
         KeyCode::Char('$') => *col = last_col,
         KeyCode::Char('y') => {
@@ -223,11 +222,15 @@ fn visual(app: &mut App, mut selection: Selection, key: KeyEvent) {
     app.mode = Mode::Visual(selection);
 }
 
-fn selected_text(pane: &crate::pane::PaneMirror, selection: Selection, last_col: u16) -> String {
+fn selected_text(
+    pane: &mut crate::pane::PaneMirror,
+    selection: Selection,
+    last_col: u16,
+) -> String {
     let (start, end) = selection.ordered();
     let text = match selection.linewise {
-        true => pane.text_between((start.0, 0), (end.0, last_col + 1)),
-        false => pane.text_between(start, (end.0, end.1 + 1)),
+        true => pane.text_of_lines((start.0, 0), (end.0, last_col + 1)),
+        false => pane.text_of_lines(start, (end.0, end.1 + 1)),
     };
     text.trim_end_matches('\n').to_string()
 }

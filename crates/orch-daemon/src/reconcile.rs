@@ -199,14 +199,18 @@ impl Daemon {
             .map_err(refused)
     }
 
-    async fn branch_prefix(&self) -> String {
+    pub(crate) async fn branch_prefix(&self) -> String {
         self.global_config().await.map_or_else(
             |_| orch_git::DEFAULT_BRANCH_PREFIX.into(),
             |global| global.branch_prefix,
         )
     }
 
-    async fn default_base(&self, repo: &Path, config: &RepoConfig) -> Result<String, RequestError> {
+    pub(crate) async fn default_base(
+        &self,
+        repo: &Path,
+        config: &RepoConfig,
+    ) -> Result<String, RequestError> {
         let configured = config.base_branch().map(String::from);
         with_git(repo.to_path_buf(), move |git| {
             git.default_base(configured.as_deref())
@@ -215,7 +219,10 @@ impl Daemon {
         .map_err(refused)
     }
 
-    async fn registered_repo(&self, repo: &Path) -> Result<orch_store::Repo, RequestError> {
+    pub(crate) async fn registered_repo(
+        &self,
+        repo: &Path,
+    ) -> Result<orch_store::Repo, RequestError> {
         let known = repo.to_path_buf();
         self.store
             .call(move |store| store.repo_by_path(&known))
@@ -322,7 +329,7 @@ impl Daemon {
                 Some(base) => base.clone(),
                 None => self.default_base(&repo, &config).await.ok()?,
             };
-            let preset = select_preset(&config, None)
+            let preset = select_preset(&repo, &config, None)
                 .map_or_else(|_| FALLBACK_PRESET.into(), |preset| preset.name);
             self.create_record(NewRecord {
                 id: id.clone(),
@@ -818,16 +825,21 @@ impl Daemon {
 
     async fn forget_repo(self: &Arc<Self>, repo: PathBuf) -> Result<Reply, RequestError> {
         let registered = self.registered_repo(&repo).await?;
-        let sessions: Vec<SessionId> = self
-            .lock()
-            .sessions
-            .values()
-            .filter(|live| live.repo == repo)
-            .map(|live| live.record.id.clone())
-            .collect();
+        let _guard = self.repo_guard(&repo).await;
+        let (sessions, running) = {
+            let state = self.lock();
+            let mine = || state.sessions.values().filter(|live| live.repo == repo);
+            let sessions: Vec<SessionId> = mine().map(|live| live.record.id.clone()).collect();
+            (sessions, mine().any(Live::is_running))
+        };
         if !registered.missing && !sessions.is_empty() {
             return Err(refused(
                 "the Repo still exists and has Sessions; Discard them first",
+            ));
+        }
+        if running {
+            return Err(refused(
+                "Agents of the Repo are still running; quit them before forgetting it",
             ));
         }
         for id in &sessions {
@@ -912,7 +924,7 @@ impl Daemon {
         let _guard = self.repo_guard(&repo).await;
         let leftover = self.current_leftover(&repo, leftover).await?;
         let config = self.repo_config(&repo).await?;
-        let preset = select_preset(&config, None)?;
+        let preset = select_preset(&repo, &config, None)?;
         let base = self.default_base(&repo, &config).await?;
         let prefix = self.branch_prefix().await;
         let (name, worktree) = with_git(repo.clone(), move |git| {

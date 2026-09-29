@@ -212,6 +212,7 @@ fn the_created_session_is_selected_once_it_appears() {
 fn an_untrusted_repo_asks_for_trust_and_retries_after_approval() {
     let mut tui = form(config());
     tui.daemon().script_reply(Err(RequestError::Untrusted {
+        repo: "/home/me/recent".into(),
         hash: "abc123".into(),
         items: vec!["Setup script: ./scripts/setup.sh".into()],
     }));
@@ -244,6 +245,7 @@ fn an_untrusted_repo_asks_for_trust_and_retries_after_approval() {
 fn declining_trust_creates_nothing() {
     let mut tui = form(config());
     tui.daemon().script_reply(Err(RequestError::Untrusted {
+        repo: "/home/me/recent".into(),
         hash: "abc123".into(),
         items: vec!["Setup script".into()],
     }));

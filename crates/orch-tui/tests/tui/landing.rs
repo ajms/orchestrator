@@ -241,7 +241,8 @@ fn discard_previews_what_would_be_lost_before_a_one_key_confirmation() {
     assert_eq!(
         last_request(&mut tui),
         Request::Discard {
-            session: id("doomed")
+            session: id("doomed"),
+            skip_teardown: false,
         }
     );
     assert!(!tui.screen().contains("src/new.rs"));

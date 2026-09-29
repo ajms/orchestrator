@@ -248,12 +248,49 @@ pub async fn connect_or_spawn_daemon(
     connect_or_spawn(&daemon_socket(runtime_dir), spawn, DEFAULT_SPAWN_WAIT).await
 }
 
+pub const DAEMON_UNIT: &str = "orch-daemon.service";
+
 pub async fn restart_running_daemon(
     runtime_dir: &Path,
     orch_program: &Path,
 ) -> Result<Client, ConnectError> {
+    if daemon_under_systemd(runtime_dir) {
+        restart_unit()?;
+        let socket = daemon_socket(runtime_dir);
+        return connect_or_spawn(&socket, || Ok(()), DEFAULT_SPAWN_WAIT).await;
+    }
     let spawn = || spawn_detached(daemon_command(orch_program));
     restart_daemon(runtime_dir, spawn, DEFAULT_SPAWN_WAIT).await
+}
+
+fn restart_unit() -> io::Result<()> {
+    let status = Command::new("systemctl")
+        .args(["--user", "restart", DAEMON_UNIT])
+        .stdin(Stdio::null())
+        .status()?;
+    match status.success() {
+        true => Ok(()),
+        false => Err(io::Error::other(format!(
+            "systemctl --user restart {DAEMON_UNIT} failed ({status})"
+        ))),
+    }
+}
+
+pub fn daemon_under_systemd(runtime_dir: &Path) -> bool {
+    let Ok(holder) = std::fs::read_to_string(daemon_lock(runtime_dir)) else {
+        return false;
+    };
+    let Ok(pid) = holder.trim().parse::<u32>() else {
+        return false;
+    };
+    std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .is_ok_and(|cgroup| in_daemon_unit(&cgroup))
+}
+
+fn in_daemon_unit(cgroup: &str) -> bool {
+    cgroup
+        .lines()
+        .any(|line| line.trim_end().ends_with(&format!("/{DAEMON_UNIT}")))
 }
 
 pub async fn restart_daemon(
@@ -297,5 +334,24 @@ pub async fn stop_daemon(runtime_dir: &Path, wait: Duration) -> io::Result<()> {
             signal = Signal::SIGKILL;
         }
         tokio::time::sleep(SPAWN_POLL).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_daemon_in_the_units_cgroup_runs_under_systemd() {
+        let cgroup =
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/orch-daemon.service\n";
+        assert!(in_daemon_unit(cgroup));
+    }
+
+    #[test]
+    fn a_daemon_spawned_from_a_terminal_does_not() {
+        let cgroup = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/gnome-terminal-server.service\n";
+        assert!(!in_daemon_unit(cgroup));
+        assert!(!in_daemon_unit("0::/user.slice/session-2.scope\n"));
     }
 }

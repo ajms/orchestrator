@@ -325,6 +325,7 @@ async fn a_deleted_base_branch_is_flagged_blocks_landing_and_can_be_retargeted()
             landing: Landing::Squash {
                 message: "Feature".into(),
             },
+            skip_teardown: false,
         })
         .await;
     assert!(
@@ -550,6 +551,7 @@ async fn ended_sessions_leave_the_session_list() {
     let discarded = client
         .request(Request::Discard {
             session: id.clone(),
+            skip_teardown: false,
         })
         .await;
     assert_eq!(discarded, Ok(Reply::Done));
@@ -636,6 +638,7 @@ async fn open_pr(env: &Env, client: &mut TestClient) -> SessionId {
                 title: "Add caching".into(),
                 body: String::new(),
             },
+            skip_teardown: false,
         })
         .await;
     assert!(matches!(opened, Ok(Reply::PrOpened { .. })), "{opened:?}");
@@ -764,6 +767,7 @@ async fn land_with_stuck_cleanup(
             landing: Landing::Squash {
                 message: "Stubborn".into(),
             },
+            skip_teardown: false,
         })
         .await;
     assert!(
@@ -878,6 +882,7 @@ async fn an_interrupted_cleanup_runs_the_teardown_it_missed() {
                 landing: Landing::Squash {
                     message: "Interrupted".into(),
                 },
+                skip_teardown: false,
             })
             .await;
     });

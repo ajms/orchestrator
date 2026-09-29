@@ -234,6 +234,16 @@ impl Live {
         self.holder.as_ref().and_then(|link| link.port_block)
     }
 
+    pub(crate) fn relocate(&mut self, repo: PathBuf, worktree: PathBuf) {
+        self.repo = repo;
+        self.record.worktree = worktree;
+        self.repo_missing = false;
+    }
+
+    pub(crate) fn is_running(&self) -> bool {
+        self.has_holder() || self.launching
+    }
+
     pub(crate) fn has_holder(&self) -> bool {
         self.holder.is_some()
     }
@@ -473,6 +483,20 @@ impl Daemon {
         guard.lock_owned().await
     }
 
+    pub(crate) async fn repo_guards<const N: usize>(
+        &self,
+        repos: [&std::path::Path; N],
+    ) -> Vec<tokio::sync::OwnedMutexGuard<()>> {
+        let mut repos = repos.to_vec();
+        repos.sort();
+        repos.dedup();
+        let mut guards = Vec::new();
+        for repo in repos {
+            guards.push(self.repo_guard(repo).await);
+        }
+        guards
+    }
+
     pub(crate) fn session_dir(&self, id: &SessionId) -> PathBuf {
         self.config.sessions_dir.join(id.as_str())
     }
@@ -487,6 +511,9 @@ impl Daemon {
     }
 
     pub(crate) async fn watch_idle(self: Arc<Self>) {
+        let Some(idle_timeout) = self.config.idle_timeout else {
+            return;
+        };
         let mut idle_since: Option<Instant> = None;
         loop {
             tokio::time::sleep(IDLE_CHECK).await;
@@ -495,7 +522,7 @@ impl Daemon {
                 continue;
             }
             let since = *idle_since.get_or_insert_with(Instant::now);
-            if since.elapsed() >= self.config.idle_timeout {
+            if since.elapsed() >= idle_timeout {
                 self.shutdown.notify_one();
                 return;
             }

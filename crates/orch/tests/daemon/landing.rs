@@ -14,6 +14,7 @@ async fn land(
             landing: Landing::Squash {
                 message: message.into(),
             },
+            skip_teardown: false,
         })
         .await
 }
@@ -276,36 +277,4 @@ async fn a_failing_teardown_after_landing_is_a_warning_next_to_the_landed_commit
         })
         .await;
     assert!(view.error.is_some_and(|error| error.contains("Teardown")));
-}
-
-#[tokio::test]
-async fn an_untrusted_teardown_script_is_skipped_and_reported() {
-    let env = Env::new();
-    let repo = env.repo("app");
-    let marker = env.path("teardown-ran");
-    commit(
-        &repo,
-        ".orchestrator.toml",
-        &format!("teardown = \"touch {}\"\n", marker.display()),
-    );
-    let _daemon = env.start_daemon().await;
-    let mut client = env.client().await;
-    let id = running_session(&env, &mut client, "Untrusted").await;
-
-    let discarded = client
-        .request(Request::Discard {
-            session: id.clone(),
-        })
-        .await;
-
-    assert_eq!(discarded, Ok(Reply::Done));
-    let view = client
-        .until(&id, "Discarded", |view| {
-            view.phase == PhaseView::Discarded && view.port_base.is_none()
-        })
-        .await;
-    let error = view.error.unwrap_or_default();
-    assert!(error.contains("Teardown script was skipped"), "{error}");
-    assert!(error.contains("not trusted"), "{error}");
-    assert!(!marker.exists());
 }
