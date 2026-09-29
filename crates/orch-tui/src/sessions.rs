@@ -58,9 +58,7 @@ impl Sessions {
     }
 
     pub fn count(&self, state: AgentStateView) -> usize {
-        self.listed()
-            .filter(|view| view.agent == Some(state) && view.phase.is_live())
-            .count()
+        self.listed().filter(|view| agent_is(view, state)).count()
     }
 
     pub fn unseen(&self) -> usize {
@@ -79,6 +77,25 @@ impl Sessions {
             .iter()
             .filter(|view| !matches!(view.phase, PhaseView::Landed | PhaseView::Discarded))
     }
+}
+
+pub fn agent_is(view: &SessionView, state: AgentStateView) -> bool {
+    view.phase.is_live() && view.agent == Some(state)
+}
+
+pub fn needs_input(view: &SessionView) -> bool {
+    agent_is(view, AgentStateView::NeedsInput)
+}
+
+pub fn agent_ended(view: &SessionView) -> bool {
+    matches!(
+        view.agent,
+        Some(AgentStateView::Exited | AgentStateView::Errored)
+    )
+}
+
+pub fn agent_running(view: &SessionView) -> bool {
+    view.phase.is_live() && !agent_ended(view)
 }
 
 pub fn repo_label(repo: &Path, missing: bool) -> String {

@@ -18,6 +18,7 @@ mod review_mouse;
 mod scroll;
 mod selection;
 mod sidebar;
+mod sidebar_mouse;
 mod socket_link;
 mod statusline;
 mod trust;

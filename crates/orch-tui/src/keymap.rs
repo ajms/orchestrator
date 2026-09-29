@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use orch_protocol::{AgentStateView, PhaseView};
+use orch_protocol::PhaseView;
 use orch_term::keys::{encode_key, is_ctrl_backslash};
 
 use crate::app::{App, Call, Focus, Mode, Prefix, Selection};
@@ -7,7 +7,7 @@ use crate::event::{Effect, ReviewPurpose};
 use crate::guard::GuardId;
 use crate::layout::Columns;
 use crate::reconcile::ReconcileAction;
-use crate::sessions::phase_label;
+use crate::sessions::{agent_ended, phase_label};
 
 pub(crate) fn handle(app: &mut App, key: KeyEvent) {
     if app.mismatch.is_some() {
@@ -111,6 +111,7 @@ fn normal(app: &mut App, key: KeyEvent) {
     match app.prefix.take() {
         Some(Prefix::CtrlW) => return window(app, key),
         Some(Prefix::G) if key.code == KeyCode::Char('g') => return scroll_to(app, usize::MAX),
+        Some(Prefix::Z) if key.code == KeyCode::Char('a') => return app.toggle_cursor_fold(),
         _ => {}
     }
     let in_pane = app.focus == Focus::Pane;
@@ -123,9 +124,11 @@ fn normal(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') | KeyCode::Up if in_pane => scroll_by(app, 1),
         KeyCode::Char('j') | KeyCode::Down => app.select_offset(1),
         KeyCode::Char('k') | KeyCode::Up => app.select_offset(-1),
+        KeyCode::Enter if !in_pane && app.on_heading() => app.toggle_cursor_fold(),
         KeyCode::Enter | KeyCode::Char('l') => app.focus = Focus::Pane,
         KeyCode::Char('h') | KeyCode::Char('-') => app.focus = Focus::Sidebar,
         KeyCode::Char('g') => app.prefix = Some(Prefix::G),
+        KeyCode::Char('z') => app.prefix = Some(Prefix::Z),
         KeyCode::Char('G') => scroll_to(app, 0),
         KeyCode::Char('v') => start_visual(app, false),
         KeyCode::Char('V') => start_visual(app, true),
@@ -242,10 +245,7 @@ fn enter_insert(app: &mut App) {
     let Some(view) = app.selected_view() else {
         return;
     };
-    let ended = matches!(
-        view.agent,
-        Some(AgentStateView::Exited | AgentStateView::Errored)
-    );
+    let ended = agent_ended(view);
     if view.phase == PhaseView::Suspended || (view.phase.is_live() && ended) {
         return app.resume_selected(true);
     }

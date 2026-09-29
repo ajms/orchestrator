@@ -36,7 +36,7 @@ fn mode_line(app: &App) -> Line<'static> {
         }
         (Mode::Visual(_), None) => "h/j/k/l extend · y yank · Esc cancel".into(),
         (Mode::Normal, None) => {
-            "j/k select · i insert · Ctrl-w h/l focus · d review · : commands".into()
+            "j/k select · i insert · za fold · Ctrl-w h/l focus · d review · : commands".into()
         }
     };
     Line::from(vec![

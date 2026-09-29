@@ -26,6 +26,7 @@ use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
 use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
+use crate::sidebar::{Row, SidebarView, Stop, Viewport};
 
 pub(crate) const NO_SESSION: &str = "no Session selected";
 
@@ -98,6 +99,7 @@ pub(crate) enum Prefix {
     CtrlBackslash,
     CtrlW,
     G,
+    Z,
 }
 
 pub(crate) enum Pending {
@@ -183,6 +185,7 @@ pub(crate) struct App {
     pub gesture: Option<Region>,
     pub pane_selection: Selector,
     pub links: Hyperlinks,
+    pub sidebar: SidebarView,
     pub clock: Box<dyn Fn() -> Instant>,
     size: Size,
     guards: Guards,
@@ -217,6 +220,7 @@ impl App {
             gesture: None,
             pane_selection: Selector::default(),
             links: Hyperlinks::default(),
+            sidebar: SidebarView::default(),
             clock: Box::new(Instant::now),
             size,
             guards: Guards::default(),
@@ -515,23 +519,24 @@ impl App {
     }
 
     fn remove_session(&mut self, session: &SessionId) {
-        let order = self.sessions.ordered_ids();
+        let removed = Stop::Session(session.clone());
+        let before = self.sidebar.stops(&self.sessions);
         self.sessions.remove(session);
-        if self.selected.as_ref() != Some(session) {
+        if self.cursor() != Some(removed.clone()) {
             return;
         }
-        let at = order.iter().position(|id| id == session).unwrap_or(0);
-        let remaining: Vec<&SessionId> = order.iter().filter(|id| *id != session).collect();
-        self.selected = remaining
-            .get(at.min(remaining.len().saturating_sub(1)))
-            .map(|id| (*id).clone());
+        let at = before.iter().position(|stop| *stop == removed).unwrap_or(0);
+        let after = self.sidebar.stops(&self.sessions);
+        if let Some(next) = after.get(at.min(after.len().saturating_sub(1))) {
+            self.set_cursor(next.clone());
+        }
     }
 
     fn focus_session(&mut self, session: SessionId) {
         if self.sessions.get(&session).is_none() {
             return;
         }
-        self.selected = Some(session);
+        self.set_cursor(Stop::Session(session));
         self.reveal_guards();
         self.popup = None;
         self.review = None;
@@ -634,22 +639,150 @@ impl App {
     }
 
     pub fn select_offset(&mut self, offset: isize) {
-        let order = self.sessions.ordered_ids();
+        let stops = self.sidebar.stops(&self.sessions);
         let Some(at) = self
-            .selected
-            .as_ref()
-            .and_then(|id| order.iter().position(|known| known == id))
+            .cursor()
+            .and_then(|cursor| stops.iter().position(|stop| *stop == cursor))
         else {
             return;
         };
         let next = at
             .saturating_add_signed(offset)
-            .min(order.len().saturating_sub(1));
+            .min(stops.len().saturating_sub(1));
         if next != at {
-            self.selected = order.get(next).cloned();
+            self.set_cursor(stops[next].clone());
             self.reveal_guards();
         }
         self.follow_selection();
+    }
+
+    pub fn show_session(&mut self, session: SessionId) {
+        if self.selected.as_ref() != Some(&session) {
+            self.set_cursor(Stop::Session(session));
+            self.reveal_guards();
+        }
+        self.follow_selection();
+    }
+
+    pub fn cursor(&self) -> Option<Stop> {
+        match (&self.sidebar.heading, &self.selected) {
+            (Some(repo), _) => Some(Stop::Heading(repo.clone())),
+            (None, Some(session)) => Some(Stop::Session(session.clone())),
+            (None, None) => None,
+        }
+    }
+
+    fn set_cursor(&mut self, stop: Stop) {
+        match stop {
+            Stop::Session(session) => {
+                self.sidebar.heading = None;
+                self.selected = Some(session);
+            }
+            Stop::Heading(repo) => {
+                self.sidebar.heading = Some(repo);
+                self.selected = None;
+            }
+        }
+    }
+
+    pub fn sidebar_rows(&self) -> Vec<Row<'_>> {
+        let width = usize::from(self.areas().sidebar.width.saturating_sub(2));
+        self.sidebar
+            .rows(&self.sessions, &self.reconcile_report, width)
+    }
+
+    pub fn sidebar_viewport(&self, rows: usize) -> Viewport {
+        let height = usize::from(self.areas().sidebar.height.saturating_sub(2));
+        Viewport { rows, height }
+    }
+
+    pub fn sidebar_stop_at(&self, row: u16) -> Option<Stop> {
+        let first = self.areas().sidebar.y + 1;
+        let rows = self.sidebar_rows();
+        let offset = self.sidebar.offset(self.sidebar_viewport(rows.len()));
+        let at = usize::from(row.checked_sub(first)?) + offset;
+        rows.get(at).and_then(Row::stop)
+    }
+
+    pub fn scroll_sidebar(&mut self, lines: isize) {
+        let viewport = self.sidebar_viewport(self.sidebar_rows().len());
+        self.sidebar.scroll_by(lines, viewport);
+    }
+
+    pub fn toggle_fold(&mut self, repo: &std::path::Path) {
+        if !self.sidebar.is_folded(repo) {
+            self.sidebar.fold(repo);
+            if self.selected_view().is_some_and(|view| view.repo == repo) {
+                self.set_cursor(Stop::Heading(repo.to_path_buf()));
+            }
+            return;
+        }
+        self.sidebar.unfold(repo);
+        if self.sidebar.heading.as_deref() != Some(repo) {
+            return;
+        }
+        let first = self
+            .sessions
+            .in_repo(repo)
+            .next()
+            .map(|view| view.id.clone());
+        if let Some(first) = first {
+            self.set_cursor(Stop::Session(first));
+            self.reveal_guards();
+        }
+    }
+
+    pub fn on_heading(&self) -> bool {
+        self.sidebar.heading.is_some()
+    }
+
+    pub fn toggle_cursor_fold(&mut self) {
+        let repo = match self.cursor() {
+            Some(Stop::Heading(repo)) => repo,
+            Some(Stop::Session(_)) => match self.selected_view() {
+                Some(view) => view.repo.clone(),
+                None => return,
+            },
+            None => return,
+        };
+        self.toggle_fold(&repo);
+    }
+
+    fn settle_cursor(&mut self) {
+        if let Some(repo) = self.selected_view().map(|view| view.repo.clone()) {
+            self.sidebar.unfold(&repo);
+        }
+        let stops = self.sidebar.stops(&self.sessions);
+        if self.cursor().is_some_and(|cursor| stops.contains(&cursor)) {
+            return;
+        }
+        match stops.into_iter().next() {
+            Some(first) => self.set_cursor(first),
+            None => {
+                self.selected = None;
+                self.sidebar.heading = None;
+            }
+        }
+    }
+
+    fn reveal_cursor(&mut self) {
+        let cursor = self.cursor();
+        if cursor == self.sidebar.revealed {
+            return;
+        }
+        self.sidebar.revealed = cursor.clone();
+        let Some(cursor) = cursor else {
+            return;
+        };
+        let rows = self.sidebar_rows();
+        let viewport = self.sidebar_viewport(rows.len());
+        let row = rows
+            .iter()
+            .position(|row| row.stop() == Some(cursor.clone()));
+        drop(rows);
+        if let Some(row) = row {
+            self.sidebar.reveal(row, viewport);
+        }
     }
 
     pub fn end_gesture(&mut self) {
@@ -948,13 +1081,12 @@ impl App {
             .select_when_listed
             .take_if(|wanted| order.contains(wanted))
         {
-            self.selected = Some(wanted);
+            self.set_cursor(Stop::Session(wanted));
         }
-        if !self.selected.as_ref().is_some_and(|id| order.contains(id)) {
-            self.selected = order.first().cloned();
-        }
+        self.settle_cursor();
         self.sync_pane();
         self.report_view();
+        self.reveal_cursor();
     }
 
     fn sync_pane(&mut self) {

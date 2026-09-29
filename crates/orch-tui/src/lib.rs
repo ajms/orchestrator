@@ -22,6 +22,7 @@ mod review;
 mod runtime;
 mod selection;
 mod sessions;
+mod sidebar;
 mod socket;
 
 pub use config::{Display, TuiConfig};

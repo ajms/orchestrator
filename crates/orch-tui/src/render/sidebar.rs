@@ -1,59 +1,95 @@
-use orch_protocol::{PrChecksView, PrReviewView, SessionView};
+use std::path::Path;
+
+use orch_protocol::{AgentStateView, PrChecksView, PrReviewView, SessionView, SubagentView};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 
 use super::style;
 use crate::app::{App, Focus};
 use crate::sessions::repo_label;
+use crate::sidebar::{FLAG_INDENT, FLAG_SEPARATOR, Flag, Folded, Row, Urgency};
 
 const SLUG_WIDTH: usize = 20;
 const SELECTED: Color = Color::Rgb(50, 50, 70);
+const UNSEEN: Style = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
 
 pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let width = usize::from(area.width.saturating_sub(2));
-    let mut lines = Vec::new();
-    for repo in app.sessions.repos() {
-        if !lines.is_empty() {
-            lines.push(Line::default());
-        }
-        let missing = app
-            .sessions
-            .in_repo(repo)
-            .any(|view| view.flags.repo_missing);
-        lines.push(heading(repo, missing));
-        for view in app.sessions.in_repo(repo) {
-            let selected = app.selected.as_ref() == Some(&view.id);
-            lines.extend(session_lines(view, width, selected));
-        }
-    }
-    let listed = app.sessions.repos();
-    for report in &app.reconcile_report.repos {
-        if report.missing && !listed.contains(&report.repo.as_path()) {
-            if !lines.is_empty() {
-                lines.push(Line::default());
-            }
-            lines.push(heading(&report.repo, true));
-        }
-    }
+    let rows = app.sidebar_rows();
+    let offset = app.sidebar.offset(app.sidebar_viewport(rows.len()));
+    let lines: Vec<Line> = rows.iter().map(|row| line(app, row, width)).collect();
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(super::border(app.focus == Focus::Sidebar, false))
         .title(" Sessions ");
-    frame.render_widget(Paragraph::new(lines).block(block), area);
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((u16::try_from(offset).unwrap_or(u16::MAX), 0));
+    frame.render_widget(paragraph, area);
 }
 
-fn heading(repo: &std::path::Path, missing: bool) -> Line<'static> {
+fn line(app: &App, row: &Row, width: usize) -> Line<'static> {
+    let selected = row.stop().is_some_and(|stop| app.cursor() == Some(stop));
+    match row {
+        Row::Blank => Line::default(),
+        Row::MissingRepo(repo) => heading(repo, true),
+        Row::Heading {
+            repo,
+            missing,
+            folded: None,
+        } => heading(repo, *missing),
+        Row::Heading {
+            repo,
+            missing,
+            folded: Some(folded),
+        } => highlighted(folded_heading(repo, *missing, folded), selected),
+        Row::Session(view) => highlighted(first_line(view), selected),
+        Row::Flags(_, flags) => flag_line(flags),
+        Row::Subagent(_, subagent) => subagent_line(subagent, width),
+        Row::SubagentsDone(_, done) => Line::from(format!("    ↳ {done} done")).dark_gray(),
+    }
+}
+
+fn highlighted(line: Line<'static>, selected: bool) -> Line<'static> {
+    match selected {
+        true => line.style(Style::new().bg(SELECTED)),
+        false => line,
+    }
+}
+
+fn heading(repo: &Path, missing: bool) -> Line<'static> {
     Line::from(format!(" {}", repo_label(repo, missing)))
         .bold()
         .underlined()
 }
 
-fn session_lines(view: &SessionView, width: usize, selected: bool) -> Vec<Line<'static>> {
+fn folded_heading(repo: &Path, missing: bool, folded: &Folded) -> Line<'static> {
+    let mut spans = vec![
+        Span::raw(format!(" ▸ {}", repo_label(repo, missing)))
+            .bold()
+            .underlined(),
+        Span::raw(format!(" ({})", folded.count)),
+    ];
+    spans.extend(folded.urgency.map(urgency));
+    Line::from(spans)
+}
+
+fn urgency(urgency: Urgency) -> Span<'static> {
+    match urgency {
+        Urgency::NeedsInput => {
+            let (label, colour) = style::agent_state(AgentStateView::NeedsInput);
+            Span::styled(format!(" {label}"), Style::new().fg(colour))
+        }
+        Urgency::Unseen => Span::styled(" ●", UNSEEN),
+    }
+}
+
+fn first_line(view: &SessionView) -> Line<'static> {
     let marker = match view.flags.unseen {
-        true => Span::styled("● ", Style::new().fg(Color::Yellow).bold()),
+        true => Span::styled("● ", UNSEEN),
         false => Span::raw("  "),
     };
     let (label, colour) = style::status(view);
@@ -76,127 +112,48 @@ fn session_lines(view: &SessionView, width: usize, selected: bool) -> Vec<Line<'
             Style::new().fg(style::context(percent)),
         ));
     }
-    let mut first = Line::from(first);
-    if selected {
-        first = first.style(Style::new().bg(SELECTED));
-    }
-    let mut lines = vec![first];
-    lines.extend(wrap(flags(view), width));
-    lines.extend(subagent_lines(view, width));
-    lines
+    Line::from(first)
 }
 
-fn subagent_lines(view: &SessionView, width: usize) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line> = view
-        .subagents
-        .iter()
-        .filter(|subagent| !subagent.done)
-        .map(|subagent| {
-            let text = format!(
-                "{}: {} · {} tools",
-                subagent.agent_type, subagent.description, subagent.tool_count
-            );
-            Line::from(vec![
-                Span::raw("    ↳ ").dark_gray(),
-                Span::raw(truncate(&text, width.saturating_sub(6).max(1))),
-            ])
-        })
-        .collect();
-    let done = view
-        .subagents
-        .iter()
-        .filter(|subagent| subagent.done)
-        .count();
-    if done > 0 {
-        lines.push(Line::from(format!("    ↳ {done} done")).dark_gray());
-    }
-    lines
-}
-
-fn flags(view: &SessionView) -> Vec<Span<'static>> {
-    let flags = &view.flags;
-    let mut spans = Vec::new();
-    if let Some(number) = flags.pr_number {
-        spans.push(Span::styled(
-            format!("PR #{number}"),
-            Style::new().fg(Color::Magenta),
-        ));
-    }
-    if let Some(pr) = &flags.pr {
-        match pr.checks {
-            PrChecksView::None => {}
-            PrChecksView::Pending => {
-                spans.push(Span::styled("⋯ checks", Style::new().fg(Color::Yellow)))
-            }
-            PrChecksView::Passing => {
-                spans.push(Span::styled("✓ checks", Style::new().fg(Color::Green)))
-            }
-            PrChecksView::Failing => {
-                spans.push(Span::styled("✗ checks", Style::new().fg(Color::Red)))
-            }
-        }
-        match pr.review {
-            PrReviewView::None => {}
-            PrReviewView::ReviewRequired => spans.push(Span::raw("review required")),
-            PrReviewView::Approved => {
-                spans.push(Span::styled("approved", Style::new().fg(Color::Green)))
-            }
-            PrReviewView::ChangesRequested => spans.push(Span::styled(
-                "changes requested",
-                Style::new().fg(Color::Yellow),
-            )),
-        }
-        if pr.new_comments > 0 {
-            spans.push(Span::raw(format!("{} new", pr.new_comments)));
-        }
-        if pr.closed {
-            spans.push(Span::styled(
-                "PR closed (:abandon)",
-                Style::new().fg(Color::Red),
-            ));
-        }
-    }
-    let marks = [
-        (flags.needs_rebase, "⟲ rebase", Color::Yellow),
-        (flags.stalled, "stalled?", Color::Red),
-        (flags.recovered, "recovered", Color::Cyan),
-        (flags.worktree_missing, "worktree missing", Color::Red),
-        (flags.base_missing, "base missing", Color::Red),
-        (flags.muted, "muted", Color::DarkGray),
-    ];
-    spans.extend(
-        marks
-            .into_iter()
-            .filter(|(set, _, _)| *set)
-            .map(|(_, text, colour)| Span::styled(text, Style::new().fg(colour))),
+fn subagent_line(subagent: &SubagentView, width: usize) -> Line<'static> {
+    let text = format!(
+        "{}: {} · {} tools",
+        subagent.agent_type, subagent.description, subagent.tool_count
     );
-    spans
+    Line::from(vec![
+        Span::raw("    ↳ ").dark_gray(),
+        Span::raw(truncate(&text, width.saturating_sub(6).max(1))),
+    ])
 }
 
-fn wrap(items: Vec<Span<'static>>, width: usize) -> Vec<Line<'static>> {
-    const INDENT: &str = "    ";
-    let mut lines = Vec::new();
-    let mut current: Vec<Span<'static>> = Vec::new();
-    let mut used = 0;
-    for item in items {
-        let len = item.content.chars().count();
-        if !current.is_empty() && used + 3 + len > width {
-            lines.push(Line::from(std::mem::take(&mut current)));
+fn flag_line(flags: &[Flag]) -> Line<'static> {
+    let mut spans = vec![Span::raw(" ".repeat(FLAG_INDENT))];
+    for (at, flag) in flags.iter().enumerate() {
+        if at > 0 {
+            spans.push(Span::raw(FLAG_SEPARATOR).dark_gray());
         }
-        if current.is_empty() {
-            current.push(Span::raw(INDENT));
-            used = INDENT.len();
-        } else {
-            current.push(Span::raw(" · ").dark_gray());
-            used += 3;
-        }
-        used += len;
-        current.push(item);
+        spans.push(Span::styled(flag.text(), flag_style(*flag)));
     }
-    if !current.is_empty() {
-        lines.push(Line::from(current));
-    }
-    lines
+    Line::from(spans)
+}
+
+fn flag_style(flag: Flag) -> Style {
+    let colour = match flag {
+        Flag::Pr(_) => Color::Magenta,
+        Flag::Checks(PrChecksView::Pending) => Color::Yellow,
+        Flag::Checks(PrChecksView::Passing) => Color::Green,
+        Flag::Checks(_) => Color::Red,
+        Flag::Review(PrReviewView::Approved) => Color::Green,
+        Flag::Review(PrReviewView::ChangesRequested) => Color::Yellow,
+        Flag::Review(_) | Flag::NewComments(_) => return Style::new(),
+        Flag::PrClosed => Color::Red,
+        Flag::NeedsRebase => Color::Yellow,
+        Flag::Stalled => Color::Red,
+        Flag::Recovered => Color::Cyan,
+        Flag::WorktreeMissing | Flag::BaseMissing => Color::Red,
+        Flag::Muted => Color::DarkGray,
+    };
+    Style::new().fg(colour)
 }
 
 fn truncate(text: &str, width: usize) -> String {

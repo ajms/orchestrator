@@ -2,11 +2,13 @@ use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use vt100::MouseProtocolMode;
 
-use crate::app::{App, Call, Mode};
+use crate::app::{App, Call, Focus, Mode};
 use crate::hyperlinks::{Hyperlink, HyperlinkTarget, hyperlink_at};
 use crate::layout::Columns;
 use crate::passthrough;
 use crate::review::{EditorTarget, ReviewAction, ReviewView};
+use crate::sessions::agent_running;
+use crate::sidebar::Stop;
 
 const WHEEL_LINES: isize = 3;
 
@@ -31,7 +33,13 @@ pub(crate) fn handle(app: &mut App, event: MouseEvent) {
         app.end_gesture();
         return;
     }
-    match owner(app, event) {
+    let region = owner(app, event);
+    if matches!(event.kind, MouseEventKind::Down(_))
+        && matches!(region, Region::Pane | Region::PaneBorder)
+    {
+        app.focus = Focus::Pane;
+    }
+    match region {
         Region::Pane => pane(app, event),
         Region::Sidebar => sidebar(app, event),
         Region::Review => review(app, event),
@@ -200,7 +208,30 @@ fn open(app: &mut App, target: HyperlinkTarget) {
     }
 }
 
-fn sidebar(_app: &mut App, _event: MouseEvent) {}
+fn sidebar(app: &mut App, event: MouseEvent) {
+    match event.kind {
+        MouseEventKind::Down(MouseButton::Left) => sidebar_click(app, event.row),
+        MouseEventKind::ScrollUp => app.scroll_sidebar(WHEEL_LINES),
+        MouseEventKind::ScrollDown => app.scroll_sidebar(-WHEEL_LINES),
+        _ => {}
+    }
+}
+
+fn sidebar_click(app: &mut App, row: u16) {
+    match app.sidebar_stop_at(row) {
+        Some(Stop::Heading(repo)) => app.toggle_fold(&repo),
+        Some(Stop::Session(session)) => app.show_session(session),
+        None => {}
+    }
+    let stay_inserting = app.inserting() && app.selected_view().is_some_and(agent_running);
+    if app.inserting() && !stay_inserting {
+        app.mode = Mode::Normal;
+    }
+    app.focus = match stay_inserting {
+        true => Focus::Pane,
+        false => Focus::Sidebar,
+    };
+}
 
 fn review(app: &mut App, event: MouseEvent) {
     let columns = Columns::of(app.areas().main());

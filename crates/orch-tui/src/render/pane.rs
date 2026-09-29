@@ -21,10 +21,11 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(super::border(focused, app.inserting()));
     let Some(view) = app.selected_view() else {
-        frame.render_widget(
-            Paragraph::new(" No Sessions yet — :new starts one").block(block),
-            area,
-        );
+        let text = match &app.sidebar.heading {
+            Some(repo) => format!(" {} is folded — Enter or za unfolds it", repo_name(repo)),
+            None => " No Sessions yet — :new starts one".into(),
+        };
+        frame.render_widget(Paragraph::new(text).block(block), area);
         return;
     };
     block = block.title(title(view));
