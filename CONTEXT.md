@@ -114,7 +114,7 @@ The input mode in which keystrokes go to the focused Session's Agent.
 _Avoid_: Terminal mode, passthrough
 
 **Normal mode**:
-The input mode in which keystrokes go to the Orchestrator itself.
+The input mode in which keystrokes go to the Orchestrator itself, except `Ctrl-c`, which still reaches the selected Session's Agent.
 _Avoid_: Command mode, orchestrator mode
 
 **Mouse passthrough**:

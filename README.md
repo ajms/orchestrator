@@ -69,6 +69,7 @@ The TUI is modal, like nvim's `:terminal`. In **Insert** mode every key except `
 | `Ctrl-\ Ctrl-n` | Insert → Normal mode |
 | `Ctrl-h` | Insert → Normal mode, focus sidebar |
 | `i` / `a` | Normal → Insert mode (focused Session) |
+| `Ctrl-c` | Normal mode: send Ctrl-c to the selected Session's Agent (interrupt) |
 | `j` / `k` | Sidebar: select a Session. Pane: scroll. |
 | `za`, or `Enter` on a folded heading | Fold / unfold the selected Repo |
 | `Ctrl-d` / `Ctrl-u`, `gg` / `G` | Scroll history |
