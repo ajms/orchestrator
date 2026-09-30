@@ -21,6 +21,8 @@ The domain vocabulary (Session, Repo, Worktree, Landing, Preset, Guard, Trust…
 cargo install --path crates/orch      # or: cargo build --release → target/release/orch
 ```
 
+Or download a Linux x86_64 build from [Releases](https://github.com/ajms/orchestrator/releases).
+
 The Daemon starts automatically the first time you run `orch`, and exits after a few idle minutes once no Client, Holder or open PR needs it. If you'd rather have it start with your login:
 
 ```sh
@@ -162,6 +164,8 @@ pre-commit run --all-files
 ```
 
 CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test` on every PR and on pushes to `main`.
+
+Every green push to `main` is released by `.github/workflows/release.yml`: it tags the commit with the UTC date (`2026.09.30`, then `2026.09.30.1`, `2026.09.30.2`, … for later merges that day) and publishes a GitHub Release with generated notes and a Linux x86_64 tarball. The tag is baked into `orch --version` via `ORCH_VERSION`; local builds report the Cargo version.
 
 ## Architecture
 
