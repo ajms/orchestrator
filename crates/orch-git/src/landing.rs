@@ -76,22 +76,26 @@ impl Repo {
         let commit = self
             .git(["commit-tree", &tree, "-p", &base_tip, "-m", message])
             .run()?;
-        if !self
-            .git(["update-ref", &base_ref, &commit, &base_tip])
-            .succeeds()
-        {
+        self.advance_base(&worktree.base, &base_tip, &commit, main_checkout)?;
+        Ok(Landed { commit })
+    }
+
+    pub(crate) fn advance_base(
+        &self,
+        base: &str,
+        from: &str,
+        to: &str,
+        main_checkout: bool,
+    ) -> Result<(), LandingError> {
+        let base_ref = head_ref(base);
+        if !self.git(["update-ref", &base_ref, to, from]).succeeds() {
             return Err(LandingError::BaseMoved);
         }
-        if main_checkout
-            && let Err(error) = self
-                .git(["read-tree", "-m", "-u", &base_tip, &commit])
-                .run()
-        {
-            self.git(["update-ref", &base_ref, &base_tip, &commit])
-                .run()?;
+        if main_checkout && let Err(error) = self.git(["read-tree", "-m", "-u", from, to]).run() {
+            self.git(["update-ref", &base_ref, from, to]).run()?;
             return Err(error.into());
         }
-        Ok(Landed { commit })
+        Ok(())
     }
 
     pub fn commit_worktree(
@@ -129,7 +133,7 @@ impl Repo {
             .map(drop)
     }
 
-    fn main_checkout_to_update(
+    pub(crate) fn main_checkout_to_update(
         &self,
         base: &str,
         base_tip: &str,

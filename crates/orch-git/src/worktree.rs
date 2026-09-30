@@ -74,12 +74,42 @@ impl Repo {
         base: &str,
     ) -> Result<SessionWorktree, Error> {
         self.exclude_orchestrator_dir()?;
+        self.fast_forward_from_origin(base);
         let worktree = self.session_worktree(name, base);
         self.git(["worktree", "add", "-q", "--no-track", "-b", &name.branch])
             .arg(&worktree.path)
             .arg(head_ref(base))
             .run()?;
         Ok(worktree)
+    }
+
+    fn fast_forward_from_origin(&self, base: &str) {
+        let tracking = format!("refs/remotes/origin/{base}");
+        let fetched = self
+            .git(["fetch", "-q", "--no-tags", "origin"])
+            .arg(format!("+{}:{tracking}", head_ref(base)))
+            .succeeds();
+        if !fetched {
+            return;
+        }
+        let tip = |reference: &str| {
+            self.git(["rev-parse", "--verify", "--quiet", reference])
+                .run()
+                .ok()
+        };
+        let (Some(local), Some(upstream)) = (tip(&head_ref(base)), tip(&tracking)) else {
+            return;
+        };
+        let behind = local != upstream
+            && self
+                .git(["merge-base", "--is-ancestor", &local, &upstream])
+                .succeeds();
+        if !behind {
+            return;
+        }
+        if let Ok(main_checkout) = self.main_checkout_to_update(base, &local, &upstream) {
+            let _ = self.advance_base(base, &local, &upstream, main_checkout);
+        }
     }
 
     pub fn attach_worktree(&self, name: &SessionName) -> Result<PathBuf, Error> {
