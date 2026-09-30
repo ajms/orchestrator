@@ -41,6 +41,31 @@ fn insert_mode_sends_every_key_to_the_pane_including_esc() {
 }
 
 #[test]
+fn ctrl_c_in_normal_mode_interrupts_the_selected_agent_and_stays_in_normal_mode() {
+    let mut tui = one_session();
+    tui.ctrl('c');
+    tui.press(KeyCode::Enter);
+    tui.ctrl('c');
+
+    assert_eq!(tui.daemon().input, b"\x03\x03");
+    assert!(statusline(&mut tui).contains("NORMAL"));
+}
+
+#[test]
+fn ctrl_c_in_normal_mode_sends_nothing_without_a_live_agent() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![
+        in_phase(session("webshop", "asleep"), PhaseView::Suspended),
+        with_agent(session("webshop", "ended"), AgentStateView::Exited),
+    ]);
+    tui.ctrl('c');
+    tui.keys("j");
+    tui.ctrl('c');
+
+    assert!(tui.daemon().input.is_empty());
+}
+
+#[test]
 fn ctrl_backslash_ctrl_n_returns_to_normal_mode() {
     let mut tui = one_session();
     tui.keys("i");

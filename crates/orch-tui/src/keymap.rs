@@ -117,6 +117,7 @@ fn normal(app: &mut App, key: KeyEvent) {
     let in_pane = app.focus == Focus::Pane;
     let half_page = (app.pane_size().rows / 2).max(1) as isize;
     match key.code {
+        KeyCode::Char('c') if ctrl(key) => interrupt(app, key),
         KeyCode::Char('w') if ctrl(key) => app.prefix = Some(Prefix::CtrlW),
         KeyCode::Char('u') if ctrl(key) => scroll_by(app, half_page),
         KeyCode::Char('d') if ctrl(key) => scroll_by(app, -half_page),
@@ -137,6 +138,15 @@ fn normal(app: &mut App, key: KeyEvent) {
         KeyCode::Char('D') => app.load_review(ReviewPurpose::External),
         KeyCode::Char(':') => app.mode = Mode::CommandLine(String::new()),
         _ => {}
+    }
+}
+
+fn interrupt(app: &mut App, key: KeyEvent) {
+    let live = app
+        .selected_view()
+        .is_some_and(|view| view.phase.is_live() && !agent_ended(view));
+    if live && app.shown_pane().is_some() {
+        send_key(app, key);
     }
 }
 
