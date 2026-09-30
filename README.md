@@ -70,11 +70,23 @@ The TUI is modal, like nvim's `:terminal`. In **Insert** mode every key except `
 | `Ctrl-h` | Insert → Normal mode, focus sidebar |
 | `i` / `a` | Normal → Insert mode (focused Session) |
 | `j` / `k` | Sidebar: select a Session. Pane: scroll. |
+| `za`, or `Enter` on a folded heading | Fold / unfold the selected Repo |
 | `Ctrl-d` / `Ctrl-u`, `gg` / `G` | Scroll history |
 | `Ctrl-w h` / `l` / `w` | Focus sidebar / pane / other |
 | `v` / `V`, then `y` | Select and yank text |
 | `d` / `D` | Built-in Review / external Review command |
+| `o` | Review view: open the first hunk in `$EDITOR` |
 | `:` | Command line |
+
+The mouse works the same in Insert and Normal mode and never switches between them. When the Agent asks for the mouse (Claude Code's fullscreen renderer does), clicks, drags, the wheel and motion over the Session pane go to the Agent, so its own selection, copy, scrolling and links work as in a plain terminal. A drag that starts in the pane stays with the pane until you release, even if it wanders onto the sidebar. Hold Shift while dragging to get your terminal's native selection instead; it spans the whole window, sidebar included.
+
+Otherwise the pane has its own selection. Drag to select; dragging past the top or bottom edge scrolls the history. The selection is copied to the clipboard and PRIMARY when you release. Double-click selects a word, triple-click a line. The wheel scrolls the history.
+
+Hold Ctrl over a URL or a file path to underline it, and Ctrl+click to open it: URLs in your browser, files in `$EDITOR` at the line.
+
+In the sidebar, click a Session to show it, click a Repo heading to fold or unfold it, and the wheel scrolls the list.
+
+In the Review view the wheel scrolls the column under it, a click on a file shows it, a drag in the diff selects and copies on release, and Ctrl+click on a diff line opens `$EDITOR` at that line.
 
 Commands:
 

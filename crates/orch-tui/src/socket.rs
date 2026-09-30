@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use orch_core::SessionId;
 use orch_holder::{read_frame_async, write_frame_async};
-use orch_protocol::{ConnectError, FromDaemon, OpenPane, Request, Size, ToDaemon, open_connection};
+use orch_protocol::{
+    ConnectError, DisplayVars, FromDaemon, OpenPane, Request, Size, ToDaemon, open_control,
+    open_pane,
+};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -35,9 +38,10 @@ impl Drop for Relay {
 impl SocketLink {
     pub async fn connect(
         socket: &Path,
+        display: &DisplayVars,
         events: UnboundedSender<Event>,
     ) -> Result<Self, ConnectError> {
-        let (reader, writer) = open_connection(socket, None).await?;
+        let (reader, writer) = open_control(socket, display).await?;
         let (outbox, pending) = unbounded_channel();
         let relay = events.clone();
         let reading = tokio::spawn(async move {
@@ -154,7 +158,7 @@ async fn pane_loop(
     events: UnboundedSender<Event>,
 ) {
     let wrap = |message| Event::Pane { pane, message };
-    let (reader, writer) = match open_connection(&socket, Some(open)).await {
+    let (reader, writer) = match open_pane(&socket, open).await {
         Ok(halves) => halves,
         Err(err) => {
             let reason = err.to_string();

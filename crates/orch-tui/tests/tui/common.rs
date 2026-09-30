@@ -1,7 +1,12 @@
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
-use crossterm::event::{Event as TermEvent, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    Event as TermEvent, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use orch_core::SessionId;
 use orch_protocol::{
     AgentStateView, FlagsView, FromDaemon, PhaseView, Reply, RepoSettings, Request, RequestError,
@@ -15,6 +20,8 @@ use ratatui::style::Color;
 pub const WIDTH: u16 = 120;
 pub const HEIGHT: u16 = 30;
 pub const SIDEBAR: u16 = 40;
+pub const PANE_LEFT: u16 = SIDEBAR + 1;
+pub const PANE_TOP: u16 = 1;
 
 #[derive(Default)]
 pub struct FakeDaemon {
@@ -23,6 +30,8 @@ pub struct FakeDaemon {
     pub pane_ids: Vec<(PaneId, SessionId)>,
     pub closed: usize,
     pub input: Vec<u8>,
+    pub input_by_session: Vec<(Option<String>, Vec<u8>)>,
+    shown: Option<String>,
     pub pastes: Vec<String>,
     pub resizes: Vec<Size>,
     pub screens: Vec<(SessionId, ScreenSnapshot)>,
@@ -69,6 +78,16 @@ impl FakeDaemon {
             .unwrap_or_else(|| panic!("no pane opened for {session}"))
     }
 
+    pub fn input_to(&self, session: &str) -> String {
+        let bytes: Vec<u8> = self
+            .input_by_session
+            .iter()
+            .filter(|(shown, _)| shown.as_deref() == Some(session))
+            .flat_map(|(_, bytes)| bytes.clone())
+            .collect();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
     pub fn open_panes(&self) -> Vec<String> {
         self.opened
             .iter()
@@ -99,6 +118,7 @@ impl DaemonLink for FakeDaemon {
 
     fn open_pane(&mut self, pane: PaneId, session: &SessionId, size: Size) {
         self.opened.push((session.clone(), size));
+        self.shown = Some(session.as_str().to_string());
         self.pane_ids.push((pane, session.clone()));
         if let Some((_, screen)) = self.screens.iter().find(|(id, _)| id == session) {
             self.outbox.push_back(Event::Pane {
@@ -110,9 +130,12 @@ impl DaemonLink for FakeDaemon {
 
     fn close_pane(&mut self) {
         self.closed += 1;
+        self.shown = None;
     }
 
     fn input(&mut self, bytes: Vec<u8>) {
+        self.input_by_session
+            .push((self.shown.clone(), bytes.clone()));
         self.input.extend(bytes);
     }
 
@@ -129,6 +152,18 @@ pub struct Harness {
     pub tui: Tui<FakeDaemon>,
     pub terminal: Terminal<TestBackend>,
     pub effects: Vec<Effect>,
+    clock: Rc<Cell<Instant>>,
+}
+
+fn tui_with_clock(config: TuiConfig, daemon: FakeDaemon) -> (Tui<FakeDaemon>, Rc<Cell<Instant>>) {
+    let size = Size {
+        rows: HEIGHT,
+        cols: WIDTH,
+    };
+    let clock = Rc::new(Cell::new(Instant::now()));
+    let now = clock.clone();
+    let tui = Tui::new(config, daemon, size).with_clock(move || now.get());
+    (tui, clock)
 }
 
 impl Harness {
@@ -149,26 +184,22 @@ impl Harness {
     }
 
     pub fn unfocused() -> Self {
-        let size = Size {
-            rows: HEIGHT,
-            cols: WIDTH,
-        };
+        let (tui, clock) = tui_with_clock(TuiConfig::default(), FakeDaemon::default());
         Self {
-            tui: Tui::new(TuiConfig::default(), FakeDaemon::default(), size),
+            tui,
             terminal: Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap(),
             effects: Vec::new(),
+            clock,
         }
     }
 
     fn build(config: TuiConfig, daemon: FakeDaemon) -> Self {
-        let size = Size {
-            rows: HEIGHT,
-            cols: WIDTH,
-        };
+        let (tui, clock) = tui_with_clock(config, daemon);
         let mut harness = Self {
-            tui: Tui::new(config, daemon, size),
+            tui,
             terminal: Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap(),
             effects: Vec::new(),
+            clock,
         };
         harness.send(Event::Terminal(TermEvent::FocusGained));
         harness
@@ -222,6 +253,54 @@ impl Harness {
             };
             self.press(code);
         }
+    }
+
+    pub fn mouse(&mut self, kind: MouseEventKind, column: u16, row: u16, modifiers: KeyModifiers) {
+        let event = MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers,
+        };
+        self.send(Event::Terminal(TermEvent::Mouse(event)));
+    }
+
+    pub fn mouse_down(&mut self, column: u16, row: u16) {
+        let kind = MouseEventKind::Down(MouseButton::Left);
+        self.mouse(kind, column, row, KeyModifiers::NONE);
+    }
+
+    pub fn drag(&mut self, column: u16, row: u16) {
+        let kind = MouseEventKind::Drag(MouseButton::Left);
+        self.mouse(kind, column, row, KeyModifiers::NONE);
+    }
+
+    pub fn release(&mut self, column: u16, row: u16) {
+        let kind = MouseEventKind::Up(MouseButton::Left);
+        self.mouse(kind, column, row, KeyModifiers::NONE);
+    }
+
+    pub fn click(&mut self, column: u16, row: u16) {
+        self.mouse_down(column, row);
+        self.release(column, row);
+    }
+
+    pub fn wheel(&mut self, kind: MouseEventKind, column: u16, row: u16) {
+        self.mouse(kind, column, row, KeyModifiers::NONE);
+    }
+
+    pub fn later(&mut self, millis: u64) {
+        self.clock
+            .set(self.clock.get() + Duration::from_millis(millis));
+    }
+
+    pub fn tick(&mut self) {
+        self.send(Event::Tick);
+    }
+
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.terminal.backend_mut().resize(cols, rows);
+        self.send(Event::Terminal(TermEvent::Resize(cols, rows)));
     }
 
     pub fn command(&mut self, line: &str) {
@@ -381,6 +460,10 @@ pub fn screen_of(text: &str, size: Size) -> ScreenSnapshot {
         alternate: None,
         input_modes: screen.input_mode_formatted(),
     }
+}
+
+pub fn in_pane(col: u16, row: u16) -> (u16, u16) {
+    (PANE_LEFT + col, PANE_TOP + row)
 }
 
 pub fn statusline(tui: &mut Harness) -> String {

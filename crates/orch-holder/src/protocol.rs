@@ -76,6 +76,11 @@ pub enum FromHolder {
         answer: GuardAnswer,
     },
     Superseded,
+    Clipboard {
+        text: String,
+    },
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

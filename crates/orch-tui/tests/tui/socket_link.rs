@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use orch_holder::{read_frame_async, write_frame_async};
-use orch_protocol::{FromDaemon, OpenPane, PROTOCOL_VERSION, Reply, Request, Size, ToDaemon};
+use orch_protocol::{
+    DisplayVars, FromDaemon, OpenPane, PROTOCOL_VERSION, Reply, Request, Size, ToDaemon,
+};
 use orch_tui::{DaemonLink, Event, PaneId, RequestId, SocketLink};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -9,6 +11,13 @@ use tokio::sync::mpsc;
 use crate::common::id;
 
 const PANE: Size = Size { rows: 10, cols: 40 };
+
+fn desktop() -> DisplayVars {
+    DisplayVars {
+        wayland_display: Some("wayland-7".into()),
+        x11_display: None,
+    }
+}
 
 async fn next(rx: &mut mpsc::UnboundedReceiver<Event>) -> Event {
     tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -30,7 +39,8 @@ async fn the_socket_link_speaks_the_daemon_protocol_on_control_and_pane_connecti
             hello,
             ToDaemon::Hello {
                 version: PROTOCOL_VERSION,
-                pane: None
+                pane: None,
+                display: Some(desktop()),
             }
         );
         let welcome = FromDaemon::Welcome {
@@ -70,6 +80,7 @@ async fn the_socket_link_speaks_the_daemon_protocol_on_control_and_pane_connecti
                     session: crate::common::id("first"),
                     size: PANE
                 }),
+                display: None,
             }
         );
         write_frame_async(&mut pane_out, &welcome).await.unwrap();
@@ -91,7 +102,7 @@ async fn the_socket_link_speaks_the_daemon_protocol_on_control_and_pane_connecti
     });
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut link = SocketLink::connect(&socket, tx).await.unwrap();
+    let mut link = SocketLink::connect(&socket, &desktop(), tx).await.unwrap();
     assert!(matches!(
         next(&mut rx).await,
         Event::Daemon(FromDaemon::Sessions { .. })
@@ -147,7 +158,7 @@ async fn a_version_mismatch_is_reported_on_connect() {
     });
 
     let (tx, _rx) = mpsc::unbounded_channel();
-    match SocketLink::connect(&socket, tx).await {
+    match SocketLink::connect(&socket, &desktop(), tx).await {
         Err(orch_protocol::ConnectError::VersionMismatch { message, .. }) => {
             assert_eq!(message, "old Daemon");
         }

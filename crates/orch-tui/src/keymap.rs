@@ -1,14 +1,13 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use orch_protocol::{AgentStateView, PhaseView};
+use orch_protocol::PhaseView;
 use orch_term::keys::{encode_key, is_ctrl_backslash};
 
 use crate::app::{App, Call, Focus, Mode, Prefix, Selection};
-use crate::clipboard::osc52;
 use crate::event::{Effect, ReviewPurpose};
 use crate::guard::GuardId;
+use crate::layout::Columns;
 use crate::reconcile::ReconcileAction;
-use crate::review::ReviewAction;
-use crate::sessions::phase_label;
+use crate::sessions::{agent_ended, phase_label};
 
 pub(crate) fn handle(app: &mut App, key: KeyEvent) {
     if app.mismatch.is_some() {
@@ -60,14 +59,12 @@ fn reconcile(app: &mut App, key: KeyEvent) {
 
 fn review(app: &mut App, key: KeyEvent) {
     app.message = None;
+    let body = Columns::of(app.areas().main()).diff_body();
     let Some(review) = &mut app.review else {
         return;
     };
-    match review.key(key) {
-        ReviewAction::Stay => {}
-        ReviewAction::Close => app.review = None,
-        ReviewAction::CommandLine => app.mode = Mode::CommandLine(String::new()),
-    }
+    let action = review.key(key, body);
+    app.review_action(action);
 }
 
 pub(crate) fn paste(app: &mut App, text: String) {
@@ -114,6 +111,7 @@ fn normal(app: &mut App, key: KeyEvent) {
     match app.prefix.take() {
         Some(Prefix::CtrlW) => return window(app, key),
         Some(Prefix::G) if key.code == KeyCode::Char('g') => return scroll_to(app, usize::MAX),
+        Some(Prefix::Z) if key.code == KeyCode::Char('a') => return app.toggle_cursor_fold(),
         _ => {}
     }
     let in_pane = app.focus == Focus::Pane;
@@ -126,9 +124,11 @@ fn normal(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') | KeyCode::Up if in_pane => scroll_by(app, 1),
         KeyCode::Char('j') | KeyCode::Down => app.select_offset(1),
         KeyCode::Char('k') | KeyCode::Up => app.select_offset(-1),
+        KeyCode::Enter if !in_pane && app.on_heading() => app.toggle_cursor_fold(),
         KeyCode::Enter | KeyCode::Char('l') => app.focus = Focus::Pane,
         KeyCode::Char('h') | KeyCode::Char('-') => app.focus = Focus::Sidebar,
         KeyCode::Char('g') => app.prefix = Some(Prefix::G),
+        KeyCode::Char('z') => app.prefix = Some(Prefix::Z),
         KeyCode::Char('G') => scroll_to(app, 0),
         KeyCode::Char('v') => start_visual(app, false),
         KeyCode::Char('V') => start_visual(app, true),
@@ -188,6 +188,7 @@ fn start_visual(app: &mut App, linewise: bool) {
         return;
     };
     let cursor = pane.cursor_line();
+    app.pane_selection.clear();
     app.focus = Focus::Pane;
     app.mode = Mode::Visual(Selection {
         linewise,
@@ -213,7 +214,7 @@ fn visual(app: &mut App, mut selection: Selection, key: KeyEvent) {
         KeyCode::Char('y') => {
             let text = selected_text(pane, selection, last_col);
             let lines = text.lines().count();
-            app.push(Call::Local(Effect::WriteTerminal(osc52(&text))));
+            app.copy(&text);
             app.message = Some(format!("yanked {lines} line(s)"));
             app.mode = Mode::Normal;
             return;
@@ -244,10 +245,7 @@ fn enter_insert(app: &mut App) {
     let Some(view) = app.selected_view() else {
         return;
     };
-    let ended = matches!(
-        view.agent,
-        Some(AgentStateView::Exited | AgentStateView::Errored)
-    );
+    let ended = agent_ended(view);
     if view.phase == PhaseView::Suspended || (view.phase.is_live() && ended) {
         return app.resume_selected(true);
     }

@@ -343,6 +343,11 @@ impl State {
 
     fn output(&mut self, bytes: &[u8]) {
         self.emulator.process(bytes);
+        for text in self.emulator.take_copies() {
+            if let Some((_, upstream)) = &self.upstream {
+                upstream.send(FromHolder::Clipboard { text });
+            }
+        }
         self.subscribers.retain(|_, feed| {
             feed.push(FromHolder::Output {
                 bytes: bytes.to_vec(),

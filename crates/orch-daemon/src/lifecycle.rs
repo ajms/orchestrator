@@ -531,7 +531,8 @@ impl Daemon {
                 .arg("--port-size")
                 .arg(block.size.to_string());
         }
-        for (key, value) in session_env(record) {
+        let display = self.lock().display.pairs();
+        for (key, value) in session_env(record).into_iter().chain(display) {
             command.arg("--env").arg(format!("{key}={value}"));
         }
         let size = self

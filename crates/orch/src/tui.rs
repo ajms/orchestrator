@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use orch_holder::default_runtime_dir;
+use orch_protocol::DisplayVars;
 use orch_tui::{Options, TuiConfig};
 
 use crate::client::{self, ClientError};
@@ -31,7 +32,10 @@ fn start() -> Result<(), String> {
     let options = Options {
         runtime_dir: default_runtime_dir(),
         orch_program,
-        config: tui_config(cwd.as_deref()),
+        config: TuiConfig {
+            display: DisplayVars::from_env(),
+            ..tui_config(cwd.as_deref())
+        },
     };
     client::block_on(orch_tui::run(options))
         .map_err(|err: ClientError| err.to_string())?

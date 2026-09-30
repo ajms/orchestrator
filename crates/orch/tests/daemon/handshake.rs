@@ -20,6 +20,7 @@ async fn a_client_speaking_another_protocol_version_is_told_so_explicitly() {
     let hello = ToDaemon::Hello {
         version: PROTOCOL_VERSION + 1,
         pane: None,
+        display: None,
     };
     write_frame_async(&mut stream, &hello).await.unwrap();
     let reply: Option<FromDaemon> = read_frame_async(&mut stream).await.unwrap();
@@ -49,6 +50,7 @@ async fn a_client_of_another_version_can_restart_the_daemon_and_sessions_survive
     let hello = ToDaemon::Hello {
         version: PROTOCOL_VERSION + 1,
         pane: None,
+        display: None,
     };
     write_frame_async(&mut stream, &hello).await.unwrap();
     let reply: Option<FromDaemon> = read_frame_async(&mut stream).await.unwrap();

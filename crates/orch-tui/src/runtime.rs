@@ -1,12 +1,14 @@
 use std::io::{self, Stdout, Write};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc as std_mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crossterm::event::{
-    DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+    DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -16,15 +18,17 @@ use orch_protocol::{ConnectError, Size, daemon_socket};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::time::Instant;
 
 use crate::config::TuiConfig;
 use crate::event::{EditorError, Effect, Event};
 use crate::git::load_review;
-use crate::link::Tui;
+use crate::link::{DaemonLink, Tui};
 use crate::socket::SocketLink;
 
 const INPUT_POLL: Duration = Duration::from_millis(50);
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(1);
+const AUTO_SCROLL_TICK: Duration = Duration::from_millis(50);
 
 pub struct Options {
     pub runtime_dir: PathBuf,
@@ -49,9 +53,10 @@ async fn event_loop(
     inbox: &mut UnboundedReceiver<Event>,
 ) -> io::Result<()> {
     let mut tui = connect(options, events, false).await?;
+    let mut tick_at = Instant::now();
     loop {
         screen.terminal.draw(|frame| tui.render(frame))?;
-        let Some(event) = inbox.recv().await else {
+        let Some(event) = next_event(&tui, inbox, &mut tick_at).await else {
             return Ok(());
         };
         let mut effects = tui.handle(event);
@@ -62,6 +67,14 @@ async fn event_loop(
             match effect {
                 Effect::Quit => return Ok(()),
                 Effect::WriteTerminal(bytes) => screen.write(&bytes)?,
+                Effect::CopyCommand {
+                    program,
+                    args,
+                    text,
+                } => in_background(events, program, args, Some(text)),
+                Effect::OpenUrl { url } => {
+                    in_background(events, "xdg-open".into(), vec![url], None)
+                }
                 Effect::EditText { text } => {
                     let result = screen
                         .suspend(input, move || edit(&text))
@@ -76,6 +89,15 @@ async fn event_loop(
                         .and_then(|result| result);
                     if let Err(err) = result {
                         let _ = events.send(Event::Notice(format!("external Review: {err}")));
+                    }
+                }
+                Effect::OpenInEditor { file, line, cwd } => {
+                    let result = screen
+                        .suspend(input, move || run_editor(&file, line, &cwd))
+                        .await
+                        .unwrap_or_else(|err| Err(EditorError::Io(err)));
+                    if let Err(err) = result {
+                        let _ = events.send(Event::Notice(format!("editor failed: {err}")));
                     }
                 }
                 Effect::LoadReview {
@@ -101,6 +123,24 @@ async fn event_loop(
             }
         }
     }
+}
+
+async fn next_event<L: DaemonLink>(
+    tui: &Tui<L>,
+    inbox: &mut UnboundedReceiver<Event>,
+    tick_at: &mut Instant,
+) -> Option<Event> {
+    if !tui.auto_scrolling() {
+        *tick_at = Instant::now() + AUTO_SCROLL_TICK;
+        return inbox.recv().await;
+    }
+    if Instant::now() < *tick_at
+        && let Ok(event) = tokio::time::timeout_at(*tick_at, inbox.recv()).await
+    {
+        return event;
+    }
+    *tick_at = Instant::now() + AUTO_SCROLL_TICK;
+    Some(Event::Tick)
 }
 
 fn discard_stale(inbox: &mut UnboundedReceiver<Event>, events: &UnboundedSender<Event>) {
@@ -132,7 +172,7 @@ async fn connect(
         false => orch_protocol::connect_or_spawn_daemon(runtime_dir, program).await,
     };
     let link = match ensured {
-        Ok(_) => SocketLink::connect(&socket, events.clone()).await,
+        Ok(_) => SocketLink::connect(&socket, &options.config.display, events.clone()).await,
         Err(err) => Err(err),
     };
     let link = match link {
@@ -152,19 +192,64 @@ fn edit(text: &str) -> Result<String, EditorError> {
         .suffix(".md")
         .tempfile()?;
     std::fs::write(file.path(), text)?;
+    run_editor(file.path(), None, Path::new("."))?;
+    Ok(std::fs::read_to_string(file.path())?)
+}
+
+fn run_editor(file: &Path, line: Option<u32>, cwd: &Path) -> Result<(), EditorError> {
     let editor = std::env::var("VISUAL")
         .or_else(|_| std::env::var("EDITOR"))
         .unwrap_or_else(|_| "vi".into());
+    let at = line.map_or(String::new(), |line| format!(" +{line}"));
     let status = Command::new("sh")
         .arg("-c")
-        .arg(format!("{editor} \"$1\""))
+        .arg(format!("{editor}{at} \"$1\""))
         .arg("sh")
-        .arg(file.path())
+        .arg(file)
+        .current_dir(cwd)
         .status()?;
-    if !status.success() {
-        return Err(EditorError::Exited { editor, status });
+    match status.success() {
+        true => Ok(()),
+        false => Err(EditorError::Exited { editor, status }),
     }
-    Ok(std::fs::read_to_string(file.path())?)
+}
+
+fn in_background(
+    events: &UnboundedSender<Event>,
+    program: String,
+    args: Vec<String>,
+    stdin: Option<String>,
+) {
+    let events = events.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(err) = run_process(&program, &args, stdin) {
+            let _ = events.send(Event::Notice(format!("{program}: {err}")));
+        }
+    });
+}
+
+fn run_process(program: &str, args: &[String], stdin: Option<String>) -> io::Result<()> {
+    let piped = match stdin {
+        Some(_) => Stdio::piped(),
+        None => Stdio::null(),
+    };
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(piped)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()?;
+    let written = match (child.stdin.take(), stdin) {
+        (Some(mut pipe), Some(text)) => pipe.write_all(text.as_bytes()),
+        _ => Ok(()),
+    };
+    let status = child.wait()?;
+    written?;
+    match status.success() {
+        true => Ok(()),
+        false => Err(io::Error::other(format!("exited with {status}"))),
+    }
 }
 
 fn shell(command: &str, cwd: &Path, env: &[(String, String)]) -> io::Result<()> {
@@ -234,6 +319,7 @@ fn start() -> io::Result<()> {
     let entered = execute!(
         io::stdout(),
         EnterAlternateScreen,
+        EnableMouseCapture,
         EnableFocusChange,
         EnableBracketedPaste
     );
@@ -248,6 +334,7 @@ fn leave() -> io::Result<()> {
         io::stdout(),
         DisableBracketedPaste,
         DisableFocusChange,
+        DisableMouseCapture,
         LeaveAlternateScreen
     );
     disable_raw_mode()?;

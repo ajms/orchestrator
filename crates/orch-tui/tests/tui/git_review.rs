@@ -91,3 +91,36 @@ fn a_missing_base_is_an_error() {
     };
     assert!(load_review(&target).is_err());
 }
+
+#[test]
+fn a_file_removed_in_the_worktree_is_marked_as_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("old.rs"), "fn old() {}\n").unwrap();
+    std::fs::write(repo.join("kept.rs"), "fn kept() {}\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-qm", "init"]);
+    let worktree = dir.path().join("wt");
+    let path = worktree.to_str().unwrap();
+    git(&repo, &["worktree", "add", "-q", "-b", "orch/work", path]);
+    std::fs::remove_file(worktree.join("old.rs")).unwrap();
+    std::fs::write(worktree.join("kept.rs"), "").unwrap();
+
+    let review = load_review(&ReviewTarget {
+        repo: repo.clone(),
+        worktree: worktree.clone(),
+        slug: "wt".into(),
+        branch: "orch/work".into(),
+        base: "main".into(),
+    })
+    .unwrap();
+
+    let marks: Vec<(&str, bool)> = review
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.deleted))
+        .collect();
+    assert_eq!(marks, vec![("kept.rs", false), ("old.rs", true)]);
+}

@@ -1,16 +1,16 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 
+use crate::layout::Columns;
 use crate::review::ReviewView;
 
 const SELECTED: Color = Color::Rgb(50, 50, 70);
 
 pub(super) fn draw(review: &ReviewView, frame: &mut Frame, area: Rect) {
-    let [files, diff] =
-        Layout::horizontal([Constraint::Length(40), Constraint::Min(20)]).areas(area);
+    let columns = Columns::of(area);
     let rows: Vec<Line> = review
         .files
         .iter()
@@ -33,12 +33,12 @@ pub(super) fn draw(review: &ReviewView, frame: &mut Frame, area: Rect) {
         false => rows,
     };
     frame.render_widget(
-        Paragraph::new(rows).block(
+        Paragraph::new(rows).scroll((review.list_scroll, 0)).block(
             Block::bordered()
                 .border_type(BorderType::Rounded)
                 .title(format!(" Review vs {} ", review.base)),
         ),
-        files,
+        columns.files,
     );
     let body: Vec<Line> = review
         .files
@@ -49,10 +49,14 @@ pub(super) fn draw(review: &ReviewView, frame: &mut Frame, area: Rect) {
         Paragraph::new(body).scroll((review.scroll, 0)).block(
             Block::bordered()
                 .border_type(BorderType::Rounded)
-                .title(" j/k file · Ctrl-d/u scroll · :land · q back "),
+                .title(" j/k file · Ctrl-d/u scroll · o edit · :land · q back "),
         ),
-        diff,
+        columns.diff,
     );
+    if let Some(span) = review.selection.span() {
+        let top = i64::from(review.scroll);
+        super::pane::paint_selection(frame, columns.diff_body(), top, span, false);
+    }
 }
 
 fn diff_line(line: &str) -> Line<'static> {

@@ -1,3 +1,5 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use orch_term::keys::InputModes;
 use serde::{Deserialize, Serialize};
 
@@ -5,9 +7,43 @@ use crate::Size;
 
 const ALT_SCREEN_ENTRIES: [&[u8]; 2] = [b"\x1b[?1049h", b"\x1b[?47h"];
 const ALT_SCREEN_ENTER: &[u8] = b"\x1b[?1049h";
+const FOCUS_REPORTING: u16 = 1004;
+const MAX_COPY: usize = 1 << 20;
+
+#[derive(Default)]
+struct AgentRequests {
+    copies: Vec<String>,
+    focus_reporting: bool,
+}
+
+impl vt100::Callbacks for AgentRequests {
+    fn copy_to_clipboard(&mut self, _: &mut vt100::Screen, _ty: &[u8], data: &[u8]) {
+        let Ok(decoded) = STANDARD.decode(data) else {
+            return;
+        };
+        if !decoded.is_empty() && decoded.len() <= MAX_COPY {
+            self.copies
+                .push(String::from_utf8_lossy(&decoded).into_owned());
+        }
+    }
+
+    fn unhandled_csi(
+        &mut self,
+        _: &mut vt100::Screen,
+        i1: Option<u8>,
+        _i2: Option<u8>,
+        params: &[&[u16]],
+        c: char,
+    ) {
+        let private_mode = i1 == Some(b'?') && matches!(c, 'h' | 'l');
+        if private_mode && params.contains(&&[FOCUS_REPORTING][..]) {
+            self.focus_reporting = c == 'h';
+        }
+    }
+}
 
 pub struct Emulator {
-    parser: vt100::Parser,
+    parser: vt100::Parser<AgentRequests>,
     main: Option<vt100::Screen>,
     carry: Vec<u8>,
 }
@@ -15,7 +51,12 @@ pub struct Emulator {
 impl Emulator {
     pub fn new(size: Size, scrollback: usize) -> Self {
         Self {
-            parser: vt100::Parser::new(size.rows, size.cols, scrollback),
+            parser: vt100::Parser::new_with_callbacks(
+                size.rows,
+                size.cols,
+                scrollback,
+                AgentRequests::default(),
+            ),
             main: None,
             carry: Vec::new(),
         }
@@ -41,6 +82,10 @@ impl Emulator {
         }
     }
 
+    pub fn take_copies(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.parser.callbacks_mut().copies)
+    }
+
     pub fn resize(&mut self, size: Size) {
         self.parser.screen_mut().set_size(size.rows, size.cols);
         if let Some(main) = &mut self.main {
@@ -56,6 +101,7 @@ impl Emulator {
         ScreenCopy {
             current: self.parser.screen().clone(),
             main: self.main.clone(),
+            focus_reporting: self.parser.callbacks().focus_reporting,
         }
     }
 
@@ -96,6 +142,7 @@ fn modes_of(screen: &vt100::Screen) -> InputModes {
 pub struct ScreenCopy {
     current: vt100::Screen,
     main: Option<vt100::Screen>,
+    focus_reporting: bool,
 }
 
 impl ScreenCopy {
@@ -105,7 +152,10 @@ impl ScreenCopy {
             .current
             .alternate_screen()
             .then(|| self.current.contents_formatted());
-        let input_modes = self.current.input_mode_formatted();
+        let mut input_modes = self.current.input_mode_formatted();
+        if self.focus_reporting {
+            input_modes.extend(format!("\x1b[?{FOCUS_REPORTING}h").into_bytes());
+        }
         let main = match (&alternate, self.main.as_mut()) {
             (Some(_), Some(main)) => main,
             _ => &mut self.current,

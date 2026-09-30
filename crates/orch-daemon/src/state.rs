@@ -9,7 +9,8 @@ use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
 use orch_notify::{AttentionEvent, ClientView};
 use orch_protocol::{
-    FlagsView, FromDaemon, GuardKindView, GuardPrompt, ReconcileReport, SessionView, SubagentView,
+    DisplayVars, FlagsView, FromDaemon, GuardKindView, GuardPrompt, ReconcileReport, SessionView,
+    SubagentView,
 };
 use orch_store::SessionRecord;
 use tokio::sync::mpsc::Sender;
@@ -46,6 +47,7 @@ pub(crate) struct State {
     pub(crate) busy: usize,
     pub(crate) report: Option<ReconcileReport>,
     pub(crate) passes: Passes,
+    pub(crate) display: DisplayVars,
     notifier: Notifier,
     rate_limits: RateLimits,
     use_clock: UseClock,
@@ -452,6 +454,7 @@ impl Daemon {
                 busy: 0,
                 report: None,
                 passes: Passes::default(),
+                display: DisplayVars::default(),
                 notifier,
                 rate_limits: RateLimits::default(),
                 use_clock: UseClock::default(),
@@ -632,6 +635,17 @@ impl State {
             .filter(|client| peer.is_none() || client.peer == peer)
             .max_by_key(|client| client.last_used.at())
             .map(|client| client.last_used.clone())
+    }
+
+    pub(crate) fn relay_copy(&self, session: &SessionId, text: String) {
+        for client in self.clients.values() {
+            if client.session_in_view.as_ref() == Some(session) {
+                client.outbox.send(FromDaemon::Clipboard {
+                    session: session.clone(),
+                    text: text.clone(),
+                });
+            }
+        }
     }
 
     fn focus_recent_client(&self, session: SessionId) {

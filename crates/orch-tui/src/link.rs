@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use orch_core::SessionId;
 use orch_protocol::{Request, Size};
 use ratatui::Frame;
@@ -28,6 +30,15 @@ impl<L: DaemonLink> Tui<L> {
             app: App::new(config, size),
             link,
         }
+    }
+
+    pub fn with_clock(mut self, clock: impl Fn() -> Instant + 'static) -> Self {
+        self.app.clock = Box::new(clock);
+        self
+    }
+
+    pub fn auto_scrolling(&self) -> bool {
+        crate::mouse::auto_scrolling(&self.app)
     }
 
     pub fn link_mut(&mut self) -> &mut L {

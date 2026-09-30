@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
@@ -9,18 +10,23 @@ use orch_protocol::{
     UsageReport,
 };
 
+use crate::clipboard::copy_effects;
 pub use crate::config::TuiConfig;
 use crate::discard::{DiscardConfirm, DiscardTarget};
 use crate::event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};
 use crate::guard::{GuardId, Guards};
+use crate::hyperlinks::Hyperlinks;
 use crate::land::LandForm;
 use crate::layout::Areas;
 use crate::link::RequestId;
+use crate::mouse::Region;
 use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
-use crate::review::ReviewView;
+use crate::review::{EditorTarget, ReviewAction, ReviewView};
+use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
+use crate::sidebar::{Row, SidebarView, Stop, Viewport};
 
 pub(crate) const NO_SESSION: &str = "no Session selected";
 
@@ -38,6 +44,24 @@ pub(crate) enum Call {
     Paste(String),
     ResizePane(Size),
     Local(Effect),
+}
+
+impl Call {
+    fn suspends(&self) -> bool {
+        matches!(
+            self,
+            Call::Local(
+                Effect::EditText { .. } | Effect::RunExternal { .. } | Effect::OpenInEditor { .. }
+            )
+        )
+    }
+}
+
+fn focus_report(focused: bool) -> Vec<u8> {
+    match focused {
+        true => b"\x1b[I".to_vec(),
+        false => b"\x1b[O".to_vec(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +99,7 @@ pub(crate) enum Prefix {
     CtrlBackslash,
     CtrlW,
     G,
+    Z,
 }
 
 pub(crate) enum Pending {
@@ -157,6 +182,11 @@ pub(crate) struct App {
     pub reconcile: Option<ReconcileView>,
     pub reconcile_report: ReconcileReport,
     pub mismatch: Option<String>,
+    pub gesture: Option<Region>,
+    pub pane_selection: Selector,
+    pub links: Hyperlinks,
+    pub sidebar: SidebarView,
+    pub clock: Box<dyn Fn() -> Instant>,
     size: Size,
     guards: Guards,
     select_when_listed: Option<SessionId>,
@@ -187,6 +217,11 @@ impl App {
             reconcile: None,
             reconcile_report: ReconcileReport::default(),
             mismatch: None,
+            gesture: None,
+            pane_selection: Selector::default(),
+            links: Hyperlinks::default(),
+            sidebar: SidebarView::default(),
+            clock: Box::new(Instant::now),
             size,
             guards: Guards::default(),
             select_when_listed: None,
@@ -214,9 +249,14 @@ impl App {
             } => self.review_loaded(session, purpose, result),
             Event::VersionMismatch { message } => self.mismatch = Some(message),
             Event::Notice(text) => self.message = Some(text),
+            Event::Tick => crate::mouse::tick(self),
             Event::Disconnected { reason } => {
                 self.message = Some(format!("lost the Daemon: {reason}"));
             }
+        }
+        self.tell_focus();
+        if self.calls.iter().any(Call::suspends) {
+            self.end_gesture();
         }
         std::mem::take(&mut self.calls)
     }
@@ -246,6 +286,11 @@ impl App {
                 }
             }
             FromDaemon::Focus { session } => self.focus_session(session),
+            FromDaemon::Clipboard { session, text } => {
+                if self.selected.as_ref() == Some(&session) {
+                    self.copy(&text);
+                }
+            }
             FromDaemon::Response { id, result } => {
                 if let Some((request, pending)) = self.pending.remove(&RequestId(id)) {
                     self.answered(request, pending, result);
@@ -382,8 +427,22 @@ impl App {
             return;
         };
         match message {
-            FromDaemon::Screen(snapshot) => mirror.restore(&snapshot),
-            FromDaemon::Output { bytes } => mirror.output(&bytes),
+            FromDaemon::Screen(snapshot) => {
+                mirror.restore(&snapshot);
+                self.pane_selection.clear();
+                self.links.hover(None);
+            }
+            FromDaemon::Output { bytes } => {
+                let grown = mirror.output(&bytes);
+                match grown {
+                    Some(grown) => self.pane_selection.shift(grown),
+                    None => self.pane_selection.clear(),
+                }
+                match grown.filter(|grown| *grown != 0) {
+                    Some(grown) => self.links.shift(grown),
+                    None => self.links.hover(None),
+                }
+            }
             FromDaemon::Resized(size) => mirror.resized(size),
             FromDaemon::InputDropped { reason } => {
                 self.message = Some(format!("input not sent: {reason}"));
@@ -401,15 +460,38 @@ impl App {
     fn terminal(&mut self, event: TermEvent) {
         match event {
             TermEvent::Key(key) if key.kind != KeyEventKind::Release => {
+                self.links.hover(None);
                 crate::keymap::handle(self, key)
             }
             TermEvent::Paste(text) => crate::keymap::paste(self, text),
-            TermEvent::FocusGained => self.terminal_focused = true,
-            TermEvent::FocusLost => self.terminal_focused = false,
+            TermEvent::Mouse(event) => crate::mouse::handle(self, event),
+            TermEvent::FocusGained => self.terminal_focus(true),
+            TermEvent::FocusLost => self.terminal_focus(false),
             TermEvent::Resize(cols, rows) => self.resize(Size { rows, cols }),
             _ => {}
         }
         self.follow_selection();
+    }
+
+    fn terminal_focus(&mut self, focused: bool) {
+        self.terminal_focused = focused;
+        if !focused {
+            self.end_gesture();
+        }
+    }
+
+    fn tell_focus(&mut self) {
+        let focused = self.terminal_focused;
+        let wanted = self.shown_pane().is_some_and(PaneMirror::wants_focus);
+        let Some(pane) = self.pane.as_mut() else {
+            return;
+        };
+        if !wanted {
+            pane.told_focused = false;
+        } else if pane.told_focused != focused {
+            pane.told_focused = focused;
+            self.calls.push(Call::Input(focus_report(focused)));
+        }
     }
 
     fn resize(&mut self, size: Size) {
@@ -442,23 +524,24 @@ impl App {
     }
 
     fn remove_session(&mut self, session: &SessionId) {
-        let order = self.sessions.ordered_ids();
+        let removed = Stop::Session(session.clone());
+        let before = self.sidebar.stops(&self.sessions);
         self.sessions.remove(session);
-        if self.selected.as_ref() != Some(session) {
+        if self.cursor() != Some(removed.clone()) {
             return;
         }
-        let at = order.iter().position(|id| id == session).unwrap_or(0);
-        let remaining: Vec<&SessionId> = order.iter().filter(|id| *id != session).collect();
-        self.selected = remaining
-            .get(at.min(remaining.len().saturating_sub(1)))
-            .map(|id| (*id).clone());
+        let at = before.iter().position(|stop| *stop == removed).unwrap_or(0);
+        let after = self.sidebar.stops(&self.sessions);
+        if let Some(next) = after.get(at.min(after.len().saturating_sub(1))) {
+            self.set_cursor(next.clone());
+        }
     }
 
     fn focus_session(&mut self, session: SessionId) {
         if self.sessions.get(&session).is_none() {
             return;
         }
-        self.selected = Some(session);
+        self.set_cursor(Stop::Session(session));
         self.reveal_guards();
         self.popup = None;
         self.review = None;
@@ -508,8 +591,18 @@ impl App {
         self.request(request, Pending::Fix(fix));
     }
 
+    pub fn areas(&self) -> Areas {
+        Areas::for_size(self.size)
+    }
+
     pub fn pane_size(&self) -> Size {
-        Areas::for_size(self.size).pane_inner()
+        self.areas().pane_inner()
+    }
+
+    pub fn shown_pane(&self) -> Option<&PaneMirror> {
+        self.pane
+            .as_ref()
+            .filter(|pane| self.selected.as_ref() == Some(&pane.session) && pane.closed.is_none())
     }
 
     pub fn inserting(&self) -> bool {
@@ -551,26 +644,197 @@ impl App {
     }
 
     pub fn select_offset(&mut self, offset: isize) {
-        let order = self.sessions.ordered_ids();
+        let stops = self.sidebar.stops(&self.sessions);
         let Some(at) = self
-            .selected
-            .as_ref()
-            .and_then(|id| order.iter().position(|known| known == id))
+            .cursor()
+            .and_then(|cursor| stops.iter().position(|stop| *stop == cursor))
         else {
             return;
         };
         let next = at
             .saturating_add_signed(offset)
-            .min(order.len().saturating_sub(1));
+            .min(stops.len().saturating_sub(1));
         if next != at {
-            self.selected = order.get(next).cloned();
+            self.set_cursor(stops[next].clone());
             self.reveal_guards();
         }
         self.follow_selection();
     }
 
+    pub fn show_session(&mut self, session: SessionId) {
+        if self.selected.as_ref() != Some(&session) {
+            self.set_cursor(Stop::Session(session));
+            self.reveal_guards();
+        }
+        self.follow_selection();
+    }
+
+    pub fn cursor(&self) -> Option<Stop> {
+        match (&self.sidebar.heading, &self.selected) {
+            (Some(repo), _) => Some(Stop::Heading(repo.clone())),
+            (None, Some(session)) => Some(Stop::Session(session.clone())),
+            (None, None) => None,
+        }
+    }
+
+    fn set_cursor(&mut self, stop: Stop) {
+        match stop {
+            Stop::Session(session) => {
+                self.sidebar.heading = None;
+                self.selected = Some(session);
+            }
+            Stop::Heading(repo) => {
+                self.sidebar.heading = Some(repo);
+                self.selected = None;
+            }
+        }
+    }
+
+    pub fn sidebar_rows(&self) -> Vec<Row<'_>> {
+        let width = usize::from(self.areas().sidebar.width.saturating_sub(2));
+        self.sidebar
+            .rows(&self.sessions, &self.reconcile_report, width)
+    }
+
+    pub fn sidebar_viewport(&self, rows: usize) -> Viewport {
+        let height = usize::from(self.areas().sidebar.height.saturating_sub(2));
+        Viewport { rows, height }
+    }
+
+    pub fn sidebar_stop_at(&self, row: u16) -> Option<Stop> {
+        let first = self.areas().sidebar.y + 1;
+        let rows = self.sidebar_rows();
+        let offset = self.sidebar.offset(self.sidebar_viewport(rows.len()));
+        let at = usize::from(row.checked_sub(first)?) + offset;
+        rows.get(at).and_then(Row::stop)
+    }
+
+    pub fn scroll_sidebar(&mut self, lines: isize) {
+        let viewport = self.sidebar_viewport(self.sidebar_rows().len());
+        self.sidebar.scroll_by(lines, viewport);
+    }
+
+    pub fn toggle_fold(&mut self, repo: &std::path::Path) {
+        if !self.sidebar.is_folded(repo) {
+            self.sidebar.fold(repo);
+            if self.selected_view().is_some_and(|view| view.repo == repo) {
+                self.set_cursor(Stop::Heading(repo.to_path_buf()));
+            }
+            return;
+        }
+        self.sidebar.unfold(repo);
+        if self.sidebar.heading.as_deref() != Some(repo) {
+            return;
+        }
+        let first = self
+            .sessions
+            .in_repo(repo)
+            .next()
+            .map(|view| view.id.clone());
+        if let Some(first) = first {
+            self.set_cursor(Stop::Session(first));
+            self.reveal_guards();
+        }
+    }
+
+    pub fn on_heading(&self) -> bool {
+        self.sidebar.heading.is_some()
+    }
+
+    pub fn toggle_cursor_fold(&mut self) {
+        let repo = match self.cursor() {
+            Some(Stop::Heading(repo)) => repo,
+            Some(Stop::Session(_)) => match self.selected_view() {
+                Some(view) => view.repo.clone(),
+                None => return,
+            },
+            None => return,
+        };
+        self.toggle_fold(&repo);
+    }
+
+    fn settle_cursor(&mut self) {
+        if let Some(repo) = self.selected_view().map(|view| view.repo.clone()) {
+            self.sidebar.unfold(&repo);
+        }
+        let stops = self.sidebar.stops(&self.sessions);
+        if self.cursor().is_some_and(|cursor| stops.contains(&cursor)) {
+            return;
+        }
+        match stops.into_iter().next() {
+            Some(first) => self.set_cursor(first),
+            None => {
+                self.selected = None;
+                self.sidebar.heading = None;
+            }
+        }
+    }
+
+    fn reveal_cursor(&mut self) {
+        let cursor = self.cursor();
+        if cursor == self.sidebar.revealed {
+            return;
+        }
+        self.sidebar.revealed = cursor.clone();
+        let Some(cursor) = cursor else {
+            return;
+        };
+        let rows = self.sidebar_rows();
+        let viewport = self.sidebar_viewport(rows.len());
+        let row = rows
+            .iter()
+            .position(|row| row.stop() == Some(cursor.clone()));
+        drop(rows);
+        if let Some(row) = row {
+            self.sidebar.reveal(row, viewport);
+        }
+    }
+
+    pub fn end_gesture(&mut self) {
+        self.gesture = None;
+        self.pane_selection.let_go();
+        if let Some(review) = &mut self.review {
+            review.selection.let_go();
+        }
+    }
+
     pub fn push(&mut self, call: Call) {
         self.calls.push(call);
+    }
+
+    pub fn copy(&mut self, text: &str) {
+        for effect in copy_effects(&self.config.display, text) {
+            self.push(Call::Local(effect));
+        }
+    }
+
+    pub fn open_url(&mut self, url: String) {
+        self.push(Call::Local(Effect::OpenUrl { url }));
+    }
+
+    pub fn open_in_editor(&mut self, cwd: PathBuf, file: PathBuf, line: Option<u32>) {
+        let effect = Effect::OpenInEditor { file, line, cwd };
+        self.push(Call::Local(effect));
+    }
+
+    pub fn edit(&mut self, target: EditorTarget) {
+        let worktree = match &self.review {
+            Some(review) => Some(review.worktree.clone()),
+            None => self.selected_view().map(|view| view.worktree.clone()),
+        };
+        if let Some(cwd) = worktree {
+            self.open_in_editor(cwd, target.file, target.line);
+        }
+    }
+
+    pub fn review_action(&mut self, action: ReviewAction) {
+        match action {
+            ReviewAction::Stay => {}
+            ReviewAction::Close => self.review = None,
+            ReviewAction::CommandLine => self.mode = Mode::CommandLine(String::new()),
+            ReviewAction::Open(target) => self.edit(target),
+            ReviewAction::Notice(text) => self.message = Some(text),
+        }
     }
 
     pub fn report(&mut self, request: Request) {
@@ -794,7 +1058,8 @@ impl App {
         self.message = None;
         match purpose {
             ReviewPurpose::BuiltIn => {
-                self.review = Some(ReviewView::new(view.base.clone(), data.files));
+                let (base, worktree) = (view.base.clone(), view.worktree.clone());
+                self.review = Some(ReviewView::new(base, worktree, data.files));
             }
             ReviewPurpose::External => {
                 let command = self
@@ -821,13 +1086,12 @@ impl App {
             .select_when_listed
             .take_if(|wanted| order.contains(wanted))
         {
-            self.selected = Some(wanted);
+            self.set_cursor(Stop::Session(wanted));
         }
-        if !self.selected.as_ref().is_some_and(|id| order.contains(id)) {
-            self.selected = order.first().cloned();
-        }
+        self.settle_cursor();
         self.sync_pane();
         self.report_view();
+        self.reveal_cursor();
     }
 
     fn sync_pane(&mut self) {
@@ -842,12 +1106,16 @@ impl App {
         if wanted == current {
             return;
         }
-        if self.pane.take().is_some() {
+        if let Some(left) = self.pane.take() {
+            if left.told_focused {
+                self.calls.push(Call::Input(focus_report(false)));
+            }
             self.calls.push(Call::ClosePane);
         }
         let Some((session, holder_pid)) = wanted else {
             return;
         };
+        self.pane_selection.clear();
         self.next_pane += 1;
         let id = PaneId(self.next_pane);
         let size = self.pane_size();

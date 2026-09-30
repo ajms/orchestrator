@@ -1,6 +1,8 @@
 mod cli;
+mod clipboard;
 mod common;
 mod discard;
+mod display;
 mod guards;
 mod handshake;
 mod idle;

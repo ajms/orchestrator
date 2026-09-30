@@ -7,10 +7,11 @@ use std::time::{Duration, Instant};
 
 use orch_core::SessionId;
 use orch_protocol::{
-    Client, CreateSession, Fix, FromDaemon, Pane, ReconcileReport, Reply, Request, RequestError,
-    SessionView, Size, daemon_socket,
+    Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport, Reply, Request,
+    RequestError, SessionView, Size, daemon_socket, open_control,
 };
 use tempfile::TempDir;
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
 pub const WAIT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(20);
@@ -121,6 +122,8 @@ impl Env {
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ORCH_HOLDER_SOCKET")
             .env_remove("ORCH_SESSION")
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("DISPLAY")
             .envs(GIT_ENV)
             .current_dir(self.path("home"))
             .stdin(Stdio::null());
@@ -173,6 +176,10 @@ impl Env {
             }
             tokio::time::sleep(POLL).await;
         }
+    }
+
+    pub async fn tui(&self, display: DisplayVars) -> (OwnedReadHalf, OwnedWriteHalf) {
+        open_control(&self.socket(), &display).await.unwrap()
     }
 
     pub async fn pane(&self, session: &SessionId, size: Size) -> PaneView {
@@ -427,6 +434,7 @@ pub struct TestClient {
     pub rings: Vec<Ring>,
     pub focused: Vec<SessionId>,
     pub rate_limits: Vec<RateLimits>,
+    pub copies: Vec<(SessionId, String)>,
     session_in_view: Option<SessionId>,
     focused_terminal: bool,
 }
@@ -443,6 +451,7 @@ impl From<Client> for TestClient {
             rings: Vec::new(),
             focused: Vec::new(),
             rate_limits: Vec::new(),
+            copies: Vec::new(),
             session_in_view: None,
             focused_terminal: false,
         }
@@ -539,6 +548,9 @@ impl TestClient {
                 five_hour: *five_hour,
                 seven_day: *seven_day,
             }),
+            FromDaemon::Clipboard { session, text } => {
+                self.copies.push((session.clone(), text.clone()))
+            }
             _ => {}
         }
     }

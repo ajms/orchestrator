@@ -13,7 +13,9 @@ use orch_holder::{Size, read_frame_async, write_frame_async};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
-use crate::{FromDaemon, OpenPane, PROTOCOL_VERSION, Reply, Request, RequestError, ToDaemon};
+use crate::{
+    DisplayVars, FromDaemon, OpenPane, PROTOCOL_VERSION, Reply, Request, RequestError, ToDaemon,
+};
 
 const DAEMON_SOCKET: &str = "daemon.sock";
 const DAEMON_LOCK: &str = "daemon.lock";
@@ -55,12 +57,22 @@ struct Connection {
     writer: OwnedWriteHalf,
 }
 
-pub async fn open_connection(
+pub async fn open_control(
     socket: &Path,
-    pane: Option<OpenPane>,
+    display: &DisplayVars,
 ) -> Result<(OwnedReadHalf, OwnedWriteHalf), ConnectError> {
-    let (reader, writer) = Connection::open(socket, pane).await?.into_split();
-    Ok((reader, writer))
+    Ok(Connection::open(socket, None, display.reported())
+        .await?
+        .into_split())
+}
+
+pub async fn open_pane(
+    socket: &Path,
+    pane: OpenPane,
+) -> Result<(OwnedReadHalf, OwnedWriteHalf), ConnectError> {
+    Ok(Connection::open(socket, Some(pane), None)
+        .await?
+        .into_split())
 }
 
 impl Connection {
@@ -68,13 +80,18 @@ impl Connection {
         (self.reader, self.writer)
     }
 
-    async fn open(socket: &Path, pane: Option<OpenPane>) -> Result<Self, ConnectError> {
+    async fn open(
+        socket: &Path,
+        pane: Option<OpenPane>,
+        display: Option<DisplayVars>,
+    ) -> Result<Self, ConnectError> {
         let (reader, writer) = UnixStream::connect(socket).await?.into_split();
         let mut connection = Self { reader, writer };
         connection
             .send(&ToDaemon::Hello {
                 version: PROTOCOL_VERSION,
                 pane,
+                display,
             })
             .await?;
         match connection.recv().await? {
@@ -111,7 +128,7 @@ pub struct Client {
 impl Client {
     pub async fn connect(socket: &Path) -> Result<Self, ConnectError> {
         Ok(Self {
-            connection: Connection::open(socket, None).await?,
+            connection: Connection::open(socket, None, None).await?,
             next_id: 0,
             backlog: VecDeque::new(),
         })
@@ -164,7 +181,7 @@ impl Pane {
             session: session.clone(),
             size,
         };
-        let connection = Connection::open(socket, Some(pane)).await?;
+        let connection = Connection::open(socket, Some(pane), None).await?;
         Ok(Self { connection })
     }
 

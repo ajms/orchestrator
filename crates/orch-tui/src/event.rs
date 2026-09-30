@@ -32,6 +32,7 @@ pub enum Event {
         reason: String,
     },
     Notice(String),
+    Tick,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +85,11 @@ pub enum Effect {
     Quit,
     RestartDaemon,
     WriteTerminal(Vec<u8>),
+    CopyCommand {
+        program: String,
+        args: Vec<String>,
+        text: String,
+    },
     EditText {
         text: String,
     },
@@ -96,5 +102,13 @@ pub enum Effect {
         command: String,
         cwd: PathBuf,
         env: Vec<(String, String)>,
+    },
+    OpenUrl {
+        url: String,
+    },
+    OpenInEditor {
+        file: PathBuf,
+        line: Option<u32>,
+        cwd: PathBuf,
     },
 }
