@@ -153,3 +153,70 @@ fn the_branch_checked_out_in_a_worktree_is_known_by_its_path() {
     );
     assert_eq!(repo.worktree_branch(fixture.outside()).unwrap(), None);
 }
+
+#[test]
+fn a_new_worktree_starts_from_the_base_just_fetched_from_origin() {
+    let fixture = Fixture::with_origin("main");
+    let upstream_tip = fixture.push_upstream("main", "up.txt", "up\n");
+    let repo = fixture.repo();
+
+    let worktree = repo.create_worktree(&name("fix"), "main").unwrap();
+
+    assert_eq!(rev(&worktree.path, "HEAD"), upstream_tip);
+    assert_eq!(rev(&fixture.root, "refs/heads/main"), upstream_tip);
+    assert_eq!(read(&fixture.root, "up.txt"), "up\n");
+    assert_eq!(git(&fixture.root, &["status", "--porcelain"]), "");
+}
+
+#[test]
+fn a_base_checked_out_with_local_changes_is_not_fast_forwarded() {
+    let fixture = Fixture::with_origin("main");
+    let local_tip = rev(&fixture.root, "HEAD");
+    fixture.push_upstream("main", "README.md", "upstream\n");
+    std::fs::write(fixture.root.join("README.md"), "mine\n").unwrap();
+    let repo = fixture.repo();
+
+    let worktree = repo.create_worktree(&name("fix"), "main").unwrap();
+
+    assert_eq!(rev(&worktree.path, "HEAD"), local_tip);
+    assert_eq!(rev(&fixture.root, "refs/heads/main"), local_tip);
+    assert_eq!(read(&fixture.root, "README.md"), "mine\n");
+}
+
+#[test]
+fn a_base_not_checked_out_is_fast_forwarded_without_touching_the_main_checkout() {
+    let fixture = Fixture::with_origin("trunk");
+    let upstream_tip = fixture.push_upstream("trunk", "up.txt", "up\n");
+    let repo = fixture.repo();
+
+    let worktree = repo.create_worktree(&name("fix"), "trunk").unwrap();
+
+    assert_eq!(rev(&worktree.path, "HEAD"), upstream_tip);
+    assert_eq!(rev(&fixture.root, "refs/heads/trunk"), upstream_tip);
+    assert!(!fixture.root.join("up.txt").exists());
+}
+
+#[test]
+fn a_base_ahead_of_or_diverged_from_origin_keeps_its_local_commits() {
+    let fixture = Fixture::with_origin("main");
+    fixture.push_upstream("main", "up.txt", "up\n");
+    let local_tip = commit(&fixture.root, "mine.txt", "mine\n", "landed");
+    let repo = fixture.repo();
+
+    let worktree = repo.create_worktree(&name("fix"), "main").unwrap();
+
+    assert_eq!(rev(&worktree.path, "HEAD"), local_tip);
+    assert_eq!(rev(&fixture.root, "refs/heads/main"), local_tip);
+}
+
+#[test]
+fn an_unreachable_origin_still_creates_the_worktree_from_the_local_base() {
+    let fixture = Fixture::with_origin("main");
+    let local_tip = rev(&fixture.root, "HEAD");
+    std::fs::remove_dir_all(&fixture.origin).unwrap();
+    let repo = fixture.repo();
+
+    let worktree = repo.create_worktree(&name("fix"), "main").unwrap();
+
+    assert_eq!(rev(&worktree.path, "HEAD"), local_tip);
+}

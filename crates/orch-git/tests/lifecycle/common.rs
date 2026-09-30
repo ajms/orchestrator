@@ -111,6 +111,21 @@ impl Fixture {
         fixture
     }
 
+    pub fn push_upstream(&self, branch: &str, path: &str, content: &str) -> String {
+        let clone = self.outside().join("upstream");
+        if !clone.exists() {
+            git(
+                self.outside(),
+                &["clone", "-q", self.origin.to_str().unwrap(), "upstream"],
+            );
+        }
+        git(&clone, &["checkout", "-q", branch]);
+        git(&clone, &["pull", "-q", "--ff-only"]);
+        let tip = commit(&clone, path, content, "upstream");
+        git(&clone, &["push", "-q", "origin", branch]);
+        tip
+    }
+
     pub fn outside(&self) -> &Path {
         self.tmp.path()
     }
