@@ -16,8 +16,13 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
+const VERSION: &str = match option_env!("ORCH_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Parser)]
-#[command(name = "orch", version)]
+#[command(name = "orch", version = VERSION)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,

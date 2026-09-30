@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-gnu
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Pick tag
+        id: tag
+        run: |
+          if git tag --points-at "$SHA" | grep -qE '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]+)?$'; then
+            echo "$SHA is already released"
+            exit 0
+          fi
+          day=$(date -u +%Y.%m.%d)
+          last=$(git tag --list "$day" "$day.*" | awk -F. '{ seen = 1 } NF == 4 && $4 > n { n = $4 } END { if (seen) print n + 0 }')
+          echo "tag=$day${last:+.$((last + 1))}" >> "$GITHUB_OUTPUT"
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.tag.outputs.tag
+
+      - name: Build
+        if: steps.tag.outputs.tag
+        env:
+          ORCH_VERSION: ${{ steps.tag.outputs.tag }}
+        run: |
+          cargo build --release --locked -p orch
+          archive="orch-$ORCH_VERSION-$TARGET.tar.gz"
+          tar -czf "$archive" -C target/release orch
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - name: Publish
+        if: steps.tag.outputs.tag
+        run: gh release create "${{ steps.tag.outputs.tag }}" "$ARCHIVE" --target "$SHA" --title "${{ steps.tag.outputs.tag }}" --generate-notes
