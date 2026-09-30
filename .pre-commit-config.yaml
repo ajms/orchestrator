@@ -27,7 +27,7 @@ repos:
         pass_filenames: false
       - id: cargo-test
         name: cargo test
-        entry: cargo test --workspace --locked
+        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX cargo test --workspace --locked
         language: system
         types_or: [rust, toml]
         pass_filenames: false
