@@ -76,6 +76,9 @@ impl Repo {
     }
 
     fn origin_default_branch(&self) -> Option<String> {
+        let _ = self
+            .git(["remote", "set-head", "origin", "--auto"])
+            .succeeds();
         let remote_head = self
             .git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
             .run()
