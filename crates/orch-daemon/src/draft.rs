@@ -47,7 +47,7 @@ impl Daemon {
         let Some(Argv { program, args }) = adapter.draft(&conversation) else {
             return Ok(self.default_draft(id, &record.slug).await);
         };
-        let mut command = tokio::process::Command::new(program);
+        let mut command = crate::subprocess::command(program);
         command
             .args(&agent.args)
             .args(args)

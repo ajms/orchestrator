@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Once;
 
-use orch_git::{Repo, SessionName, SessionWorktree};
+use orch_git::{ENV_REDIRECTING_GIT, Repo, SessionName, SessionWorktree};
 use tempfile::TempDir;
 
 static ISOLATE: Once = Once::new();
@@ -21,11 +21,19 @@ fn isolate_git() {
             // SAFETY: every test calls `isolate_git` before spawning anything, and Once serialises the writes.
             unsafe { std::env::set_var(key, value) };
         }
+        for key in ENV_REDIRECTING_GIT {
+            // SAFETY: as above.
+            unsafe { std::env::remove_var(key) };
+        }
     });
 }
 
 pub fn git(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    for key in ENV_REDIRECTING_GIT {
+        command.env_remove(key);
+    }
+    let output = command
         .arg("-C")
         .arg(dir)
         .args(args)

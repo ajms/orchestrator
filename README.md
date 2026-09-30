@@ -13,7 +13,7 @@ The domain vocabulary (Session, Repo, Worktree, Landing, Preset, Guard, Trust…
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` on `PATH`), set up as you normally use it; `orch` uses your own `~/.claude` configuration
 - [`gh`](https://cli.github.com/), authenticated, for PR Landing and PR status
 - a freedesktop notification daemon for desktop notifications (optional)
-- Rust 1.88+ to build
+- Rust 1.88+ to build (development uses the version pinned in `rust-toolchain.toml`)
 
 ## Install
 
@@ -150,6 +150,18 @@ Precedence is: personal override > Repo file > global defaults.
 **Trust:** scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
 
 State lives in `~/.local/state/orchestrator/state.db`. Runtime sockets live under `$XDG_RUNTIME_DIR/orchestrator`.
+
+## Development
+
+The toolchain is pinned in `rust-toolchain.toml`. Hooks are managed with [pre-commit](https://pre-commit.com):
+
+```sh
+uv tool install pre-commit            # or: pipx install pre-commit
+pre-commit install                    # fmt + clippy on commit, tests on push
+pre-commit run --all-files
+```
+
+CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test` on every PR and on pushes to `main`.
 
 ## Architecture
 
