@@ -57,12 +57,17 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
 
+    use orch_git::ENV_REDIRECTING_GIT;
     use tempfile::TempDir;
 
     use super::*;
 
     fn git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let mut command = Command::new("git");
+        for key in ENV_REDIRECTING_GIT {
+            command.env_remove(key);
+        }
+        let status = command
             .arg("-C")
             .arg(dir)
             .args(args)

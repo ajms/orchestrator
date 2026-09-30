@@ -92,7 +92,7 @@ impl Daemon {
     ) -> std::io::Result<Outcome> {
         write_log(dir, log, "").await?;
         let output = File::options().append(true).open(log)?;
-        let mut child = tokio::process::Command::new("sh")
+        let mut child = crate::subprocess::command("sh")
             .arg("-c")
             .arg(command)
             .current_dir(worktree)

@@ -1,8 +1,17 @@
 use std::process::Stdio;
 use std::time::Duration;
 
+use orch_git::ENV_REDIRECTING_GIT;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    for key in ENV_REDIRECTING_GIT {
+        command.env_remove(key);
+    }
+    command
+}
 
 pub(crate) async fn run(
     mut command: Command,

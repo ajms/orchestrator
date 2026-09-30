@@ -224,3 +224,56 @@ async fn approving_trust_with_a_stale_hash_is_refused() {
         "{create:?}"
     );
 }
+
+#[tokio::test]
+async fn a_setup_script_runs_git_in_its_worktree_when_the_daemon_inherited_a_git_dir() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let decoy = env.repo("decoy");
+    commit(&decoy, "decoy.txt", "decoy\n");
+    env.write_config(&format!(
+        "[repos.{repo:?}]\nsetup = \"git rev-parse HEAD > setup-head\"\n"
+    ));
+    let mut daemon = env.daemon_command(std::time::Duration::from_secs(600));
+    daemon.env("GIT_DIR", decoy.join(".git"));
+    let _daemon = env.spawn_daemon(&mut daemon).await;
+    let mut client = env.client().await;
+
+    let id = client.create(CreateSession::new(&repo, "Task")).await;
+    let active = client
+        .until(&id, "Active", |view| view.phase == PhaseView::Active)
+        .await;
+
+    let head = std::fs::read_to_string(active.worktree.join("setup-head")).unwrap();
+    assert_eq!(head.trim(), git(&repo, &["rev-parse", "HEAD"]));
+}
+
+#[tokio::test]
+async fn an_agent_runs_git_in_its_worktree_when_the_daemon_inherited_a_git_dir() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let decoy = env.repo("decoy");
+    commit(&decoy, "decoy.txt", "decoy\n");
+    let agent = env.path("agent.sh");
+    std::fs::write(
+        &agent,
+        "#!/bin/sh\ngit rev-parse HEAD > agent-head.tmp\nmv agent-head.tmp agent-head\nexec sleep 600\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&agent, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    env.write_config_with_agent("", agent.to_str().unwrap());
+    let mut daemon = env.daemon_command(std::time::Duration::from_secs(600));
+    daemon.env("GIT_DIR", decoy.join(".git"));
+    let _daemon = env.spawn_daemon(&mut daemon).await;
+    let mut client = env.client().await;
+
+    let id = client.create(CreateSession::new(&repo, "Task")).await;
+    let active = client
+        .until(&id, "Active", |view| view.phase == PhaseView::Active)
+        .await;
+    let head = active.worktree.join("agent-head");
+    wait_until("the Agent to run git", || head.exists()).await;
+
+    let head = std::fs::read_to_string(head).unwrap();
+    assert_eq!(head.trim(), git(&repo, &["rev-parse", "HEAD"]));
+}

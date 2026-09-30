@@ -4,11 +4,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use orch_core::{Phase, SessionId};
+use orch_git::ENV_REDIRECTING_GIT;
 use orch_store::{NewSession, Repo, RepoRoot, SessionRecord, Store};
 use tempfile::TempDir;
 
 pub fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let mut command = Command::new("git");
+    for key in ENV_REDIRECTING_GIT {
+        command.env_remove(key);
+    }
+    let status = command
         .args([
             "-c",
             "user.name=t",

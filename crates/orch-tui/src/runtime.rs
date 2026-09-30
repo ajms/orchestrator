@@ -14,6 +14,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use orch_git::ENV_REDIRECTING_GIT;
 use orch_protocol::{ConnectError, Size, daemon_socket};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -253,7 +254,11 @@ fn run_process(program: &str, args: &[String], stdin: Option<String>) -> io::Res
 }
 
 fn shell(command: &str, cwd: &Path, env: &[(String, String)]) -> io::Result<()> {
-    let status = Command::new("sh")
+    let mut shell = Command::new("sh");
+    for key in ENV_REDIRECTING_GIT {
+        shell.env_remove(key);
+    }
+    let status = shell
         .arg("-c")
         .arg(command)
         .current_dir(cwd)
@@ -415,5 +420,36 @@ fn read_input(
         if events.send(event).is_err() {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_external_review_runs_in_its_worktree_even_under_a_git_hook() {
+        let dir = tempfile::tempdir().unwrap();
+        let (decoy, worktree) = (dir.path().join("decoy"), dir.path().join("wt"));
+        for repo in [&decoy, &worktree] {
+            let mut init = Command::new("git");
+            for key in ENV_REDIRECTING_GIT {
+                init.env_remove(key);
+            }
+            assert!(
+                init.args(["init", "-q"])
+                    .arg(repo)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        // SAFETY: the only test in this binary that touches the environment.
+        unsafe { std::env::set_var("GIT_DIR", decoy.join(".git")) };
+
+        shell("git rev-parse --absolute-git-dir > seen", &worktree, &[]).unwrap();
+
+        let seen = std::fs::read_to_string(worktree.join("seen")).unwrap();
+        assert_eq!(Path::new(seen.trim()), worktree.join(".git"));
     }
 }

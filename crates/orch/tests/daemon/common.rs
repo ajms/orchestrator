@@ -6,6 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use orch_core::SessionId;
+use orch_git::ENV_REDIRECTING_GIT;
 use orch_protocol::{
     Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport, Reply, Request,
     RequestError, SessionView, Size, daemon_socket, open_control,
@@ -28,6 +29,13 @@ const GIT_ENV: [(&str, &str); 6] = [
     ("GIT_COMMITTER_NAME", "Test"),
     ("GIT_COMMITTER_EMAIL", "test@example.com"),
 ];
+
+fn hermetic(command: &mut Command) -> &mut Command {
+    for key in ENV_REDIRECTING_GIT {
+        command.env_remove(key);
+    }
+    command.envs(GIT_ENV)
+}
 
 pub struct Env {
     dir: TempDir,
@@ -108,7 +116,7 @@ impl Env {
 
     pub fn orch(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_orch"));
-        command
+        hermetic(&mut command)
             .env("HOME", self.path("home"))
             .env("XDG_CONFIG_HOME", self.path("config"))
             .env("XDG_STATE_HOME", self.path("state"))
@@ -124,7 +132,6 @@ impl Env {
             .env_remove("ORCH_SESSION")
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("DISPLAY")
-            .envs(GIT_ENV)
             .current_dir(self.path("home"))
             .stdin(Stdio::null());
         command
@@ -157,11 +164,13 @@ impl Env {
     }
 
     pub async fn start_daemon_args(&self, idle_timeout: Duration, args: &[&str]) -> Daemon {
-        let child = self
-            .daemon_command(idle_timeout)
-            .args(args)
-            .spawn()
-            .unwrap();
+        let mut command = self.daemon_command(idle_timeout);
+        command.args(args);
+        self.spawn_daemon(&mut command).await
+    }
+
+    pub async fn spawn_daemon(&self, command: &mut Command) -> Daemon {
+        let child = command.spawn().unwrap();
         let daemon = Daemon { child };
         wait_until("daemon socket", || self.socket().exists()).await;
         daemon
@@ -380,11 +389,10 @@ impl Drop for Daemon {
 }
 
 pub fn git(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = hermetic(&mut Command::new("git"))
         .arg("-C")
         .arg(dir)
         .args(args)
-        .envs(GIT_ENV)
         .output()
         .expect("git runs");
     assert!(

@@ -5,7 +5,7 @@ use std::process::{Command, Output};
 
 use crate::Error;
 
-const ENV_REDIRECTING_GIT: [&str; 5] = [
+pub const ENV_REDIRECTING_GIT: [&str; 5] = [
     "GIT_DIR",
     "GIT_WORK_TREE",
     "GIT_INDEX_FILE",

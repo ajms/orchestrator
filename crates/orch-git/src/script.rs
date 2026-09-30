@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use crate::git::ENV_REDIRECTING_GIT;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Script {
     pub command: String,
@@ -15,7 +17,11 @@ pub struct ScriptOutcome {
 
 impl Script {
     pub fn run(&self, cwd: &Path) -> ScriptOutcome {
-        let result = Command::new("sh")
+        let mut command = Command::new("sh");
+        for key in ENV_REDIRECTING_GIT {
+            command.env_remove(key);
+        }
+        let result = command
             .arg("-c")
             .arg(format!("exec 2>&1\n{}", self.command))
             .current_dir(cwd)

@@ -214,7 +214,7 @@ fn pr_number(output: &str) -> Option<u64> {
 }
 
 async fn gh(repo: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
-    let mut command = tokio::process::Command::new("gh");
+    let mut command = crate::subprocess::command("gh");
     command.args(args).current_dir(repo);
     let what = format!(
         "gh {}",

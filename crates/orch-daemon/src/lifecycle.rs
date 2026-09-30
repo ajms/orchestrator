@@ -513,7 +513,7 @@ impl Daemon {
     }
 
     async fn spawn_holder(&self, record: &SessionRecord, argv: Vec<String>) -> Result<(), String> {
-        let mut command = tokio::process::Command::new(&self.config.orch_program);
+        let mut command = crate::subprocess::command(&self.config.orch_program);
         command
             .arg("hold")
             .arg("--session")

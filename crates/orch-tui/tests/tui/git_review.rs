@@ -2,22 +2,29 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Once;
 
+use orch_git::ENV_REDIRECTING_GIT;
 use orch_tui::{ReviewTarget, load_review};
 
 static ISOLATE: Once = Once::new();
-
 fn without_user_git_identity() {
     ISOLATE.call_once(|| {
         // SAFETY: every test here calls this before spawning git, and Once serialises the writes.
         unsafe {
             std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
             std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
+            for key in ENV_REDIRECTING_GIT {
+                std::env::remove_var(key);
+            }
         }
     });
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let mut git = Command::new("git");
+    for key in ENV_REDIRECTING_GIT {
+        git.env_remove(key);
+    }
+    let output = git
         .args(args)
         .current_dir(dir)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")

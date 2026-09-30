@@ -14,7 +14,7 @@ mod worktree;
 pub use cleanup::{Cleaned, CleanupCheckpoint, InUse};
 pub use discard::{Commit, DiscardPreview};
 pub use error::Error;
-pub use git::GitVersion;
+pub use git::{ENV_REDIRECTING_GIT, GitVersion};
 pub use landing::{Landed, LandingError};
 pub use leftover::Leftover;
 pub use repo::Repo;
