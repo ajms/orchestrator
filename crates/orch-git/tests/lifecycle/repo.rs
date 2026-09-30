@@ -51,6 +51,23 @@ fn base_branch_falls_back_to_origin_head() {
 }
 
 #[test]
+fn base_branch_follows_a_default_branch_changed_on_origin_after_cloning() {
+    let fixture = Fixture::with_origin("trunk");
+    git(
+        &fixture.origin,
+        &["symbolic-ref", "HEAD", "refs/heads/main"],
+    );
+    assert_eq!(fixture.repo().default_base(None).unwrap(), "main");
+}
+
+#[test]
+fn an_unreachable_origin_falls_back_to_the_last_known_origin_head() {
+    let fixture = Fixture::with_origin("trunk");
+    std::fs::remove_dir_all(&fixture.origin).unwrap();
+    assert_eq!(fixture.repo().default_base(None).unwrap(), "trunk");
+}
+
+#[test]
 fn origin_head_without_a_local_branch_creates_it_untracked_from_origin() {
     let fixture = Fixture::with_origin("trunk");
     let remote_tip = git(&fixture.root, &["rev-parse", "origin/trunk"]);
@@ -76,6 +93,7 @@ fn origin_head_naming_a_missing_remote_branch_falls_through_to_the_main_checkout
             "refs/remotes/origin/ghost",
         ],
     );
+    std::fs::remove_dir_all(&fixture.origin).unwrap();
     assert_eq!(fixture.repo().default_base(None).unwrap(), "main");
 }
 
