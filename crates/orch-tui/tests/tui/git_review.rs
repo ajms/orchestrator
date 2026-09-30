@@ -1,7 +1,20 @@
 use std::path::Path;
 use std::process::Command;
+use std::sync::Once;
 
 use orch_tui::{ReviewTarget, load_review};
+
+static ISOLATE: Once = Once::new();
+
+fn without_user_git_identity() {
+    ISOLATE.call_once(|| {
+        // SAFETY: every test here calls this before spawning git, and Once serialises the writes.
+        unsafe {
+            std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+            std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
+        }
+    });
+}
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -24,6 +37,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 
 #[test]
 fn the_review_covers_commits_uncommitted_and_untracked_files_but_not_base_progress() {
+    without_user_git_identity();
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
     std::fs::create_dir(&repo).unwrap();
@@ -76,6 +90,7 @@ fn the_review_covers_commits_uncommitted_and_untracked_files_but_not_base_progre
 
 #[test]
 fn a_missing_base_is_an_error() {
+    without_user_git_identity();
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-q", "-b", "main"]);
     std::fs::write(dir.path().join("a"), "a").unwrap();
@@ -94,6 +109,7 @@ fn a_missing_base_is_an_error() {
 
 #[test]
 fn a_file_removed_in_the_worktree_is_marked_as_deleted() {
+    without_user_git_identity();
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
     std::fs::create_dir(&repo).unwrap();

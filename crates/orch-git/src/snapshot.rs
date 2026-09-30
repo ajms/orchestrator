@@ -53,5 +53,9 @@ pub(crate) fn snapshot_commit(worktree: &Path) -> Result<String, Error> {
         worktree,
         ["commit-tree", &tree, "-p", "HEAD", "-m", "orch snapshot"],
     )
+    .env("GIT_AUTHOR_NAME", "orch")
+    .env("GIT_AUTHOR_EMAIL", "orch@localhost")
+    .env("GIT_COMMITTER_NAME", "orch")
+    .env("GIT_COMMITTER_EMAIL", "orch@localhost")
     .run()
 }
