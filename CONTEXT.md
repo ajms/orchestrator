@@ -28,6 +28,10 @@ _Avoid_: Paused, stopped, dead
 Where a Session is in its lifecycle: Setting up, Setup failed, Active, PR open, Suspended, Landed or Discarded.
 _Avoid_: Stage, lifecycle state
 
+**Preparing**:
+The wait between submitting a new Session and the Daemon listing it, while its Base branch, Branch and Worktree are made. It is not a Phase.
+_Avoid_: Creating, pending
+
 **Agent state**:
 What a live Session's Agent is doing right now: Starting, Working, Needs input, Idle, Errored, Exited or Unknown. Unknown: the Agent runs but reports no state (its adapter lacks hooks).
 _Avoid_: Activity, run state
