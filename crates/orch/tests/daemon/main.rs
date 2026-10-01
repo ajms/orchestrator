@@ -18,5 +18,6 @@ mod repo_settings;
 mod setup;
 mod stacking;
 mod status;
+mod titles;
 mod trust;
 mod usage;

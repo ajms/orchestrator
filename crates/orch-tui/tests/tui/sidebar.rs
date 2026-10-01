@@ -21,6 +21,28 @@ fn the_sidebar_lists_sessions_grouped_by_repo() {
 }
 
 #[test]
+fn a_session_row_shows_its_title_in_place_of_the_slug_truncated_like_it() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![
+        titled(session("webshop", "fix-login"), "login redirect"),
+        titled(
+            session("webshop", "cart-refactor"),
+            "a title far longer than the slug column",
+        ),
+        session("webshop", "untitled"),
+    ]);
+
+    let row = tui.sidebar_line_with("login redirect");
+    assert!(!row.contains("fix-login"), "{row}");
+    assert!(
+        tui.sidebar_line_with("a title far longer …")
+            .contains("Idle")
+    );
+    assert!(!tui.screen().contains("cart-refactor"));
+    assert!(tui.sidebar_line_with("untitled").contains("Idle"));
+}
+
+#[test]
 fn a_session_row_shows_its_agent_state_in_colour() {
     let mut tui = Harness::new();
     tui.sessions(vec![

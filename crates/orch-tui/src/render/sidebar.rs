@@ -14,7 +14,7 @@ use crate::preparing::{Preparing, PreparingState};
 use crate::sessions::repo_label;
 use crate::sidebar::{FLAG_INDENT, FLAG_SEPARATOR, Flag, Folded, Row, Urgency};
 
-const SLUG_WIDTH: usize = 20;
+const LABEL_WIDTH: usize = 20;
 const SELECTED: Color = Color::Rgb(50, 50, 70);
 const UNSEEN: Style = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
 
@@ -105,7 +105,10 @@ fn first_line(view: &SessionView) -> Line<'static> {
     let mut first = vec![
         marker,
         Span::styled(
-            format!("{:<SLUG_WIDTH$} ", truncate(&view.slug, SLUG_WIDTH)),
+            format!(
+                "{:<LABEL_WIDTH$} ",
+                truncate(view.title_or_slug(), LABEL_WIDTH)
+            ),
             name,
         ),
         Span::styled(label, Style::new().fg(colour)),
@@ -122,7 +125,7 @@ fn first_line(view: &SessionView) -> Line<'static> {
 
 fn preparing_line(preparing: &Preparing, now: Instant, width: usize) -> Line<'static> {
     let seconds = now.saturating_duration_since(preparing.since).as_secs();
-    let room = width.saturating_sub(SLUG_WIDTH + 5);
+    let room = width.saturating_sub(LABEL_WIDTH + 5);
     let state = match &preparing.state {
         PreparingState::Failed(reason) => Span::styled(
             format!("✗ {}", truncate(reason, room)),
@@ -136,8 +139,8 @@ fn preparing_line(preparing: &Preparing, now: Instant, width: usize) -> Line<'st
     };
     Line::from(vec![
         Span::raw(format!(
-            "  {:<SLUG_WIDTH$} ",
-            truncate(&preparing.slug, SLUG_WIDTH)
+            "  {:<LABEL_WIDTH$} ",
+            truncate(&preparing.slug, LABEL_WIDTH)
         )),
         state,
     ])

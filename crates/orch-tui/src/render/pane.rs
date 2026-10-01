@@ -136,9 +136,13 @@ fn title(view: &SessionView) -> Line<'static> {
         Some(mode) => format!("[{} · {mode}]", view.preset),
         None => format!("[{}]", view.preset),
     };
+    let title = match &view.title {
+        Some(title) => format!("{title} ({})", view.slug),
+        None => view.slug.clone(),
+    };
     Line::from(vec![
         Span::raw(" "),
-        Span::raw(format!("{} / {} ", repo_name(&view.repo), view.slug)).bold(),
+        Span::raw(format!("{} / {title} ", repo_name(&view.repo))).bold(),
         Span::styled(label, Style::new().fg(colour)),
         Span::raw(format!(" {mode} ")),
     ])

@@ -101,6 +101,25 @@ fn a_queued_prompt_for_the_agent_persists_until_cleared() {
 }
 
 #[test]
+fn a_session_title_outlives_a_reopen_and_can_be_cleared() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut session = fx.session(&repo, "fix-login");
+    assert_eq!(session.title, None);
+
+    session.title = Some("login redirect".into());
+    fx.store.save_session(&session).unwrap();
+    fx.reopen();
+    let loaded = fx.store.session(&session.id).unwrap().unwrap();
+    assert_eq!(loaded.title.as_deref(), Some("login redirect"));
+    assert_eq!(loaded.slug, "fix-login");
+
+    session.title = None;
+    fx.store.save_session(&session).unwrap();
+    assert_eq!(fx.store.session(&session.id).unwrap().unwrap().title, None);
+}
+
+#[test]
 fn every_phase_and_mode_round_trips() {
     let mut fx = Fixture::new();
     let repo = fx.register("proj");

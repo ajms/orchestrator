@@ -85,6 +85,9 @@ CREATE TABLE guard_allowances (
     "
 ALTER TABLE sessions ADD COLUMN queued_prompt TEXT;
 ",
+    "
+ALTER TABLE sessions ADD COLUMN title TEXT;
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {

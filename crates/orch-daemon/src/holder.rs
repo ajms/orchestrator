@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
-use orch_agent::{Capabilities, GuardAnswer, GuardContext, GuardDecision, evaluate_guard};
+use orch_agent::{
+    Capabilities, GuardAnswer, GuardContext, GuardDecision, TitleWatch, evaluate_guard,
+};
 use orch_core::{
     AgentEvent, AgentState, ConversationId, Effect, Observation, PhaseEvent, SessionId,
 };
@@ -16,7 +18,7 @@ use orch_holder::{
 };
 use orch_protocol::{GuardChoice, Reply, RequestError};
 use tokio::net::unix::OwnedWriteHalf;
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::watch;
 
 use crate::lifecycle::PROMPT_FILE;
@@ -25,6 +27,7 @@ use crate::state::{Daemon, HolderLink, Live, PendingGuard};
 const DENIED_BY_USER: &str = "The user denied this in the Orchestrator (Guard).";
 const HOLDER_QUEUE: usize = 256;
 const EXIT_POLL: Duration = Duration::from_millis(20);
+const TITLE_POLL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Attach {
@@ -106,10 +109,18 @@ impl Daemon {
         mut last_seq: u64,
         closed: watch::Sender<bool>,
     ) {
+        let titles = self.watch_titles(&id);
         while let Ok(Some(message)) = reader.recv().await {
             match message {
                 FromHolder::Event { seq, event } if seq > last_seq => {
                     last_seq = seq;
+                    if let (
+                        Some(titles),
+                        HolderEvent::Hook { payload, .. } | HolderEvent::Tap { payload },
+                    ) = (&titles, &event)
+                    {
+                        let _ = titles.try_send(payload.clone());
+                    }
                     let effects = self.on_holder_event(&id, generation, event, seq);
                     if effects.contains(&Effect::RecheckRebase) {
                         self.request_recheck(&id);
@@ -120,8 +131,65 @@ impl Daemon {
                 _ => {}
             }
         }
+        drop(titles);
         closed.send_replace(true);
         self.holder_lost(&id, generation, last_seq).await;
+    }
+
+    fn watch_titles(self: &Arc<Self>, id: &SessionId) -> Option<Sender<String>> {
+        let watch = self
+            .lock()
+            .sessions
+            .get(id)
+            .filter(|live| live.adapter.capabilities().titles)
+            .and_then(|live| live.adapter.title_watch())?;
+        let (payloads, followed) = mpsc::channel(HOLDER_QUEUE);
+        tokio::spawn(self.clone().follow_titles(id.clone(), watch, followed));
+        Some(payloads)
+    }
+
+    async fn follow_titles(
+        self: Arc<Self>,
+        id: SessionId,
+        mut watch: Box<dyn TitleWatch>,
+        mut followed: Receiver<String>,
+    ) {
+        let mut tick = tokio::time::interval(TITLE_POLL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                payload = followed.recv() => match payload {
+                    Some(payload) => watch.follow(&payload),
+                    None => return,
+                },
+                _ = tick.tick() => {}
+            }
+            let Ok((back, events)) = tokio::task::spawn_blocking(move || {
+                let events = watch.poll();
+                (watch, events)
+            })
+            .await
+            else {
+                return;
+            };
+            watch = back;
+            if !events.is_empty() {
+                self.on_title_events(&id, &events);
+            }
+        }
+    }
+
+    fn on_title_events(&self, id: &SessionId, events: &[AgentEvent]) {
+        let mut state = self.lock();
+        let Some(live) = state.sessions.get_mut(id) else {
+            return;
+        };
+        for event in events {
+            if let AgentEvent::TitleChanged { title } = event {
+                retitle(live, title);
+            }
+        }
+        state.changed(id);
     }
 
     async fn holder_lost(self: &Arc<Self>, id: &SessionId, generation: u64, last_seq: u64) {
@@ -288,11 +356,18 @@ fn observe(
         match event {
             AgentEvent::ConversationChanged { id } => conversations.push(id.clone()),
             AgentEvent::UsageSample(sample) => usage.push(sample.clone()),
+            AgentEvent::TitleChanged { title } => retitle(live, title),
             _ => {}
         }
         effects.extend(live.status.observe(Observation::Agent(event.clone()), now));
     }
     effects
+}
+
+fn retitle(live: &mut Live, title: &str) {
+    live.record.title = Some(title.trim())
+        .filter(|title| !title.is_empty())
+        .map(Into::into);
 }
 
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {

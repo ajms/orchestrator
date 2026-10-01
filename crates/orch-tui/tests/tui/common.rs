@@ -449,6 +449,7 @@ pub fn session(repo: &str, slug: &str) -> SessionView {
         worktree: repo.join(".orchestrator/worktrees").join(slug),
         repo,
         slug: slug.into(),
+        title: None,
         branch: format!("orch/{slug}"),
         base: "main".into(),
         phase: PhaseView::Active,
@@ -468,6 +469,11 @@ pub fn session(repo: &str, slug: &str) -> SessionView {
         cost_usd: None,
         subagents: Vec::new(),
     }
+}
+
+pub fn titled(mut view: SessionView, title: &str) -> SessionView {
+    view.title = Some(title.into());
+    view
 }
 
 pub fn with_agent(mut view: SessionView, state: AgentStateView) -> SessionView {
