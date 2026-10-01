@@ -392,9 +392,7 @@ impl App {
                     preparing.fail(err.to_string());
                 }
             }
-            (Pending::Trust(retry), Ok(_)) => {
-                self.request(retry.request, retry.pending);
-            }
+            (Pending::Trust(retry), Ok(_)) => self.request(retry.request, retry.pending),
             (Pending::Draft(session, mode), result) => self.drafted(&session, mode, result),
             (Pending::Land, Ok(Reply::Landed { commit, warning })) => {
                 self.message = Some(match warning {
@@ -720,18 +718,18 @@ impl App {
         if let Some(repo) = &self.sidebar.heading {
             return Some(Stop::Heading(repo.clone()));
         }
-        if let Some(preparing) = self.sidebar.preparing {
+        if let Some(preparing) = self.sidebar.preparing_row {
             return Some(Stop::Preparing(preparing));
         }
         self.selected.clone().map(Stop::Session)
     }
 
     pub fn cursor_preparing(&self) -> Option<&Preparing> {
-        let id = self.sidebar.preparing?;
+        let id = self.sidebar.preparing_row?;
         self.preparing.iter().find(|preparing| preparing.id == id)
     }
 
-    pub fn failed_preparing(&self) -> Option<PreparingId> {
+    pub fn failed_preparing_at_cursor(&self) -> Option<PreparingId> {
         self.cursor_preparing()
             .filter(|preparing| preparing.failure().is_some())
             .map(|preparing| preparing.id)
@@ -753,11 +751,9 @@ impl App {
         let Some(create) = self.dismiss_preparing(id) else {
             return;
         };
-        self.open_new_form();
-        if let Some(Popup::New(form)) = &mut self.popup {
-            form.restore(create);
-        }
-        self.form_repo_changed();
+        let mut form = self.new_form();
+        form.restore(create);
+        self.show_new_form(form);
     }
 
     fn fail_abandoned_trust(&mut self) {
@@ -780,12 +776,12 @@ impl App {
 
     fn set_cursor(&mut self, stop: Stop) {
         self.sidebar.heading = None;
-        self.sidebar.preparing = None;
+        self.sidebar.preparing_row = None;
         self.selected = None;
         match stop {
             Stop::Session(session) => self.selected = Some(session),
             Stop::Heading(repo) => self.sidebar.heading = Some(repo),
-            Stop::Preparing(preparing) => self.sidebar.preparing = Some(preparing),
+            Stop::Preparing(preparing) => self.sidebar.preparing_row = Some(preparing),
         }
     }
 
@@ -957,12 +953,11 @@ impl App {
         self.request(request, Pending::ReportFailure);
     }
 
-    fn request(&mut self, request: Request, pending: Pending) -> RequestId {
+    fn request(&mut self, request: Request, pending: Pending) {
         self.next_request += 1;
         let id = RequestId(self.next_request);
         self.pending.insert(id, (request.clone(), pending));
         self.calls.push(Call::Request(id, request));
-        id
     }
 
     pub fn on_selected(&mut self, request: impl FnOnce(SessionId) -> Request) {
@@ -1020,6 +1015,16 @@ impl App {
     }
 
     pub fn open_new_form(&mut self) {
+        let form = self.new_form();
+        self.show_new_form(form);
+    }
+
+    fn show_new_form(&mut self, form: NewForm) {
+        self.popup = Some(Popup::New(form));
+        self.form_repo_changed();
+    }
+
+    fn new_form(&self) -> NewForm {
         let mut repos = self.config.repos.clone();
         for repo in self.sessions.repos() {
             if !repos.iter().any(|known| known == repo) {
@@ -1037,9 +1042,7 @@ impl App {
             None => 0,
         };
         let presets = self.config.presets.names().map(String::from).collect();
-        let form = NewForm::new(repos, preselect, presets, &self.config.branch_prefix);
-        self.popup = Some(Popup::New(form));
-        self.form_repo_changed();
+        NewForm::new(repos, preselect, presets, &self.config.branch_prefix)
     }
 
     pub fn form_repo_changed(&mut self) {
@@ -1216,7 +1219,7 @@ impl App {
         }
     }
 
-    fn follow_selection(&mut self) {
+    fn drop_listed_preparing(&mut self) {
         let sessions = &self.sessions;
         self.preparing.retain(|preparing| {
             preparing
@@ -1224,6 +1227,10 @@ impl App {
                 .as_ref()
                 .is_none_or(|session| sessions.get(session).is_none())
         });
+    }
+
+    fn follow_selection(&mut self) {
+        self.drop_listed_preparing();
         let order = self.sessions.ordered_ids();
         if let Some(wanted) = self
             .select_when_listed

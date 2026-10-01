@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Instant;
 
 use orch_core::SessionId;
@@ -37,6 +38,10 @@ impl Preparing {
             session: None,
             state: PreparingState::Waiting,
         }
+    }
+
+    pub fn is_in(&self, repo: &Path) -> bool {
+        self.create.repo == repo
     }
 
     pub fn is_counting(&self) -> bool {

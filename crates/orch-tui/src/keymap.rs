@@ -114,7 +114,7 @@ fn normal(app: &mut App, key: KeyEvent) {
         Some(Prefix::Z) if key.code == KeyCode::Char('a') => return app.toggle_cursor_fold(),
         _ => {}
     }
-    if let Some(failed) = app.failed_preparing() {
+    if let Some(failed) = app.failed_preparing_at_cursor() {
         match key.code {
             KeyCode::Enter => return app.reopen_preparing(failed),
             KeyCode::Char('x') => return drop(app.dismiss_preparing(failed)),

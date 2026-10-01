@@ -1,8 +1,9 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crossterm::event::KeyCode;
 use orch_protocol::FromDaemon;
-use orch_protocol::{CreateSession, Reply, RepoSettings, Request, RequestError};
+use orch_protocol::{Reply, RepoSettings, RequestError};
 use orch_tui::{Event, TuiConfig};
 use ratatui::style::Color;
 
@@ -47,7 +48,7 @@ fn a_submitted_session_is_preparing_under_its_repo() {
 #[test]
 fn the_elapsed_time_counts_up_while_preparing() {
     let mut tui = submitted("Fix login timeout");
-    assert!(tui.tui.auto_scrolling());
+    assert_eq!(tui.tui.tick_every(), Some(Duration::from_secs(1)));
 
     tui.later(4_200);
     tui.tick();
@@ -69,7 +70,7 @@ fn the_cursor_moves_to_the_preparing_session_and_the_pane_describes_it() {
     assert!(screen.contains("Fix login timeout"), "{screen}");
 }
 
-fn created(prompt: &str) -> Harness {
+fn submitted_and_created(prompt: &str) -> Harness {
     replying(
         prompt,
         Ok(Reply::Created {
@@ -80,7 +81,7 @@ fn created(prompt: &str) -> Harness {
 
 #[test]
 fn the_row_gives_way_to_the_session_once_it_is_listed() {
-    let mut tui = created("Fix login timeout");
+    let mut tui = submitted_and_created("Fix login timeout");
     tui.release_replies();
     assert!(tui.screen().contains("Preparing"));
 
@@ -95,7 +96,7 @@ fn the_row_gives_way_to_the_session_once_it_is_listed() {
 
 #[test]
 fn a_session_listed_before_the_reply_takes_over_when_the_reply_arrives() {
-    let mut tui = created("Fix login timeout");
+    let mut tui = submitted_and_created("Fix login timeout");
     tui.changed(session("webshop", "fix-login-timeout"));
     tui.release_replies();
 
@@ -131,17 +132,6 @@ fn a_refused_creation_turns_the_row_into_an_error() {
         screen.contains("Enter reopens the form · x dismisses"),
         "{screen}"
     );
-}
-
-fn create_requests(tui: &mut Harness) -> Vec<CreateSession> {
-    tui.daemon()
-        .requests()
-        .into_iter()
-        .filter_map(|request| match request {
-            Request::CreateSession(create) => Some(create),
-            _ => None,
-        })
-        .collect()
 }
 
 #[test]
@@ -261,7 +251,7 @@ fn a_reply_without_a_session_fails_the_row() {
     tui.release_replies();
 
     assert!(tui.sidebar_line_with("fix-login-timeout").contains("✗"));
-    assert!(!tui.tui.auto_scrolling());
+    assert_eq!(tui.tui.tick_every(), None);
 }
 
 #[test]

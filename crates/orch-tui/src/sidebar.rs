@@ -111,7 +111,7 @@ pub(crate) struct SidebarView {
     folded: HashSet<PathBuf>,
     scroll: usize,
     pub heading: Option<PathBuf>,
-    pub preparing: Option<PreparingId>,
+    pub preparing_row: Option<PreparingId>,
     pub revealed: Option<Stop>,
 }
 
@@ -162,7 +162,7 @@ impl SidebarView {
                     stops.extend(
                         preparing
                             .iter()
-                            .filter(|preparing| preparing.create.repo == repo)
+                            .filter(|preparing| preparing.is_in(repo))
                             .map(|preparing| Stop::Preparing(preparing.id)),
                     );
                 }
@@ -200,7 +200,7 @@ impl SidebarView {
                 rows.extend(
                     preparing
                         .iter()
-                        .filter(|preparing| preparing.create.repo == repo)
+                        .filter(|preparing| preparing.is_in(repo))
                         .map(Row::Preparing),
                 );
             }

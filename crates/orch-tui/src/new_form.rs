@@ -114,13 +114,10 @@ impl NewForm {
     }
 
     pub fn apply(&mut self, settings: RepoSettings) {
-        let chosen = self
-            .wanted_preset
-            .take()
-            .or_else(|| self.preset.map(|at| self.presets[at].clone()));
+        let wanted = self.wanted_preset.take();
         self.presets = settings.presets;
         self.preset =
-            chosen.and_then(|name| self.presets.iter().position(|preset| *preset == name));
+            wanted.and_then(|name| self.presets.iter().position(|preset| *preset == name));
         self.default_preset = settings.default_preset;
         self.default_base = settings.default_base;
         self.branch_prefix = settings.branch_prefix;

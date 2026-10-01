@@ -28,17 +28,6 @@ fn submit(tui: &mut Harness) {
     tui.ctrl('s');
 }
 
-fn created(tui: &mut Harness) -> Vec<CreateSession> {
-    tui.daemon()
-        .requests()
-        .into_iter()
-        .filter_map(|request| match request {
-            Request::CreateSession(create) => Some(create),
-            _ => None,
-        })
-        .collect()
-}
-
 fn field_line(tui: &mut Harness, label: &str) -> String {
     tui.lines()
         .into_iter()
@@ -92,7 +81,7 @@ fn submitting_creates_a_session_with_defaults_left_to_the_daemon() {
     submit(&mut tui);
 
     assert_eq!(
-        created(&mut tui),
+        create_requests(&mut tui),
         vec![CreateSession::new(
             "/home/me/recent",
             "First line\nsecond line"
@@ -120,7 +109,7 @@ fn an_edited_branch_base_and_preset_are_sent() {
     submit(&mut tui);
 
     assert_eq!(
-        created(&mut tui),
+        create_requests(&mut tui),
         vec![CreateSession {
             repo: "/home/me/recent".into(),
             prompt: "Stacked work".into(),
@@ -139,7 +128,10 @@ fn a_base_can_be_typed() {
     tui.press(KeyCode::Tab);
     tui.keys("release/1.2");
     submit(&mut tui);
-    assert_eq!(created(&mut tui)[0].base.as_deref(), Some("release/1.2"));
+    assert_eq!(
+        create_requests(&mut tui)[0].base.as_deref(),
+        Some("release/1.2")
+    );
 }
 
 #[test]
@@ -152,7 +144,10 @@ fn any_other_path_can_be_entered() {
     tui.press(KeyCode::Tab);
     tui.keys("Bootstrap");
     submit(&mut tui);
-    assert_eq!(created(&mut tui)[0].repo, PathBuf::from("/srv/new-repo"));
+    assert_eq!(
+        create_requests(&mut tui)[0].repo,
+        PathBuf::from("/srv/new-repo")
+    );
 }
 
 #[test]
@@ -170,7 +165,7 @@ fn ctrl_g_edits_the_prompt_in_the_editor() {
     assert!(field_line(&mut tui, "Branch").contains("orch/rewrite-the-parser-with-tests"));
     submit(&mut tui);
     assert_eq!(
-        created(&mut tui)[0].prompt,
+        create_requests(&mut tui)[0].prompt,
         "Rewrite the parser\nwith tests"
     );
 }
@@ -181,14 +176,14 @@ fn esc_cancels_the_form() {
     tui.keys("never mind");
     tui.press(KeyCode::Esc);
     assert!(!tui.screen().contains(":new Session"));
-    assert!(created(&mut tui).is_empty());
+    assert!(create_requests(&mut tui).is_empty());
 }
 
 #[test]
 fn an_empty_prompt_is_refused() {
     let mut tui = form(config());
     submit(&mut tui);
-    assert!(created(&mut tui).is_empty());
+    assert!(create_requests(&mut tui).is_empty());
     assert!(tui.screen().contains("the prompt is empty"));
 }
 
@@ -253,7 +248,7 @@ fn declining_trust_creates_nothing() {
     submit(&mut tui);
     tui.keys("n");
 
-    assert_eq!(created(&mut tui).len(), 1);
+    assert_eq!(create_requests(&mut tui).len(), 1);
     assert!(!tui.screen().contains("Setup script"));
     let _ = KeyEvent::new(KeyCode::Null, KeyModifiers::NONE);
 }

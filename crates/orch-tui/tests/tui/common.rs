@@ -9,8 +9,8 @@ use crossterm::event::{
 };
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView, FlagsView, FromDaemon, PhaseView, Reply, RepoSettings, Request, RequestError,
-    ScreenSnapshot, SessionView, Size,
+    AgentStateView, CreateSession, FlagsView, FromDaemon, PhaseView, Reply, RepoSettings, Request,
+    RequestError, ScreenSnapshot, SessionView, Size,
 };
 use orch_tui::{DaemonLink, Effect, Event, PaneId, RequestId, Tui, TuiConfig};
 use ratatui::Terminal;
@@ -418,6 +418,17 @@ impl Harness {
         }
         panic!("{needle:?} not on screen:\n{}", self.screen());
     }
+}
+
+pub fn create_requests(tui: &mut Harness) -> Vec<CreateSession> {
+    tui.daemon()
+        .requests()
+        .into_iter()
+        .filter_map(|request| match request {
+            Request::CreateSession(create) => Some(create),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn id(text: &str) -> SessionId {
