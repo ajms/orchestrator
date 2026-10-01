@@ -6,7 +6,7 @@ use orch_tui::{Effect, Event, TuiConfig};
 
 use crate::common::*;
 
-fn config() -> TuiConfig {
+pub fn config() -> TuiConfig {
     TuiConfig {
         repos: vec![
             PathBuf::from("/home/me/recent"),
@@ -17,9 +17,9 @@ fn config() -> TuiConfig {
     }
 }
 
-fn form(config: TuiConfig) -> Harness {
+pub fn form(config: TuiConfig) -> Harness {
     let mut tui = Harness::with_config(config);
-    tui.sessions(vec![session("webshop", "existing")]);
+    tui.sessions(vec![session("recent", "existing")]);
     tui.command("new");
     tui
 }
@@ -28,50 +28,67 @@ fn submit(tui: &mut Harness) {
     tui.ctrl('s');
 }
 
-fn field_line(tui: &mut Harness, label: &str) -> String {
-    tui.lines()
-        .into_iter()
-        .find(|line| line.contains(&format!(" {label} ")))
-        .unwrap_or_else(|| panic!("no {label} field"))
+pub fn field(tui: &mut Harness, label: &str) -> String {
+    let lines = tui.lines();
+    let at = lines
+        .iter()
+        .position(|line| line.contains(&format!("│ {label} ")))
+        .unwrap_or_else(|| panic!("no {label} field in\n{}", lines.join("\n")));
+    format!("{}\n{}", lines[at], lines[at + 1])
 }
 
 #[test]
-fn new_opens_a_form_with_the_most_recent_repo_first() {
-    let mut tui = form(config());
+fn new_starts_on_the_selected_sessions_repo() {
+    let mut tui = Harness::with_config(config());
+    tui.sessions(vec![session("webshop", "existing")]);
+    tui.command("new");
     let screen = tui.screen();
     assert!(screen.contains(":new Session"), "{screen}");
-    assert!(field_line(&mut tui, "Repo").contains("/home/me/recent"));
-
-    tui.press(KeyCode::BackTab);
-    tui.press(KeyCode::Right);
-    assert!(field_line(&mut tui, "Repo").contains("/home/me/older"));
-    tui.press(KeyCode::Right);
-    assert!(field_line(&mut tui, "Repo").contains("/home/me/webshop"));
+    assert!(field(&mut tui, "Repo").contains("/home/me/webshop"));
 }
 
 #[test]
-fn the_repo_of_the_working_directory_is_preselected() {
-    let mut tui = form(TuiConfig {
+fn new_starts_on_the_repo_heading_under_the_cursor() {
+    let mut tui = Harness::with_config(config());
+    tui.sessions(vec![session("older", "old")]);
+    tui.keys("za");
+    tui.command("new");
+    assert!(field(&mut tui, "Repo").contains("/home/me/older"));
+}
+
+#[test]
+fn without_a_selection_new_starts_on_the_working_directorys_repo() {
+    let mut tui = Harness::with_config(TuiConfig {
         cwd_repo: Some(PathBuf::from("/home/me/older")),
         ..config()
     });
-    assert!(field_line(&mut tui, "Repo").contains("/home/me/older"));
+    tui.command("new");
+    assert!(field(&mut tui, "Repo").contains("/home/me/older"));
+}
+
+#[test]
+fn without_a_selection_or_working_directory_new_starts_on_the_most_recent_repo() {
+    let mut tui = Harness::with_config(config());
+    tui.command("new");
+    assert!(field(&mut tui, "Repo").contains("/home/me/recent"));
 }
 
 #[test]
 fn the_branch_is_prefilled_from_the_prompt_until_edited() {
     let mut tui = form(config());
     tui.keys("Fix the login timeout");
-    assert!(field_line(&mut tui, "Branch").contains("orch/fix-the-login-timeout"));
+    assert!(field(&mut tui, "Branch").contains("orch/fix-the-login-timeout"));
 
+    tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     for _ in "-timeout".chars() {
         tui.press(KeyCode::Backspace);
     }
     tui.keys("-bug");
     tui.press(KeyCode::BackTab);
+    tui.press(KeyCode::BackTab);
     tui.keys(" quickly");
-    assert!(field_line(&mut tui, "Branch").contains("orch/fix-the-login-bug"));
+    assert!(field(&mut tui, "Branch").contains("orch/fix-the-login-bug"));
 }
 
 #[test]
@@ -99,13 +116,14 @@ fn an_edited_branch_base_and_preset_are_sent() {
     tui.command("new");
     tui.keys("Stacked work");
     tui.press(KeyCode::Tab);
+    tui.press(KeyCode::Tab);
     tui.keys("-v2");
     tui.press(KeyCode::Tab);
-    tui.press(KeyCode::Right);
-    assert!(field_line(&mut tui, "Base").contains("orch/other-work"));
+    tui.press(KeyCode::Down);
+    assert!(field(&mut tui, "Base").contains("orch/other-work"));
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Right);
-    assert!(field_line(&mut tui, "Preset").contains("plan"));
+    assert!(field(&mut tui, "Preset").contains("plan"));
     submit(&mut tui);
 
     assert_eq!(
@@ -126,6 +144,7 @@ fn a_base_can_be_typed() {
     tui.keys("Hotfix");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
+    tui.press(KeyCode::Tab);
     tui.keys("release/1.2");
     submit(&mut tui);
     assert_eq!(
@@ -135,14 +154,13 @@ fn a_base_can_be_typed() {
 }
 
 #[test]
-fn any_other_path_can_be_entered() {
+fn a_path_that_matches_no_known_repo_is_used_as_typed() {
     let mut tui = form(config());
-    tui.press(KeyCode::BackTab);
-    tui.press(KeyCode::Left);
-    assert!(field_line(&mut tui, "Repo").contains("other path"));
-    tui.keys("/srv/new-repo");
-    tui.press(KeyCode::Tab);
     tui.keys("Bootstrap");
+    tui.press(KeyCode::Tab);
+    tui.keys("/srv/new-repo");
+    tui.press(KeyCode::Enter);
+    assert!(field(&mut tui, "Repo").contains("/srv/new-repo"));
     submit(&mut tui);
     assert_eq!(
         create_requests(&mut tui)[0].repo,
@@ -162,7 +180,7 @@ fn ctrl_g_edits_the_prompt_in_the_editor() {
     tui.send(Event::EditorClosed(Ok(
         "Rewrite the parser\nwith tests".into()
     )));
-    assert!(field_line(&mut tui, "Branch").contains("orch/rewrite-the-parser-with-tests"));
+    assert!(field(&mut tui, "Branch").contains("orch/rewrite-the-parser-with-tests"));
     submit(&mut tui);
     assert_eq!(
         create_requests(&mut tui)[0].prompt,
@@ -171,12 +189,35 @@ fn ctrl_g_edits_the_prompt_in_the_editor() {
 }
 
 #[test]
-fn esc_cancels_the_form() {
+fn esc_with_an_empty_prompt_closes_the_form_at_once() {
     let mut tui = form(config());
-    tui.keys("never mind");
     tui.press(KeyCode::Esc);
     assert!(!tui.screen().contains(":new Session"));
     assert!(create_requests(&mut tui).is_empty());
+}
+
+#[test]
+fn esc_with_a_prompt_asks_once_before_discarding() {
+    let mut tui = form(config());
+    tui.keys("never mind");
+    tui.press(KeyCode::Esc);
+    assert!(tui.line_with(":new Session").contains(":new Session"));
+    assert!(tui.screen().contains("Esc again to discard"));
+
+    tui.press(KeyCode::Esc);
+    assert!(!tui.screen().contains(":new Session"));
+    assert!(create_requests(&mut tui).is_empty());
+}
+
+#[test]
+fn another_key_after_esc_keeps_the_form() {
+    let mut tui = form(config());
+    tui.keys("never mind");
+    tui.press(KeyCode::Esc);
+    tui.keys("!");
+    assert!(!tui.screen().contains("Esc again to discard"));
+    tui.press(KeyCode::Esc);
+    assert!(tui.screen().contains(":new Session"));
 }
 
 #[test]

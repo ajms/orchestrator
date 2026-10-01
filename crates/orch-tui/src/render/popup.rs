@@ -10,13 +10,12 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use crate::app::{App, Popup};
 use crate::discard::DiscardConfirm;
 use crate::land::LandForm;
-use crate::new_form::{Field, NewForm};
 use crate::reconcile::RetargetPicker;
 use crate::sessions::repo_name;
 
 pub(super) fn draw(app: &App, frame: &mut Frame) {
     match &app.popup {
-        Some(Popup::New(form)) => new_form(frame, form),
+        Some(Popup::New(form)) => super::new_form::draw(frame, form),
         Some(Popup::Trust(prompt)) => trust(
             frame,
             &prompt.repo,
@@ -36,70 +35,6 @@ pub(super) fn draw(app: &App, frame: &mut Frame) {
     if let Some((_, prompt)) = app.guard_prompt() {
         guard(frame, prompt);
     }
-}
-
-fn new_form(frame: &mut Frame, form: &NewForm) {
-    let label = |field: Field, name: &str| {
-        let style = match form.field == field {
-            true => Style::new().fg(Color::Black).bg(Color::Cyan),
-            false => Style::new(),
-        };
-        Span::styled(format!(" {name:<9} "), style)
-    };
-    let cursor = |field: Field| if form.field == field { "▏" } else { "" };
-    let repo = match form.repos.get(form.repo) {
-        Some(repo) => format!("◂ {} ▸", repo.display()),
-        None => format!("◂ other path… ▸ {}{}", form.other_path, cursor(Field::Repo)),
-    };
-    let mut lines = vec![Line::from(vec![
-        label(Field::Repo, "Repo"),
-        Span::raw(repo),
-    ])];
-    let prompt = format!("{}{}", form.prompt, cursor(Field::Prompt));
-    for (at, text) in prompt.split('\n').enumerate() {
-        let head = match at {
-            0 => label(Field::Prompt, "Prompt"),
-            _ => Span::raw(" ".repeat(11)),
-        };
-        lines.push(Line::from(vec![head, Span::raw(text.to_string())]));
-    }
-    lines.push(Line::from(vec![
-        label(Field::Branch, "Branch"),
-        Span::raw(format!("{}{}", form.branch, cursor(Field::Branch))),
-    ]));
-    let base = match (form.base.is_empty(), &form.default_base) {
-        (false, _) => form.base.clone(),
-        (true, Some(default)) => format!("{default} (Repo default)"),
-        (true, None) => "(Repo default)".to_string(),
-    };
-    let mut base_line = vec![
-        label(Field::Base, "Base"),
-        Span::raw(format!("{base}{}", cursor(Field::Base))),
-    ];
-    if !form.base_candidates.is_empty() {
-        base_line.push(Span::raw("  ◂ ▸ other Sessions' Branches").dark_gray());
-    }
-    lines.push(Line::from(base_line));
-    let preset = match form.preset {
-        Some(at) => format!("◂ {} ▸", form.presets[at]),
-        None => match &form.default_preset {
-            Some(default) => format!("◂ {default} (Repo default) ▸"),
-            None => "◂ (Repo default) ▸".to_string(),
-        },
-    };
-    lines.push(Line::from(vec![
-        label(Field::Preset, "Preset"),
-        Span::raw(preset),
-    ]));
-    lines.push(Line::default());
-    if let Some(error) = &form.error {
-        lines.push(Line::from(format!(" {error}")).red());
-    }
-    lines.push(
-        Line::from(" Tab field · ←/→ choose · Ctrl+g $EDITOR · Ctrl+s create · Esc cancel")
-            .dark_gray(),
-    );
-    show(frame, " :new Session ", Color::Cyan, lines, 84);
 }
 
 fn land(frame: &mut Frame, view: &SessionView, form: &LandForm) {
@@ -292,7 +227,7 @@ fn show(frame: &mut Frame, title: &str, colour: Color, lines: Vec<Line<'static>>
     );
 }
 
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
+pub(super) fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let [area] = Layout::horizontal([Constraint::Length(width.min(area.width))])
         .flex(Flex::Center)
         .areas(area);

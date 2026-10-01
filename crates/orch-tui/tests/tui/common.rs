@@ -346,6 +346,13 @@ impl Harness {
             .collect()
     }
 
+    pub fn cursor(&mut self) -> Option<(u16, u16)> {
+        self.draw();
+        let backend = self.terminal.backend();
+        let at = backend.cursor_position();
+        backend.cursor_visible().then_some((at.x, at.y))
+    }
+
     pub fn sidebar_lines(&mut self) -> Vec<String> {
         self.lines()
             .into_iter()

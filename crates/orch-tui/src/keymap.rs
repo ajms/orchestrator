@@ -68,6 +68,9 @@ fn review(app: &mut App, key: KeyEvent) {
 }
 
 pub(crate) fn paste(app: &mut App, text: String) {
+    if app.popup.is_some() {
+        return crate::popup::paste(app, &text);
+    }
     if app.mode == Mode::Insert && app.pane.is_some() {
         app.push(Call::Paste(text));
     }

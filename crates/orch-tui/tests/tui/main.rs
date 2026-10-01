@@ -10,6 +10,7 @@ mod links;
 mod modes;
 mod mouse;
 mod navigation;
+mod new_form;
 mod new_session;
 mod preparing;
 mod reconcile;

@@ -5,6 +5,7 @@ use orch_protocol::{RepoSettings, Request};
 use orch_tui::{Effect, Event, ReviewData, ReviewPurpose, TuiConfig};
 
 use crate::common::*;
+use crate::new_session::field;
 
 fn settings(repo: &str, base: &str) -> RepoSettings {
     RepoSettings {
@@ -26,13 +27,6 @@ fn config() -> TuiConfig {
         ],
         ..TuiConfig::default()
     }
-}
-
-fn field_line(tui: &mut Harness, label: &str) -> String {
-    tui.lines()
-        .into_iter()
-        .find(|line| line.contains(&format!(" {label} ")))
-        .unwrap_or_else(|| panic!("no {label} field"))
 }
 
 fn settings_requested(tui: &mut Harness) -> Vec<PathBuf> {
@@ -57,14 +51,12 @@ fn the_new_form_shows_the_repos_resolved_default_base_presets_and_branch_prefix(
         settings_requested(&mut tui),
         [PathBuf::from("/home/me/recent")]
     );
-    assert!(field_line(&mut tui, "Base").contains("develop"));
-    assert!(field_line(&mut tui, "Preset").contains("careful"));
-    assert!(field_line(&mut tui, "Branch").contains("me/fix-it"));
-    tui.press(KeyCode::Tab);
-    tui.press(KeyCode::Tab);
-    tui.press(KeyCode::Tab);
+    assert!(field(&mut tui, "Base").contains("develop"));
+    assert!(field(&mut tui, "Preset").contains("careful"));
+    assert!(field(&mut tui, "Branch").contains("me/fix-it"));
+    tui.press(KeyCode::BackTab);
     tui.press(KeyCode::Right);
-    assert!(field_line(&mut tui, "Preset").contains("◂ careful ▸"));
+    assert!(field(&mut tui, "Preset").contains("◂ careful ▸"));
 }
 
 #[test]
@@ -75,8 +67,10 @@ fn picking_another_repo_fetches_its_settings() {
         settings("/home/me/older", "trunk"),
     ];
     tui.command("new");
-    tui.press(KeyCode::BackTab);
-    tui.press(KeyCode::Right);
+    tui.press(KeyCode::Tab);
+    tui.press(KeyCode::Enter);
+    tui.press(KeyCode::Down);
+    tui.press(KeyCode::Enter);
 
     assert_eq!(
         settings_requested(&mut tui),
@@ -85,7 +79,7 @@ fn picking_another_repo_fetches_its_settings() {
             PathBuf::from("/home/me/older")
         ]
     );
-    assert!(field_line(&mut tui, "Base").contains("trunk"));
+    assert!(field(&mut tui, "Base").contains("trunk"));
 }
 
 #[test]
@@ -123,11 +117,11 @@ fn the_repo_list_is_fetched_again_whenever_the_daemon_connects() {
     tui.daemon().repos = Some(vec![PathBuf::from("/srv/first")]);
     tui.sessions(Vec::new());
     tui.command("new");
-    assert!(field_line(&mut tui, "Repo").contains("/srv/first"));
+    assert!(field(&mut tui, "Repo").contains("/srv/first"));
     tui.press(KeyCode::Esc);
 
     tui.daemon().repos = Some(vec![PathBuf::from("/srv/after-restart")]);
     tui.sessions(Vec::new());
     tui.command("new");
-    assert!(field_line(&mut tui, "Repo").contains("/srv/after-restart"));
+    assert!(field(&mut tui, "Repo").contains("/srv/after-restart"));
 }

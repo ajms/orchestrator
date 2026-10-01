@@ -156,6 +156,7 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
     tui.command("new");
     tui.keys("Fix login timeout");
     tui.press(KeyCode::Tab);
+    tui.press(KeyCode::Tab);
     tui.keys("-v2");
     tui.press(KeyCode::Tab);
     tui.keys("release/1.2");

@@ -173,7 +173,7 @@ impl TrustPrompt {
 }
 
 pub(crate) enum Popup {
-    New(NewForm),
+    New(Box<NewForm>),
     Trust(TrustPrompt),
     Land(LandForm),
     Discard(DiscardConfirm),
@@ -846,19 +846,19 @@ impl App {
     }
 
     pub fn toggle_cursor_fold(&mut self) {
-        let repo = match self.cursor() {
-            Some(Stop::Heading(repo)) => repo,
-            Some(Stop::Session(_)) => match self.selected_view() {
-                Some(view) => view.repo.clone(),
-                None => return,
-            },
-            Some(Stop::Preparing(_)) => match self.cursor_preparing() {
-                Some(preparing) => preparing.create.repo.clone(),
-                None => return,
-            },
-            None => return,
-        };
-        self.toggle_fold(&repo);
+        if let Some(repo) = self.cursor_repo() {
+            self.toggle_fold(&repo);
+        }
+    }
+
+    fn cursor_repo(&self) -> Option<PathBuf> {
+        match self.cursor()? {
+            Stop::Heading(repo) => Some(repo),
+            Stop::Session(_) => self.selected_view().map(|view| view.repo.clone()),
+            Stop::Preparing(_) => self
+                .cursor_preparing()
+                .map(|preparing| preparing.create.repo.clone()),
+        }
     }
 
     fn settle_cursor(&mut self) {
@@ -1020,7 +1020,7 @@ impl App {
     }
 
     fn show_new_form(&mut self, form: NewForm) {
-        self.popup = Some(Popup::New(form));
+        self.popup = Some(Popup::New(Box::new(form)));
         self.form_repo_changed();
     }
 
@@ -1031,18 +1031,17 @@ impl App {
                 repos.push(repo.to_path_buf());
             }
         }
-        let preselect = match &self.config.cwd_repo {
-            Some(cwd) => match repos.iter().position(|repo| repo == cwd) {
-                Some(at) => at,
-                None => {
-                    repos.insert(0, cwd.clone());
-                    0
-                }
-            },
-            None => 0,
-        };
+        let start = self
+            .cursor_repo()
+            .or_else(|| self.config.cwd_repo.clone())
+            .or_else(|| repos.first().cloned());
+        if let Some(start) = &start
+            && !repos.contains(start)
+        {
+            repos.insert(0, start.clone());
+        }
         let presets = self.config.presets.names().map(String::from).collect();
-        NewForm::new(repos, preselect, presets, &self.config.branch_prefix)
+        NewForm::new(repos, start, presets, &self.config.branch_prefix)
     }
 
     pub fn form_repo_changed(&mut self) {
@@ -1050,7 +1049,7 @@ impl App {
         let Some(Popup::New(form)) = &self.popup else {
             return;
         };
-        if let Some(repo) = form.repo_path().filter(|_| !form.other_selected()) {
+        if let Some(repo) = form.repo_path() {
             let request = Request::RepoSettings { repo: repo.clone() };
             self.request(request, Pending::FormSettings(repo));
         }

@@ -40,7 +40,7 @@ cd ~/src/my-repo
 orch                                  # opens the TUI; this Repo is preselected
 ```
 
-In the TUI, type `:new`, write a prompt (`Ctrl+g` opens `$EDITOR`), pick a Preset and press Enter. `orch` then:
+In the TUI, type `:new`, write a prompt (`Ctrl+g` opens `$EDITOR`, `Ctrl+r` picks another Repo), Tab to the other fields if needed and press `Ctrl+s`. `orch` then:
 
 1. creates `.orchestrator/worktrees/<slug>` on Branch `orch/<slug>`;
 2. runs the Repo's Setup script;
