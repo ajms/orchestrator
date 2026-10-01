@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use orch_core::SessionId;
 use orch_protocol::{Request, Size};
@@ -6,9 +6,13 @@ use ratatui::Frame;
 
 use crate::app::{App, Call, TuiConfig};
 use crate::event::{Effect, Event, PaneId};
+use crate::preparing::Preparing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RequestId(pub u64);
+
+const AUTO_SCROLL_TICK: Duration = Duration::from_millis(50);
+const PREPARING_TICK: Duration = Duration::from_secs(1);
 
 pub trait DaemonLink {
     fn request(&mut self, id: RequestId, request: Request);
@@ -37,8 +41,15 @@ impl<L: DaemonLink> Tui<L> {
         self
     }
 
-    pub fn auto_scrolling(&self) -> bool {
-        crate::mouse::auto_scrolling(&self.app)
+    pub fn tick_every(&self) -> Option<Duration> {
+        if crate::mouse::auto_scrolling(&self.app) {
+            return Some(AUTO_SCROLL_TICK);
+        }
+        self.app
+            .preparing
+            .iter()
+            .any(Preparing::is_counting)
+            .then_some(PREPARING_TICK)
     }
 
     pub fn link_mut(&mut self) -> &mut L {

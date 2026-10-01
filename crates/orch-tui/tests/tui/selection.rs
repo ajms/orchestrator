@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use crossterm::event::MouseEventKind;
@@ -474,11 +476,11 @@ fn auto_scroll_asks_for_ticks_only_while_the_scrollback_can_move() {
     let mut tui = long_history();
     down(&mut tui, 7, 26);
     tui.drag(PANE_LEFT, PANE_TOP - 1);
-    assert!(tui.tui.auto_scrolling());
+    assert_eq!(tui.tui.tick_every(), Some(Duration::from_millis(50)));
 
     wheel(&mut tui, MouseEventKind::ScrollUp, 30);
     tui.tick();
-    assert!(!tui.tui.auto_scrolling());
+    assert_eq!(tui.tui.tick_every(), None);
 }
 
 #[test]
@@ -487,5 +489,5 @@ fn a_drag_past_the_bottom_of_the_live_screen_asks_for_no_ticks() {
     down(&mut tui, 0, 20);
     tui.drag(PANE_LEFT, BELOW_PANE);
 
-    assert!(!tui.tui.auto_scrolling());
+    assert_eq!(tui.tui.tick_every(), None);
 }

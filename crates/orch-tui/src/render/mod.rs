@@ -1,3 +1,4 @@
+mod new_form;
 mod pane;
 mod popup;
 mod reconcile;

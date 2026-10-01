@@ -16,14 +16,17 @@ mod new_form;
 mod pane;
 mod passthrough;
 mod popup;
+mod preparing;
 mod reconcile;
 mod render;
+mod repo_picker;
 mod review;
 mod runtime;
 mod selection;
 mod sessions;
 mod sidebar;
 mod socket;
+mod text_input;
 
 pub use config::TuiConfig;
 pub use event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};

@@ -34,6 +34,7 @@ fn start() -> Result<(), String> {
         orch_program,
         config: TuiConfig {
             display: DisplayVars::from_env(),
+            home: std::env::home_dir(),
             ..tui_config(cwd.as_deref())
         },
     };

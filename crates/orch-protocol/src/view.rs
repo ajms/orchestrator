@@ -8,6 +8,8 @@ pub struct SessionView {
     pub id: SessionId,
     pub repo: PathBuf,
     pub slug: String,
+    #[serde(default)]
+    pub title: Option<String>,
     pub branch: String,
     pub base: String,
     pub worktree: PathBuf,
@@ -28,6 +30,12 @@ pub struct SessionView {
     pub context_used_percent: Option<f64>,
     pub cost_usd: Option<f64>,
     pub subagents: Vec<SubagentView>,
+}
+
+impl SessionView {
+    pub fn title_or_slug(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.slug)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

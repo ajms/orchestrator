@@ -1,8 +1,12 @@
-use std::path::PathBuf;
+use std::cell::Cell;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use orch_git::slugify;
 use orch_protocol::{CreateSession, RepoSettings};
+
+use crate::repo_picker::{KnownRepo, RepoChoice};
+use crate::text_input::{Suggested, TextInput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
@@ -14,8 +18,8 @@ pub enum Field {
 }
 
 const FIELDS: [Field; 5] = [
-    Field::Repo,
     Field::Prompt,
+    Field::Repo,
     Field::Branch,
     Field::Base,
     Field::Preset,
@@ -31,67 +35,77 @@ pub enum Outcome {
 
 pub struct NewForm {
     pub field: Field,
-    pub repos: Vec<PathBuf>,
-    pub repo: usize,
-    pub other_path: String,
-    pub prompt: String,
-    pub branch: String,
-    branch_edited: bool,
+    pub repo: RepoChoice,
+    pub prompt: TextInput,
+    pub prompt_top: Cell<usize>,
+    pub branch: Suggested,
     branch_prefix: String,
-    pub base: String,
+    pub base: Suggested,
     pub default_base: Option<String>,
     pub default_preset: Option<String>,
     pub base_candidates: Vec<String>,
     base_choice: usize,
     pub presets: Vec<String>,
     pub preset: Option<usize>,
+    wanted_preset: Option<String>,
     pub error: Option<String>,
+    pub discarding: bool,
 }
 
 impl NewForm {
-    pub fn new(repos: Vec<PathBuf>, preselect: usize, presets: Vec<String>, prefix: &str) -> Self {
+    pub fn new(
+        repos: Vec<KnownRepo>,
+        repo: Option<PathBuf>,
+        presets: Vec<String>,
+        prefix: &str,
+    ) -> Self {
         let mut form = Self {
             field: Field::Prompt,
-            repos,
-            repo: preselect,
-            other_path: String::new(),
-            prompt: String::new(),
-            branch: String::new(),
-            branch_edited: false,
+            repo: RepoChoice::new(repos, repo),
+            prompt: TextInput::default(),
+            prompt_top: Cell::new(0),
+            branch: Suggested::suggestion(String::new()),
             branch_prefix: prefix.to_string(),
-            base: String::new(),
+            base: Suggested::default(),
             default_base: None,
             default_preset: None,
             base_candidates: Vec::new(),
             base_choice: 0,
             presets,
             preset: None,
+            wanted_preset: None,
             error: None,
+            discarding: false,
         };
         form.prefill_branch();
         form
     }
 
-    pub fn repo_path(&self) -> Option<PathBuf> {
-        match self.repos.get(self.repo) {
-            Some(repo) => Some(repo.clone()),
-            None => Some(PathBuf::from(self.other_path.trim()))
-                .filter(|path| !path.as_os_str().is_empty()),
-        }
-    }
-
-    pub fn other_selected(&self) -> bool {
-        self.repo == self.repos.len()
-    }
-
     pub fn set_prompt(&mut self, prompt: String) {
-        self.prompt = prompt;
+        self.prompt.set(prompt);
+        self.prefill_branch();
+    }
+
+    pub fn restore(&mut self, create: CreateSession) {
+        self.repo.set(create.repo);
+        self.prompt.set(create.prompt);
+        if let Some(branch) = create.branch {
+            self.branch.set(branch);
+        }
+        self.base.set(create.base.unwrap_or_default());
+        self.preset = create
+            .preset
+            .as_ref()
+            .and_then(|name| self.presets.iter().position(|preset| preset == name));
+        self.wanted_preset = create.preset;
         self.prefill_branch();
     }
 
     pub fn apply(&mut self, settings: RepoSettings) {
+        let wanted = self.wanted_preset.take();
         self.presets = settings.presets;
-        self.preset = None;
+        self.preset =
+            wanted.and_then(|name| self.presets.iter().position(|preset| *preset == name));
         self.default_preset = settings.default_preset;
         self.default_base = settings.default_base;
         self.branch_prefix = settings.branch_prefix;
@@ -103,122 +117,186 @@ impl NewForm {
         self.base_choice = 0;
     }
 
-    pub fn key(&mut self, key: KeyEvent) -> Outcome {
+    pub fn key(&mut self, key: KeyEvent, home: Option<&Path>) -> Outcome {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        match key.code {
-            KeyCode::Esc => return Outcome::Cancel,
-            KeyCode::Char('s') if ctrl => return self.submit(),
-            KeyCode::Char('g') if ctrl && self.field == Field::Prompt => {
-                return Outcome::Edit(self.prompt.clone());
+        if ctrl && matches!(key.code, KeyCode::Char('s' | 'g')) {
+            self.repo.close();
+        }
+        if self.repo.picker().is_some() {
+            if !self.repo.key(key) {
+                return Outcome::Stay;
             }
+            self.field = Field::Prompt;
+            return Outcome::RepoChanged;
+        }
+        let discarding = std::mem::take(&mut self.discarding);
+        match key.code {
+            KeyCode::Esc if discarding || self.prompt.text().is_empty() => Outcome::Cancel,
+            KeyCode::Esc => {
+                self.discarding = true;
+                Outcome::Stay
+            }
+            KeyCode::Char('r') if ctrl => self.open_picker(String::new(), home),
+            KeyCode::Char('s') if ctrl => self.submit(),
+            KeyCode::Char('g') if ctrl => Outcome::Edit(self.prompt.text().to_string()),
             KeyCode::Tab => self.move_field(1),
             KeyCode::BackTab => self.move_field(FIELDS.len() - 1),
-            KeyCode::Enter if self.field == Field::Prompt => self.edit_text('\n'),
-            KeyCode::Enter => return self.submit(),
-            KeyCode::Left => return self.cycle(false),
-            KeyCode::Right => return self.cycle(true),
-            KeyCode::Backspace => self.erase(),
-            KeyCode::Char(c) if !ctrl => self.edit_text(c),
-            _ => {}
+            _ => match self.field {
+                Field::Prompt => self.prompt_key(key),
+                Field::Repo => self.repo_key(key, home),
+                Field::Branch => self.branch_key(key),
+                Field::Base => self.base_key(key),
+                Field::Preset => self.preset_key(key),
+            },
+        }
+    }
+
+    fn prompt_key(&mut self, key: KeyEvent) -> Outcome {
+        match key.code {
+            KeyCode::Enter => self.prompt.insert("\n"),
+            KeyCode::Up => self.prompt.up(),
+            KeyCode::Down => self.prompt.down(),
+            _ => {
+                self.prompt.key(key);
+            }
+        }
+        self.prefill_branch();
+        Outcome::Stay
+    }
+
+    fn repo_key(&mut self, key: KeyEvent, home: Option<&Path>) -> Outcome {
+        match key.code {
+            KeyCode::Enter => self.open_picker(String::new(), home),
+            KeyCode::Char(c) if plain(key) => self.open_picker(c.to_string(), home),
+            _ => Outcome::Stay,
+        }
+    }
+
+    fn branch_key(&mut self, key: KeyEvent) -> Outcome {
+        if key.code == KeyCode::Enter {
+            return self.move_field(1);
+        }
+        if self.branch.key(key) {
+            self.branch_changed();
         }
         Outcome::Stay
     }
 
-    fn move_field(&mut self, step: usize) {
+    fn branch_changed(&mut self) {
+        if self.branch.text().is_empty() {
+            self.branch.suggest(String::new());
+        }
+        self.prefill_branch();
+    }
+
+    pub fn paste(&mut self, text: &str, home: Option<&Path>) -> Outcome {
+        self.discarding = false;
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let line = text.lines().next().unwrap_or_default().trim();
+        if self.repo.picker().is_some() {
+            self.repo.paste(line);
+            return Outcome::Stay;
+        }
+        match self.field {
+            Field::Prompt => {
+                self.prompt.insert(&text);
+                self.prefill_branch();
+            }
+            Field::Repo => return self.open_picker(line.to_string(), home),
+            Field::Branch => {
+                self.branch.replace(line);
+                self.branch_changed();
+            }
+            Field::Base => self.base.replace(line),
+            Field::Preset => {}
+        }
+        Outcome::Stay
+    }
+
+    fn base_key(&mut self, key: KeyEvent) -> Outcome {
+        match key.code {
+            KeyCode::Enter => return self.move_field(1),
+            KeyCode::Up => self.cycle_base(false),
+            KeyCode::Down => self.cycle_base(true),
+            KeyCode::Char(c) if plain(key) => self.base.replace(c.encode_utf8(&mut [0; 4])),
+            _ => {
+                self.base.accept();
+                self.base.key(key);
+            }
+        }
+        Outcome::Stay
+    }
+
+    fn preset_key(&mut self, key: KeyEvent) -> Outcome {
+        let len = self.presets.len() + 1;
+        let at = self.preset.map_or(0, |at| at + 1);
+        let next = match key.code {
+            KeyCode::Enter => return self.move_field(1),
+            KeyCode::Left | KeyCode::Up => (at + len - 1) % len,
+            KeyCode::Right | KeyCode::Down => (at + 1) % len,
+            _ => return Outcome::Stay,
+        };
+        self.preset = next.checked_sub(1);
+        Outcome::Stay
+    }
+
+    fn open_picker(&mut self, query: String, home: Option<&Path>) -> Outcome {
+        self.repo.open(query, home);
+        Outcome::Stay
+    }
+
+    fn move_field(&mut self, step: usize) -> Outcome {
         let at = FIELDS
             .iter()
             .position(|field| *field == self.field)
             .unwrap_or(0);
         self.field = FIELDS[(at + step) % FIELDS.len()];
-    }
-
-    fn cycle(&mut self, forward: bool) -> Outcome {
-        let step = |at: usize, len: usize| match forward {
-            true => (at + 1) % len,
-            false => (at + len - 1) % len,
-        };
-        match self.field {
-            Field::Repo => {
-                self.repo = step(self.repo, self.repos.len() + 1);
-                return Outcome::RepoChanged;
-            }
-            Field::Base => {
-                let len = self.base_candidates.len() + 1;
-                self.base_choice = step(self.base_choice, len);
-                self.base = match self.base_choice {
-                    0 => String::new(),
-                    at => self.base_candidates[at - 1].clone(),
-                };
-            }
-            Field::Preset => {
-                let len = self.presets.len() + 1;
-                let at = self.preset.map_or(0, |at| at + 1);
-                self.preset = step(at, len).checked_sub(1);
-            }
-            Field::Prompt | Field::Branch => {}
-        }
         Outcome::Stay
     }
 
-    fn edit_text(&mut self, c: char) {
-        match self.field {
-            Field::Repo if self.other_selected() => self.other_path.push(c),
-            Field::Repo | Field::Preset => {}
-            Field::Prompt => {
-                self.prompt.push(c);
-                self.prefill_branch();
-            }
-            Field::Branch => {
-                self.branch.push(c);
-                self.branch_edited = true;
-            }
-            Field::Base => self.base.push(c),
-        }
-    }
-
-    fn erase(&mut self) {
-        match self.field {
-            Field::Repo if self.other_selected() => {
-                self.other_path.pop();
-            }
-            Field::Repo | Field::Preset => {}
-            Field::Prompt => {
-                self.prompt.pop();
-                self.prefill_branch();
-            }
-            Field::Branch => {
-                self.branch.pop();
-                self.branch_edited = true;
-            }
-            Field::Base => {
-                self.base.pop();
-            }
-        }
+    fn cycle_base(&mut self, forward: bool) {
+        let len = self.base_candidates.len() + 1;
+        self.base_choice = match forward {
+            true => (self.base_choice + 1) % len,
+            false => (self.base_choice + len - 1) % len,
+        };
+        self.base.suggest(match self.base_choice {
+            0 => String::new(),
+            at => self.base_candidates[at - 1].clone(),
+        });
     }
 
     fn prefill_branch(&mut self) {
-        if !self.branch_edited {
-            self.branch = format!("{}{}", self.branch_prefix, slugify(&self.prompt));
+        if self.branch.suggested() {
+            let derived = format!("{}{}", self.branch_prefix, slugify(self.prompt.text()));
+            if derived != self.branch.text() {
+                self.branch.suggest(derived);
+            }
         }
     }
 
     fn submit(&mut self) -> Outcome {
-        let Some(repo) = self.repo_path() else {
+        let Some(repo) = self.repo.path().map(Path::to_path_buf) else {
             self.error = Some("enter the Repo's path".into());
             return Outcome::Stay;
         };
-        if self.prompt.trim().is_empty() {
+        if self.prompt.text().trim().is_empty() {
             self.error = Some("the prompt is empty".into());
             return Outcome::Stay;
         }
-        let base = self.base.trim();
-        let branch = self.branch.trim();
+        let base = self.base.text().trim();
+        let branch = self.branch.text().trim();
         Outcome::Submit(CreateSession {
             repo,
-            prompt: self.prompt.clone(),
-            branch: (self.branch_edited && !branch.is_empty()).then(|| branch.to_string()),
+            prompt: self.prompt.text().to_string(),
+            branch: (!self.branch.suggested() && !branch.is_empty()).then(|| branch.to_string()),
             base: (!base.is_empty()).then(|| base.to_string()),
             preset: self.preset.map(|at| self.presets[at].clone()),
         })
     }
+}
+
+fn plain(key: KeyEvent) -> bool {
+    !key.modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
 }

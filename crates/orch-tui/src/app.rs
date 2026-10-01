@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crossterm::event::{Event as TermEvent, KeyEventKind};
@@ -22,7 +22,9 @@ use crate::link::RequestId;
 use crate::mouse::Region;
 use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
+use crate::preparing::{Preparing, PreparingId, PreparingState};
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
+use crate::repo_picker::KnownRepo;
 use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
@@ -108,7 +110,7 @@ pub(crate) enum Pending {
     FormSettings(PathBuf),
     ReviewSettings(SessionId),
     Resume(SessionId),
-    Create,
+    Create(PreparingId),
     Trust(Box<Retry>),
     Draft(SessionId, LandingMode),
     Land,
@@ -134,7 +136,20 @@ pub(crate) struct TrustPrompt {
     retry: Box<Retry>,
 }
 
+impl Retry {
+    fn preparing(&self) -> Option<PreparingId> {
+        match self.pending {
+            Pending::Create(preparing) => Some(preparing),
+            _ => None,
+        }
+    }
+}
+
 impl TrustPrompt {
+    fn preparing(&self) -> Option<PreparingId> {
+        self.retry.preparing()
+    }
+
     pub fn skipping_teardown(&self) -> Option<Request> {
         match &self.retry.request {
             Request::Discard {
@@ -159,7 +174,7 @@ impl TrustPrompt {
 }
 
 pub(crate) enum Popup {
-    New(NewForm),
+    New(Box<NewForm>),
     Trust(TrustPrompt),
     Land(LandForm),
     Discard(DiscardConfirm),
@@ -186,6 +201,8 @@ pub(crate) struct App {
     pub pane_selection: Selector,
     pub links: Hyperlinks,
     pub sidebar: SidebarView,
+    pub preparing: Vec<Preparing>,
+    next_preparing: u64,
     pub clock: Box<dyn Fn() -> Instant>,
     size: Size,
     guards: Guards,
@@ -221,6 +238,8 @@ impl App {
             pane_selection: Selector::default(),
             links: Hyperlinks::default(),
             sidebar: SidebarView::default(),
+            preparing: Vec::new(),
+            next_preparing: 0,
             clock: Box::new(Instant::now),
             size,
             guards: Guards::default(),
@@ -254,6 +273,7 @@ impl App {
                 self.message = Some(format!("lost the Daemon: {reason}"));
             }
         }
+        self.fail_abandoned_trust();
         self.tell_focus();
         if self.calls.iter().any(Call::suspends) {
             self.end_gesture();
@@ -313,6 +333,11 @@ impl App {
         );
         let result = match result {
             Err(RequestError::Untrusted { repo, hash, items }) if retriable => {
+                if let Pending::Create(preparing) = pending
+                    && let Some(preparing) = self.preparing_mut(preparing)
+                {
+                    preparing.state = PreparingState::NeedsTrust;
+                }
                 let retry = Box::new(Retry { request, pending });
                 self.popup = Some(Popup::Trust(TrustPrompt {
                     repo,
@@ -328,7 +353,7 @@ impl App {
             (Pending::Repos, Ok(Reply::Repos { repos })) => self.config.repos = repos,
             (Pending::FormSettings(repo), Ok(Reply::RepoSettings(settings))) => {
                 if let Some(Popup::New(form)) = &mut self.popup
-                    && form.repo_path() == Some(repo)
+                    && form.repo.path() == Some(repo.as_path())
                 {
                     form.apply(settings);
                 }
@@ -347,8 +372,26 @@ impl App {
                     Some(command.unwrap_or_else(|| self.config.review_command.clone()));
                 self.start_review(&session, ReviewPurpose::External);
             }
-            (Pending::Create, Ok(Reply::Created { session })) => {
+            (Pending::Create(preparing), Ok(Reply::Created { session })) => {
+                if let Some(preparing) = self.preparing_mut(preparing) {
+                    preparing.session = Some(session.clone());
+                }
                 self.select_when_listed = Some(session);
+            }
+            (Pending::Create(preparing), Ok(_)) => {
+                if let Some(preparing) = self.preparing_mut(preparing) {
+                    preparing.fail("the Daemon did not report the new Session");
+                }
+            }
+            (Pending::Create(preparing), Err(err)) => {
+                if let Some(preparing) = self.preparing_mut(preparing) {
+                    preparing.fail(err.to_string());
+                }
+            }
+            (Pending::Trust(retry), Err(err)) if retry.preparing().is_some() => {
+                if let Some(preparing) = retry.preparing().and_then(|id| self.preparing_mut(id)) {
+                    preparing.fail(err.to_string());
+                }
             }
             (Pending::Trust(retry), Ok(_)) => self.request(retry.request, retry.pending),
             (Pending::Draft(session, mode), result) => self.drafted(&session, mode, result),
@@ -524,14 +567,17 @@ impl App {
     }
 
     fn remove_session(&mut self, session: &SessionId) {
-        let removed = Stop::Session(session.clone());
-        let before = self.sidebar.stops(&self.sessions);
+        let before = self.sidebar.stops(&self.sessions, &self.preparing);
         self.sessions.remove(session);
+        self.step_off(Stop::Session(session.clone()), &before);
+    }
+
+    fn step_off(&mut self, removed: Stop, before: &[Stop]) {
         if self.cursor() != Some(removed.clone()) {
             return;
         }
         let at = before.iter().position(|stop| *stop == removed).unwrap_or(0);
-        let after = self.sidebar.stops(&self.sessions);
+        let after = self.sidebar.stops(&self.sessions, &self.preparing);
         if let Some(next) = after.get(at.min(after.len().saturating_sub(1))) {
             self.set_cursor(next.clone());
         }
@@ -644,7 +690,7 @@ impl App {
     }
 
     pub fn select_offset(&mut self, offset: isize) {
-        let stops = self.sidebar.stops(&self.sessions);
+        let stops = self.sidebar.stops(&self.sessions, &self.preparing);
         let Some(at) = self
             .cursor()
             .and_then(|cursor| stops.iter().position(|stop| *stop == cursor))
@@ -670,30 +716,89 @@ impl App {
     }
 
     pub fn cursor(&self) -> Option<Stop> {
-        match (&self.sidebar.heading, &self.selected) {
-            (Some(repo), _) => Some(Stop::Heading(repo.clone())),
-            (None, Some(session)) => Some(Stop::Session(session.clone())),
-            (None, None) => None,
+        if let Some(repo) = &self.sidebar.heading {
+            return Some(Stop::Heading(repo.clone()));
+        }
+        if let Some(preparing) = self.sidebar.preparing_row {
+            return Some(Stop::Preparing(preparing));
+        }
+        self.selected.clone().map(Stop::Session)
+    }
+
+    pub fn cursor_preparing(&self) -> Option<&Preparing> {
+        let id = self.sidebar.preparing_row?;
+        self.preparing.iter().find(|preparing| preparing.id == id)
+    }
+
+    pub fn failed_preparing_at_cursor(&self) -> Option<PreparingId> {
+        self.cursor_preparing()
+            .filter(|preparing| preparing.failure().is_some())
+            .map(|preparing| preparing.id)
+    }
+
+    pub fn dismiss_preparing(&mut self, id: PreparingId) -> Option<CreateSession> {
+        let at = self
+            .preparing
+            .iter()
+            .position(|preparing| preparing.id == id)?;
+        let before = self.sidebar.stops(&self.sessions, &self.preparing);
+        let removed = self.preparing.remove(at);
+        self.step_off(Stop::Preparing(id), &before);
+        self.follow_selection();
+        Some(removed.create)
+    }
+
+    pub fn reopen_preparing(&mut self, id: PreparingId) {
+        let Some(create) = self.dismiss_preparing(id) else {
+            return;
+        };
+        let mut form = self.new_form();
+        form.restore(create);
+        self.show_new_form(form);
+    }
+
+    fn fail_abandoned_trust(&mut self) {
+        let asking = match &self.popup {
+            Some(Popup::Trust(prompt)) => prompt.preparing(),
+            _ => None,
+        };
+        for preparing in &mut self.preparing {
+            if preparing.state == PreparingState::NeedsTrust && Some(preparing.id) != asking {
+                preparing.fail("the Trust prompt was closed without an answer");
+            }
         }
     }
 
+    fn preparing_mut(&mut self, id: PreparingId) -> Option<&mut Preparing> {
+        self.preparing
+            .iter_mut()
+            .find(|preparing| preparing.id == id)
+    }
+
     fn set_cursor(&mut self, stop: Stop) {
+        self.sidebar.heading = None;
+        self.sidebar.preparing_row = None;
+        self.selected = None;
         match stop {
-            Stop::Session(session) => {
-                self.sidebar.heading = None;
-                self.selected = Some(session);
-            }
-            Stop::Heading(repo) => {
-                self.sidebar.heading = Some(repo);
-                self.selected = None;
-            }
+            Stop::Session(session) => self.selected = Some(session),
+            Stop::Heading(repo) => self.sidebar.heading = Some(repo),
+            Stop::Preparing(preparing) => self.sidebar.preparing_row = Some(preparing),
         }
+    }
+
+    pub fn show_preparing(&mut self, preparing: PreparingId) {
+        self.set_cursor(Stop::Preparing(preparing));
+        self.follow_selection();
     }
 
     pub fn sidebar_rows(&self) -> Vec<Row<'_>> {
         let width = usize::from(self.areas().sidebar.width.saturating_sub(2));
-        self.sidebar
-            .rows(&self.sessions, &self.reconcile_report, width)
+        self.sidebar.rows(
+            &self.sessions,
+            &self.preparing,
+            &self.reconcile_report,
+            width,
+        )
     }
 
     pub fn sidebar_viewport(&self, rows: usize) -> Viewport {
@@ -742,22 +847,30 @@ impl App {
     }
 
     pub fn toggle_cursor_fold(&mut self) {
-        let repo = match self.cursor() {
-            Some(Stop::Heading(repo)) => repo,
-            Some(Stop::Session(_)) => match self.selected_view() {
-                Some(view) => view.repo.clone(),
-                None => return,
-            },
-            None => return,
-        };
-        self.toggle_fold(&repo);
+        if let Some(repo) = self.cursor_repo() {
+            self.toggle_fold(&repo);
+        }
+    }
+
+    fn cursor_repo(&self) -> Option<PathBuf> {
+        match self.cursor()? {
+            Stop::Heading(repo) => Some(repo),
+            Stop::Session(_) => self.selected_view().map(|view| view.repo.clone()),
+            Stop::Preparing(_) => self
+                .cursor_preparing()
+                .map(|preparing| preparing.create.repo.clone()),
+        }
     }
 
     fn settle_cursor(&mut self) {
-        if let Some(repo) = self.selected_view().map(|view| view.repo.clone()) {
+        let repo = match self.cursor_preparing() {
+            Some(preparing) => Some(preparing.create.repo.clone()),
+            None => self.selected_view().map(|view| view.repo.clone()),
+        };
+        if let Some(repo) = repo {
             self.sidebar.unfold(&repo);
         }
-        let stops = self.sidebar.stops(&self.sessions);
+        let stops = self.sidebar.stops(&self.sessions, &self.preparing);
         if self.cursor().is_some_and(|cursor| stops.contains(&cursor)) {
             return;
         }
@@ -870,15 +983,30 @@ impl App {
     }
 
     pub fn create_session(&mut self, create: CreateSession) {
-        self.request(Request::CreateSession(create), Pending::Create);
+        self.next_preparing += 1;
+        let id = PreparingId(self.next_preparing);
+        self.request(Request::CreateSession(create.clone()), Pending::Create(id));
+        let since = (self.clock)();
+        let preparing = Preparing::new(id, create, &self.config.branch_prefix, since);
+        self.preparing.push(preparing);
+        self.show_preparing(id);
     }
 
     pub fn approve_trust(&mut self, prompt: TrustPrompt) {
+        if let Some(preparing) = prompt.preparing().and_then(|id| self.preparing_mut(id)) {
+            preparing.state = PreparingState::Waiting;
+        }
         let request = Request::ApproveTrust {
             repo: prompt.repo,
             hash: prompt.hash,
         };
         self.request(request, Pending::Trust(prompt.retry));
+    }
+
+    pub fn decline_trust(&mut self, prompt: TrustPrompt) {
+        if let Some(preparing) = prompt.preparing() {
+            self.dismiss_preparing(preparing);
+        }
     }
 
     pub fn skip_teardown(&mut self, prompt: TrustPrompt) {
@@ -888,26 +1016,44 @@ impl App {
     }
 
     pub fn open_new_form(&mut self) {
+        let form = self.new_form();
+        self.show_new_form(form);
+    }
+
+    fn show_new_form(&mut self, form: NewForm) {
+        self.popup = Some(Popup::New(Box::new(form)));
+        self.form_repo_changed();
+    }
+
+    fn new_form(&self) -> NewForm {
         let mut repos = self.config.repos.clone();
         for repo in self.sessions.repos() {
             if !repos.iter().any(|known| known == repo) {
                 repos.push(repo.to_path_buf());
             }
         }
-        let preselect = match &self.config.cwd_repo {
-            Some(cwd) => match repos.iter().position(|repo| repo == cwd) {
-                Some(at) => at,
-                None => {
-                    repos.insert(0, cwd.clone());
-                    0
-                }
-            },
-            None => 0,
-        };
+        let start = self
+            .cursor_repo()
+            .or_else(|| self.config.cwd_repo.clone())
+            .or_else(|| repos.first().cloned());
+        if let Some(start) = &start
+            && !repos.contains(start)
+        {
+            repos.insert(0, start.clone());
+        }
+        let repos = repos
+            .into_iter()
+            .map(|path| KnownRepo {
+                live: self
+                    .sessions
+                    .in_repo(&path)
+                    .filter(|view| view.phase.is_live())
+                    .count(),
+                path,
+            })
+            .collect();
         let presets = self.config.presets.names().map(String::from).collect();
-        let form = NewForm::new(repos, preselect, presets, &self.config.branch_prefix);
-        self.popup = Some(Popup::New(form));
-        self.form_repo_changed();
+        NewForm::new(repos, start, presets, &self.config.branch_prefix)
     }
 
     pub fn form_repo_changed(&mut self) {
@@ -915,7 +1061,7 @@ impl App {
         let Some(Popup::New(form)) = &self.popup else {
             return;
         };
-        if let Some(repo) = form.repo_path().filter(|_| !form.other_selected()) {
+        if let Some(repo) = form.repo.path().map(Path::to_path_buf) {
             let request = Request::RepoSettings { repo: repo.clone() };
             self.request(request, Pending::FormSettings(repo));
         }
@@ -925,10 +1071,10 @@ impl App {
         let Some(Popup::New(form)) = &mut self.popup else {
             return;
         };
-        let candidates = match form.repo_path() {
+        let candidates = match form.repo.path() {
             Some(repo) => self
                 .sessions
-                .in_repo(&repo)
+                .in_repo(repo)
                 .map(|view| view.branch.clone())
                 .collect(),
             None => Vec::new(),
@@ -993,6 +1139,10 @@ impl App {
     }
 
     pub fn load_discard_preview(&mut self) {
+        if self.cursor_preparing().is_some() {
+            self.message = Some("still Preparing: it can be discarded once it is listed".into());
+            return;
+        }
         let Some(session) = self.selected.clone() else {
             self.message = Some(NO_SESSION.into());
             return;
@@ -1080,7 +1230,18 @@ impl App {
         }
     }
 
+    fn drop_listed_preparing(&mut self) {
+        let sessions = &self.sessions;
+        self.preparing.retain(|preparing| {
+            preparing
+                .session
+                .as_ref()
+                .is_none_or(|session| sessions.get(session).is_none())
+        });
+    }
+
     fn follow_selection(&mut self) {
+        self.drop_listed_preparing();
         let order = self.sessions.ordered_ids();
         if let Some(wanted) = self
             .select_when_listed

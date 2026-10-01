@@ -27,6 +27,7 @@ pub struct SessionRecord {
     pub id: SessionId,
     pub repo: RepoId,
     pub slug: String,
+    pub title: Option<String>,
     pub branch: String,
     pub base: String,
     pub worktree: PathBuf,
@@ -57,7 +58,7 @@ impl SessionRecord {
 const COLUMNS: &str = "id, repo_id, slug, branch, base, worktree, phase, preset, last_mode,
     unseen, stalled, needs_rebase, recovered, worktree_missing, base_missing, muted,
     pr_number, pr_checks, pr_review, pr_new_comments, pr_state,
-    port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt";
+    port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title";
 
 fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
     let pr = match row.get::<_, Option<i64>>("pr_number")? {
@@ -74,6 +75,7 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         id: SessionId(row.get("id")?),
         repo: RepoId(row.get("repo_id")?),
         slug: row.get("slug")?,
+        title: row.get("title")?,
         branch: row.get("branch")?,
         base: row.get("base")?,
         worktree: PathBuf::from(row.get::<_, String>("worktree")?),
@@ -136,7 +138,8 @@ impl Store {
                 last_mode = ?8, unseen = ?9, stalled = ?10, needs_rebase = ?11, recovered = ?12,
                 worktree_missing = ?13, base_missing = ?14, muted = ?15, pr_number = ?16,
                 pr_checks = ?17, pr_review = ?18, pr_new_comments = ?19, pr_state = ?20,
-                updated_at = ?21, agent_state = ?22, guards_enabled = ?23, queued_prompt = ?24
+                updated_at = ?21, agent_state = ?22, guards_enabled = ?23, queued_prompt = ?24,
+                title = ?25
              WHERE id = ?1",
             params![
                 session.id.as_str(),
@@ -163,6 +166,7 @@ impl Store {
                 session.agent_state.map(Stored),
                 session.guards_enabled,
                 session.queued_prompt,
+                session.title,
             ],
         )?;
         if changed == 0 {

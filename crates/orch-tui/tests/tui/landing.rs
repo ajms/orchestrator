@@ -42,6 +42,16 @@ fn land_is_blocked_while_the_agent_is_working_or_needs_input() {
 }
 
 #[test]
+fn the_land_popup_names_a_titled_session_by_its_slug() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![titled(session("webshop", "done"), "login redirect")]);
+    tui.daemon().script_reply(drafted("Fix it", ""));
+    tui.command("land");
+
+    assert!(tui.screen().contains("Land webshop / done into main"));
+}
+
+#[test]
 fn the_land_popup_shows_the_agents_draft_and_lands_a_squash() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "done")]);

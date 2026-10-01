@@ -12,6 +12,7 @@ pub struct Capabilities {
     pub modes: bool,
     pub guards: bool,
     pub subagents: bool,
+    pub titles: bool,
 }
 
 impl Capabilities {
@@ -71,6 +72,11 @@ impl LaunchSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayloadError(pub String);
 
+pub trait TitleWatch: Send {
+    fn follow(&mut self, payload: &str);
+    fn poll(&mut self) -> Vec<AgentEvent>;
+}
+
 pub trait AgentAdapter {
     fn capabilities(&self) -> Capabilities;
 
@@ -106,6 +112,10 @@ pub trait AgentAdapter {
 
     fn map_tap(&self, _payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         Ok(Vec::new())
+    }
+
+    fn title_watch(&self) -> Option<Box<dyn TitleWatch>> {
+        None
     }
 
     fn is_guard_payload(&self, _payload: &str) -> bool {

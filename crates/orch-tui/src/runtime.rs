@@ -29,7 +29,6 @@ use crate::socket::SocketLink;
 
 const INPUT_POLL: Duration = Duration::from_millis(50);
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(1);
-const AUTO_SCROLL_TICK: Duration = Duration::from_millis(50);
 
 pub struct Options {
     pub runtime_dir: PathBuf,
@@ -54,10 +53,10 @@ async fn event_loop(
     inbox: &mut UnboundedReceiver<Event>,
 ) -> io::Result<()> {
     let mut tui = connect(options, events, false).await?;
-    let mut tick_at = Instant::now();
+    let mut ticked_at = Instant::now();
     loop {
         screen.terminal.draw(|frame| tui.render(frame))?;
-        let Some(event) = next_event(&tui, inbox, &mut tick_at).await else {
+        let Some(event) = next_event(&tui, inbox, &mut ticked_at).await else {
             return Ok(());
         };
         let mut effects = tui.handle(event);
@@ -129,18 +128,19 @@ async fn event_loop(
 async fn next_event<L: DaemonLink>(
     tui: &Tui<L>,
     inbox: &mut UnboundedReceiver<Event>,
-    tick_at: &mut Instant,
+    ticked_at: &mut Instant,
 ) -> Option<Event> {
-    if !tui.auto_scrolling() {
-        *tick_at = Instant::now() + AUTO_SCROLL_TICK;
+    let Some(every) = tui.tick_every() else {
+        *ticked_at = Instant::now();
         return inbox.recv().await;
-    }
-    if Instant::now() < *tick_at
-        && let Ok(event) = tokio::time::timeout_at(*tick_at, inbox.recv()).await
+    };
+    let due = *ticked_at + every;
+    if Instant::now() < due
+        && let Ok(event) = tokio::time::timeout_at(due, inbox.recv()).await
     {
         return event;
     }
-    *tick_at = Instant::now() + AUTO_SCROLL_TICK;
+    *ticked_at = Instant::now();
     Some(Event::Tick)
 }
 

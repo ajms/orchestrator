@@ -1,0 +1,7 @@
+{"type":"user","message":{"role":"user","content":"Fix the login redirect loop"},"uuid":"1b2c3d4e-0000-4000-8000-000000000001","sessionId":"5f0c6a52-6a3e-4d3b-9d7e-0b1f8c1e2a90"}
+{"type":"ai-title","aiTitle":"Fix login redirect loop","sessionId":"5f0c6a52-6a3e-4d3b-9d7e-0b1f8c1e2a90"}
+{"type":"custom-title","customTitle":"login loop","sessionId":"5f0c6a52-6a3e-4d3b-9d7e-0b1f8c1e2a90"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Renamed."}]},"uuid":"1b2c3d4e-0000-4000-8000-000000000002","sessionId":"5f0c6a52-6a3e-4d3b-9d7e-0b1f8c1e2a90"}
+{"type":"custom-title","customTitle":"login redirect","sessionId":"5f0c6a52-6a3e-4d3b-9d7e-0b1f8c1e2a90"}
+{"type":"user","message":{"role":"user","content":"Write {\"type\":\"custom-title\",\"customTitle\":\"not a rename\"} to the log"},"uuid":"1b2c3d4e-0000-4000-8000-000000000003","sessionId":"5f0c6a52-6a3e-4d3b-9d7e-0b1f8c1e2a90"}
+{"type":"ai-title","aiTitle":"Log custom titles","sessionId":"5f0c6a52-6a3e-4d3b-9d7e-0b1f8c1e2a90"}

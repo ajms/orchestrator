@@ -329,6 +329,7 @@ impl Live {
             id: record.id.clone(),
             repo: self.repo.clone(),
             slug: record.slug.clone(),
+            title: record.title.clone(),
             branch: record.branch.clone(),
             base: record.base.clone(),
             worktree: record.worktree.clone(),
@@ -691,7 +692,11 @@ impl State {
         for attention in raised {
             let event = AttentionEvent {
                 session: id.clone(),
-                title: live.record.slug.clone(),
+                title: live
+                    .record
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| live.record.slug.clone()),
                 repo: repo_name.clone(),
                 branch: live.record.branch.clone(),
                 attention,

@@ -221,6 +221,7 @@ fn sidebar_click(app: &mut App, row: u16) {
     match app.sidebar_stop_at(row) {
         Some(Stop::Heading(repo)) => app.toggle_fold(&repo),
         Some(Stop::Session(session)) => app.show_session(session),
+        Some(Stop::Preparing(preparing)) => app.show_preparing(preparing),
         None => {}
     }
     let stay_inserting = app.inserting() && app.selected_view().is_some_and(agent_running);

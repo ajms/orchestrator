@@ -28,6 +28,10 @@ _Avoid_: Paused, stopped, dead
 Where a Session is in its lifecycle: Setting up, Setup failed, Active, PR open, Suspended, Landed or Discarded.
 _Avoid_: Stage, lifecycle state
 
+**Preparing**:
+The wait between submitting a new Session and the Daemon listing it, while its Base branch, Branch and Worktree are made. It is not a Phase.
+_Avoid_: Creating, pending
+
 **Agent state**:
 What a live Session's Agent is doing right now: Starting, Working, Needs input, Idle, Errored, Exited or Unknown. Unknown: the Agent runs but reports no state (its adapter lacks hooks).
 _Avoid_: Activity, run state
@@ -64,6 +68,10 @@ _Avoid_: Allow-list, permission
 **Session**:
 One Agent working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent, or starting a new Conversation, keeps the same Session.
 _Avoid_: Task, job, instance, run
+
+**Session title**:
+A name the user gave the Session through its Agent (e.g. Claude Code's `/rename`). It is shown in place of the slug and outlives the Conversation it was given in.
+_Avoid_: Session name, label, alias
 
 **Agent**:
 A coding-agent program (e.g. Claude Code) that the Orchestrator drives inside a Session.

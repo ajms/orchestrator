@@ -107,6 +107,22 @@ fn the_pane_title_shows_the_session_preset_and_mode() {
 }
 
 #[test]
+fn the_pane_title_names_a_titled_session_by_its_title_and_slug() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![titled(
+        session("webshop", "fix-login"),
+        "login redirect",
+    )]);
+
+    assert!(
+        tui.screen()
+            .contains("webshop / login redirect (fix-login)"),
+        "{}",
+        tui.screen()
+    );
+}
+
+#[test]
 fn a_session_without_a_live_agent_shows_its_setup_output_instead_of_a_pane() {
     let mut failed = in_phase(session("webshop", "broken"), PhaseView::SetupFailed);
     failed.setup_output = Some("npm ERR! could not resolve".into());

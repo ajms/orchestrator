@@ -22,7 +22,7 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
     };
     match popup {
         Popup::New(form) => {
-            let outcome = form.key(key);
+            let outcome = form.key(key, app.config.home.as_deref());
             new_form(app, outcome);
         }
         Popup::Land(form) => {
@@ -49,7 +49,11 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
                     app.skip_teardown(prompt);
                 }
             }
-            KeyCode::Char('n') | KeyCode::Esc => app.popup = None,
+            KeyCode::Char('n') | KeyCode::Esc => {
+                if let Some(Popup::Trust(prompt)) = app.popup.take() {
+                    app.decline_trust(prompt);
+                }
+            }
             _ => {}
         },
         Popup::Discard(_) => {
@@ -82,6 +86,13 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
                 app.send_fix(fix);
             }
         },
+    }
+}
+
+pub(crate) fn paste(app: &mut App, text: &str) {
+    if let Some(Popup::New(form)) = app.popup.as_mut() {
+        let outcome = form.paste(text, app.config.home.as_deref());
+        new_form(app, outcome);
     }
 }
 

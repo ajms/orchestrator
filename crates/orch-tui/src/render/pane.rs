@@ -10,6 +10,7 @@ use super::style;
 use crate::app::{App, Focus, Mode, Selection};
 use crate::hyperlinks::Hyperlink;
 use crate::pane::PaneMirror;
+use crate::preparing::Preparing;
 use crate::selection::{Point, columns_on};
 
 const SELECTION: Color = Color::Rgb(70, 70, 110);
@@ -20,6 +21,16 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
     let mut block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(super::border(focused, app.inserting()));
+    if let Some(preparing) = app.cursor_preparing() {
+        let block = block.title(preparing_title(preparing));
+        frame.render_widget(
+            Paragraph::new(preparing_lines(preparing))
+                .wrap(Wrap { trim: false })
+                .block(block),
+            area,
+        );
+        return;
+    }
     let Some(view) = app.selected_view() else {
         let text = match &app.sidebar.heading {
             Some(repo) => format!(" {} is folded — Enter or za unfolds it", repo_name(repo)),
@@ -125,12 +136,56 @@ fn title(view: &SessionView) -> Line<'static> {
         Some(mode) => format!("[{} · {mode}]", view.preset),
         None => format!("[{}]", view.preset),
     };
+    let title = match &view.title {
+        Some(title) => format!("{title} ({})", view.slug),
+        None => view.slug.clone(),
+    };
     Line::from(vec![
         Span::raw(" "),
-        Span::raw(format!("{} / {} ", repo_name(&view.repo), view.slug)).bold(),
+        Span::raw(format!("{} / {title} ", repo_name(&view.repo))).bold(),
         Span::styled(label, Style::new().fg(colour)),
         Span::raw(format!(" {mode} ")),
     ])
+}
+
+fn preparing_title(preparing: &Preparing) -> Line<'static> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::raw(format!(
+            "{} / {} ",
+            repo_name(&preparing.create.repo),
+            preparing.slug
+        ))
+        .bold(),
+        match preparing.failure() {
+            Some(_) => Span::raw("Preparing failed ").red(),
+            None => Span::raw("Preparing ").cyan(),
+        },
+    ])
+}
+
+fn preparing_lines(preparing: &Preparing) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(preparing.create.repo.display().to_string()).dark_gray(),
+        Line::default(),
+    ];
+    lines.extend(
+        preparing
+            .create
+            .prompt
+            .lines()
+            .map(|line| Line::from(line.to_string())),
+    );
+    lines.push(Line::default());
+    match preparing.failure() {
+        Some(reason) => {
+            lines.push(Line::from(reason.to_string()).red());
+            lines.push(Line::default());
+            lines.push(Line::from("Enter reopens the form · x dismisses").yellow());
+        }
+        None => lines.push(Line::from("Preparing the Worktree…").yellow()),
+    }
+    lines
 }
 
 fn placeholder(view: &SessionView, closed: Option<String>) -> Vec<Line<'static>> {

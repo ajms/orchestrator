@@ -41,6 +41,7 @@ impl AgentState {
             AgentEvent::Failed { .. } => AgentState::Errored,
             AgentEvent::ModeChanged { .. }
             | AgentEvent::ConversationChanged { .. }
+            | AgentEvent::TitleChanged { .. }
             | AgentEvent::UsageSample(_)
             | AgentEvent::SubagentFinished { .. }
             | AgentEvent::GuardCheck { .. } => self,

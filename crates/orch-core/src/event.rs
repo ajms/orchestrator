@@ -110,6 +110,9 @@ pub enum AgentEvent {
     ConversationChanged {
         id: ConversationId,
     },
+    TitleChanged {
+        title: String,
+    },
     UsageSample(UsageSample),
     SubagentStarted {
         id: SubagentId,

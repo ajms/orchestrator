@@ -68,6 +68,9 @@ fn review(app: &mut App, key: KeyEvent) {
 }
 
 pub(crate) fn paste(app: &mut App, text: String) {
+    if app.popup.is_some() {
+        return crate::popup::paste(app, &text);
+    }
     if app.mode == Mode::Insert && app.pane.is_some() {
         app.push(Call::Paste(text));
     }
@@ -113,6 +116,13 @@ fn normal(app: &mut App, key: KeyEvent) {
         Some(Prefix::G) if key.code == KeyCode::Char('g') => return scroll_to(app, usize::MAX),
         Some(Prefix::Z) if key.code == KeyCode::Char('a') => return app.toggle_cursor_fold(),
         _ => {}
+    }
+    if let Some(failed) = app.failed_preparing_at_cursor() {
+        match key.code {
+            KeyCode::Enter => return app.reopen_preparing(failed),
+            KeyCode::Char('x') => return drop(app.dismiss_preparing(failed)),
+            _ => {}
+        }
     }
     let in_pane = app.focus == Focus::Pane;
     let half_page = (app.pane_size().rows / 2).max(1) as isize;
