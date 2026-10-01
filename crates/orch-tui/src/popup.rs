@@ -22,7 +22,7 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
     };
     match popup {
         Popup::New(form) => {
-            let outcome = form.key(key);
+            let outcome = form.key(key, app.config.home.as_deref());
             new_form(app, outcome);
         }
         Popup::Land(form) => {
@@ -91,7 +91,7 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
 
 pub(crate) fn paste(app: &mut App, text: &str) {
     if let Some(Popup::New(form)) = app.popup.as_mut() {
-        let outcome = form.paste(text);
+        let outcome = form.paste(text, app.config.home.as_deref());
         new_form(app, outcome);
     }
 }

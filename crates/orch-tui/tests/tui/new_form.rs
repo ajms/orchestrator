@@ -282,7 +282,7 @@ fn a_paste_on_the_preset_is_ignored() {
 fn a_paste_into_the_picker_filter_is_inserted() {
     let mut tui = form(config());
     tui.ctrl('r');
-    paste(&mut tui, "/home/me/old");
+    paste(&mut tui, "me/old");
     assert!(tui.line_with("▸").contains("/home/me/older"));
     assert!(create_requests(&mut tui).is_empty());
 }
@@ -406,6 +406,7 @@ fn the_bottom_border_shows_the_keys_for_the_focused_field() {
     tui.press(KeyCode::Enter);
     let picker = hints(&mut tui);
     assert!(picker.contains("Esc back"), "{picker}");
+    assert!(picker.contains("Tab descend"), "{picker}");
     tui.press(KeyCode::Esc);
 
     shift_tab(&mut tui);

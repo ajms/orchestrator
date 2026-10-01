@@ -154,21 +154,6 @@ fn a_base_can_be_typed() {
 }
 
 #[test]
-fn a_path_that_matches_no_known_repo_is_used_as_typed() {
-    let mut tui = form(config());
-    tui.keys("Bootstrap");
-    tui.press(KeyCode::Tab);
-    tui.keys("/srv/new-repo");
-    tui.press(KeyCode::Enter);
-    assert!(field(&mut tui, "Repo").contains("/srv/new-repo"));
-    submit(&mut tui);
-    assert_eq!(
-        create_requests(&mut tui)[0].repo,
-        PathBuf::from("/srv/new-repo")
-    );
-}
-
-#[test]
 fn ctrl_g_edits_the_prompt_in_the_editor() {
     let mut tui = form(config());
     tui.keys("draft");

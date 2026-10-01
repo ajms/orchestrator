@@ -15,7 +15,7 @@ use crate::sessions::repo_name;
 
 pub(super) fn draw(app: &App, frame: &mut Frame) {
     match &app.popup {
-        Some(Popup::New(form)) => super::new_form::draw(frame, form),
+        Some(Popup::New(form)) => super::new_form::draw(frame, form, app.config.home.as_deref()),
         Some(Popup::Trust(prompt)) => trust(
             frame,
             &prompt.repo,

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crossterm::event::{Event as TermEvent, KeyEventKind};
@@ -24,6 +24,7 @@ use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
 use crate::preparing::{Preparing, PreparingId, PreparingState};
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
+use crate::repo_picker::KnownRepo;
 use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
@@ -352,7 +353,7 @@ impl App {
             (Pending::Repos, Ok(Reply::Repos { repos })) => self.config.repos = repos,
             (Pending::FormSettings(repo), Ok(Reply::RepoSettings(settings))) => {
                 if let Some(Popup::New(form)) = &mut self.popup
-                    && form.repo_path() == Some(repo)
+                    && form.repo.path() == Some(repo.as_path())
                 {
                     form.apply(settings);
                 }
@@ -1040,6 +1041,17 @@ impl App {
         {
             repos.insert(0, start.clone());
         }
+        let repos = repos
+            .into_iter()
+            .map(|path| KnownRepo {
+                live: self
+                    .sessions
+                    .in_repo(&path)
+                    .filter(|view| view.phase.is_live())
+                    .count(),
+                path,
+            })
+            .collect();
         let presets = self.config.presets.names().map(String::from).collect();
         NewForm::new(repos, start, presets, &self.config.branch_prefix)
     }
@@ -1049,7 +1061,7 @@ impl App {
         let Some(Popup::New(form)) = &self.popup else {
             return;
         };
-        if let Some(repo) = form.repo_path() {
+        if let Some(repo) = form.repo.path().map(Path::to_path_buf) {
             let request = Request::RepoSettings { repo: repo.clone() };
             self.request(request, Pending::FormSettings(repo));
         }
@@ -1059,10 +1071,10 @@ impl App {
         let Some(Popup::New(form)) = &mut self.popup else {
             return;
         };
-        let candidates = match form.repo_path() {
+        let candidates = match form.repo.path() {
             Some(repo) => self
                 .sessions
-                .in_repo(&repo)
+                .in_repo(repo)
                 .map(|view| view.branch.clone())
                 .collect(),
             None => Vec::new(),

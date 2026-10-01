@@ -14,6 +14,7 @@ mod new_form;
 mod new_session;
 mod preparing;
 mod reconcile;
+mod repo_picker;
 mod repo_settings;
 mod review;
 mod review_mouse;

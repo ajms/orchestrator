@@ -1,14 +1,12 @@
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use orch_git::slugify;
 use orch_protocol::{CreateSession, RepoSettings};
 
-use crate::repo_picker::{PickerOutcome, RepoPicker};
-use crate::text_input::TextInput;
-
-use crate::text_input::Suggested;
+use crate::repo_picker::{KnownRepo, RepoChoice};
+use crate::text_input::{Suggested, TextInput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
@@ -37,9 +35,7 @@ pub enum Outcome {
 
 pub struct NewForm {
     pub field: Field,
-    pub repos: Vec<PathBuf>,
-    pub repo: Option<PathBuf>,
-    pub picker: Option<RepoPicker>,
+    pub repo: RepoChoice,
     pub prompt: TextInput,
     pub prompt_top: Cell<usize>,
     pub branch: Suggested,
@@ -58,16 +54,14 @@ pub struct NewForm {
 
 impl NewForm {
     pub fn new(
-        repos: Vec<PathBuf>,
+        repos: Vec<KnownRepo>,
         repo: Option<PathBuf>,
         presets: Vec<String>,
         prefix: &str,
     ) -> Self {
         let mut form = Self {
             field: Field::Prompt,
-            repos,
-            repo,
-            picker: None,
+            repo: RepoChoice::new(repos, repo),
             prompt: TextInput::default(),
             prompt_top: Cell::new(0),
             branch: Suggested::suggestion(String::new()),
@@ -87,17 +81,13 @@ impl NewForm {
         form
     }
 
-    pub fn repo_path(&self) -> Option<PathBuf> {
-        self.repo.clone()
-    }
-
     pub fn set_prompt(&mut self, prompt: String) {
         self.prompt.set(prompt);
         self.prefill_branch();
     }
 
     pub fn restore(&mut self, create: CreateSession) {
-        self.repo = Some(create.repo);
+        self.repo.set(create.repo);
         self.prompt.set(create.prompt);
         if let Some(branch) = create.branch {
             self.branch.set(branch);
@@ -127,24 +117,17 @@ impl NewForm {
         self.base_choice = 0;
     }
 
-    pub fn key(&mut self, key: KeyEvent) -> Outcome {
+    pub fn key(&mut self, key: KeyEvent, home: Option<&Path>) -> Outcome {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && matches!(key.code, KeyCode::Char('s' | 'g')) {
-            self.picker = None;
+            self.repo.close();
         }
-        if let Some(picker) = &mut self.picker {
-            return match picker.key(key, &self.repos) {
-                PickerOutcome::Stay => Outcome::Stay,
-                PickerOutcome::Close => {
-                    self.picker = None;
-                    Outcome::Stay
-                }
-                PickerOutcome::Pick(repo) => {
-                    self.picker = None;
-                    self.repo = Some(repo);
-                    Outcome::RepoChanged
-                }
-            };
+        if self.repo.picker().is_some() {
+            if !self.repo.key(key) {
+                return Outcome::Stay;
+            }
+            self.field = Field::Prompt;
+            return Outcome::RepoChanged;
         }
         let discarding = std::mem::take(&mut self.discarding);
         match key.code {
@@ -153,14 +136,14 @@ impl NewForm {
                 self.discarding = true;
                 Outcome::Stay
             }
-            KeyCode::Char('r') if ctrl => self.open_picker(String::new()),
+            KeyCode::Char('r') if ctrl => self.open_picker(String::new(), home),
             KeyCode::Char('s') if ctrl => self.submit(),
             KeyCode::Char('g') if ctrl => Outcome::Edit(self.prompt.text().to_string()),
             KeyCode::Tab => self.move_field(1),
             KeyCode::BackTab => self.move_field(FIELDS.len() - 1),
             _ => match self.field {
                 Field::Prompt => self.prompt_key(key),
-                Field::Repo => self.repo_key(key),
+                Field::Repo => self.repo_key(key, home),
                 Field::Branch => self.branch_key(key),
                 Field::Base => self.base_key(key),
                 Field::Preset => self.preset_key(key),
@@ -181,10 +164,10 @@ impl NewForm {
         Outcome::Stay
     }
 
-    fn repo_key(&mut self, key: KeyEvent) -> Outcome {
+    fn repo_key(&mut self, key: KeyEvent, home: Option<&Path>) -> Outcome {
         match key.code {
-            KeyCode::Enter => self.open_picker(String::new()),
-            KeyCode::Char(c) if plain(key) => self.open_picker(c.to_string()),
+            KeyCode::Enter => self.open_picker(String::new(), home),
+            KeyCode::Char(c) if plain(key) => self.open_picker(c.to_string(), home),
             _ => Outcome::Stay,
         }
     }
@@ -206,12 +189,12 @@ impl NewForm {
         self.prefill_branch();
     }
 
-    pub fn paste(&mut self, text: &str) -> Outcome {
+    pub fn paste(&mut self, text: &str, home: Option<&Path>) -> Outcome {
         self.discarding = false;
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let line = text.lines().next().unwrap_or_default().trim();
-        if let Some(picker) = &mut self.picker {
-            picker.paste(line);
+        if self.repo.picker().is_some() {
+            self.repo.paste(line);
             return Outcome::Stay;
         }
         match self.field {
@@ -219,7 +202,7 @@ impl NewForm {
                 self.prompt.insert(&text);
                 self.prefill_branch();
             }
-            Field::Repo => return self.open_picker(line.to_string()),
+            Field::Repo => return self.open_picker(line.to_string(), home),
             Field::Branch => {
                 self.branch.replace(line);
                 self.branch_changed();
@@ -257,8 +240,8 @@ impl NewForm {
         Outcome::Stay
     }
 
-    fn open_picker(&mut self, query: String) -> Outcome {
-        self.picker = Some(RepoPicker::new(query));
+    fn open_picker(&mut self, query: String, home: Option<&Path>) -> Outcome {
+        self.repo.open(query, home);
         Outcome::Stay
     }
 
@@ -293,7 +276,7 @@ impl NewForm {
     }
 
     fn submit(&mut self) -> Outcome {
-        let Some(repo) = self.repo_path() else {
+        let Some(repo) = self.repo.path().map(Path::to_path_buf) else {
             self.error = Some("enter the Repo's path".into());
             return Outcome::Stay;
         };

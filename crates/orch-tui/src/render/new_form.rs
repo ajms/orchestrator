@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -6,7 +8,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use crate::new_form::{Field, NewForm};
-use crate::repo_picker::RepoPicker;
+use crate::repo_picker::{PickerRow, RepoPicker};
 use crate::sessions::repo_name;
 use crate::text_input::TextInput;
 
@@ -14,7 +16,7 @@ const STACKED_BELOW: u16 = 100;
 const FIELDS_WIDTH: u16 = 40;
 const ROW_LABEL: usize = 7;
 
-pub(super) fn draw(frame: &mut Frame, form: &NewForm) {
+pub(super) fn draw(frame: &mut Frame, form: &NewForm, home: Option<&Path>) {
     let screen = frame.area();
     let width = screen.width.saturating_sub(6).min(130);
     let height = screen.height.saturating_sub(4).min(26);
@@ -28,16 +30,16 @@ pub(super) fn draw(frame: &mut Frame, form: &NewForm) {
     let body = block.inner(area);
     frame.render_widget(block, area);
     let cursor = match screen.width < STACKED_BELOW {
-        true => stacked(frame, form, body),
-        false => columns(frame, form, body),
+        true => stacked(frame, form, body, home),
+        false => columns(frame, form, body, home),
     };
     if let Some(cursor) = cursor {
         frame.set_cursor_position(cursor);
     }
 }
 
-fn columns(frame: &mut Frame, form: &NewForm, body: Rect) -> Option<Position> {
-    let left_width = match form.picker {
+fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -> Option<Position> {
+    let left_width = match form.repo.picker() {
         Some(_) => body.width * 3 / 5,
         None => FIELDS_WIDTH,
     };
@@ -48,8 +50,8 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect) -> Option<Position> {
         .border_style(Style::new().fg(Color::DarkGray));
     let fields = divider.inner(left);
     frame.render_widget(divider, left);
-    let cursor = match &form.picker {
-        Some(picker) => self::picker(frame, form, picker, fields),
+    let cursor = match form.repo.picker() {
+        Some(picker) => self::picker(frame, picker, fields),
         None => {
             let mut lines = Vec::new();
             let mut cursor = None;
@@ -63,7 +65,7 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect) -> Option<Position> {
                     y: fields.y + lines.len() as u16,
                     ..fields
                 };
-                let (value, at) = value(form, field, at);
+                let (value, at) = value(form, field, at, home);
                 cursor = cursor.or(at);
                 lines.push(value);
                 lines.push(Line::default());
@@ -78,8 +80,8 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect) -> Option<Position> {
     prompt(frame, form, text.inner(Margin::new(1, 0))).or(cursor)
 }
 
-fn stacked(frame: &mut Frame, form: &NewForm, body: Rect) -> Option<Position> {
-    let rows = match &form.picker {
+fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -> Option<Position> {
+    let rows = match form.repo.picker() {
         Some(_) => body.height / 2,
         None => 4 + u16::from(form.error.is_some()) + 1,
     };
@@ -89,8 +91,8 @@ fn stacked(frame: &mut Frame, form: &NewForm, body: Rect) -> Option<Position> {
         Constraint::Min(1),
     ])
     .areas(body);
-    let cursor = match &form.picker {
-        Some(picker) => self::picker(frame, form, picker, fields),
+    let cursor = match form.repo.picker() {
+        Some(picker) => self::picker(frame, picker, fields),
         None => {
             let mut lines = Vec::new();
             let mut cursor = None;
@@ -101,7 +103,7 @@ fn stacked(frame: &mut Frame, form: &NewForm, body: Rect) -> Option<Position> {
                     width: fields.width.saturating_sub(ROW_LABEL as u16 + 4),
                     height: 1,
                 };
-                let (value, at) = value(form, field, at);
+                let (value, at) = value(form, field, at, home);
                 cursor = cursor.or(at);
                 let mut line = Line::from(vec![label(form, field, ROW_LABEL), Span::raw(" ")]);
                 line.spans.extend(value.spans);
@@ -120,8 +122,10 @@ fn hints(form: &NewForm) -> Line<'static> {
     if form.discarding {
         return Line::from(" Esc again to discard · any other key keeps editing ").yellow();
     }
-    let keys = match (&form.picker, form.field) {
-        (Some(_), _) => "type to filter · ↑/↓ choose · Enter pick · Esc back",
+    let keys = match (form.repo.picker(), form.field) {
+        (Some(_), _) => {
+            "type to filter, / or ~ for a path · ↑/↓ choose · Tab descend · Enter pick · Esc back"
+        }
         (None, Field::Prompt) => {
             "Enter newline · Ctrl+g $EDITOR · Ctrl+r Repo · Ctrl+s create · Esc cancel"
         }
@@ -141,17 +145,23 @@ fn label(form: &NewForm, field: Field, width: usize) -> Span<'static> {
         Field::Base => "Base",
         Field::Preset => "Preset",
     };
-    let style = match form.field == field && form.picker.is_none() {
+    let style = match form.field == field && form.repo.picker().is_none() {
         true => Style::new().fg(Color::Black).bg(Color::Cyan),
         false => Style::new().fg(Color::DarkGray),
     };
     Span::styled(format!(" {name:<width$} "), style)
 }
 
-fn value(form: &NewForm, field: Field, area: Rect) -> (Line<'static>, Option<Position>) {
-    let focused = form.field == field && form.picker.is_none();
+fn value(
+    form: &NewForm,
+    field: Field,
+    area: Rect,
+    home: Option<&Path>,
+) -> (Line<'static>, Option<Position>) {
+    let focused = form.field == field && form.repo.picker().is_none();
     let line = match field {
-        Field::Repo => match &form.repo {
+        Field::Repo => match form.repo.path() {
+            Some(repo) if form.repo.moved() => Line::from(format!(" → {}", tilde(repo, home))),
             Some(repo) => Line::from(format!(" {}", repo.display())),
             None => Line::from(" (pick a Repo)").dark_gray(),
         },
@@ -198,38 +208,88 @@ fn single_line(
     (line, cursor)
 }
 
+fn tilde(path: &Path, home: Option<&Path>) -> String {
+    match home.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 fn error(form: &NewForm) -> Option<Line<'static>> {
     form.error
         .as_ref()
         .map(|error| Line::from(format!(" {error}")).red())
 }
 
-fn picker(frame: &mut Frame, form: &NewForm, picker: &RepoPicker, area: Rect) -> Option<Position> {
+fn picker(frame: &mut Frame, picker: &RepoPicker, area: Rect) -> Option<Position> {
     let query = picker.query.text();
     let mut lines = vec![Line::from(vec![
         Span::raw(" > ").cyan(),
         Span::raw(query.to_string()),
     ])];
-    let name_width = 22;
-    for (at, repo) in picker.matches(&form.repos).into_iter().enumerate() {
-        let chosen = at == picker.choice;
-        let mark = if chosen { "▸" } else { " " };
-        let line = Line::from(vec![
-            Span::raw(format!(" {mark} {:<name_width$} ", repo_name(repo))),
-            Span::raw(repo.display().to_string()).dark_gray(),
-        ]);
-        lines.push(match chosen {
-            true => line.style(Style::new().bg(Color::Rgb(50, 50, 70))),
-            false => line,
-        });
+    if let Some(error) = &picker.error {
+        lines.push(Line::from(format!(" {error}")).red());
     }
+    if picker.rows().is_empty() && !picker.path_mode() {
+        lines.push(Line::from(" no matching Repo — start with / or ~ for a path").dark_gray());
+    }
+    let mut rows: Vec<Line> = picker
+        .rows()
+        .iter()
+        .enumerate()
+        .map(|(at, row)| match at == picker.choice {
+            true => row_line("▸", row).style(Style::new().bg(Color::Rgb(50, 50, 70))),
+            false => row_line(" ", row),
+        })
+        .collect();
+    if picker.unlisted_folders > 0 {
+        rows.push(Line::from(format!("   … {} more", picker.unlisted_folders)).dark_gray());
+    }
+    let room = usize::from(area.height).saturating_sub(lines.len()).max(1);
+    picker.page.set(room);
+    let last = picker.choice == picker.rows().len().saturating_sub(1);
+    let bottom = picker.choice + usize::from(last && picker.unlisted_folders > 0);
+    let mut top = picker.top.get().min(picker.choice);
+    if bottom >= top + room {
+        top = bottom + 1 - room;
+    }
+    picker.top.set(top);
+    lines.extend(rows.into_iter().skip(top).take(room));
     frame.render_widget(Paragraph::new(lines), area);
     let column = query[..picker.query.cursor()].width() as u16;
     Some(Position::new(area.x + 3 + column, area.y))
 }
 
+fn row_line(mark: &str, row: &PickerRow) -> Line<'static> {
+    const NAME_WIDTH: usize = 22;
+    match row {
+        PickerRow::Repo(repo) => {
+            let mut line = Line::from(vec![
+                Span::raw(format!(" {mark} {:<NAME_WIDTH$} ", repo_name(&repo.path))),
+                Span::raw(repo.path.display().to_string()).dark_gray(),
+            ]);
+            if repo.live > 0 {
+                line.spans
+                    .push(Span::raw(format!("  {} live", repo.live)).dark_gray());
+            }
+            line
+        }
+        PickerRow::ThisFolder(path) => Line::from(vec![
+            Span::raw(format!(" {mark} this folder  ")),
+            Span::raw(path.display().to_string()).dark_gray(),
+        ]),
+        PickerRow::Folder { path, git } => {
+            let mut line = Line::from(format!(" {mark} {}/", repo_name(path)));
+            if *git {
+                line.spans.push(Span::raw("  git").green());
+            }
+            line
+        }
+    }
+}
+
 fn prompt(frame: &mut Frame, form: &NewForm, area: Rect) -> Option<Position> {
-    let focused = form.field == Field::Prompt && form.picker.is_none();
+    let focused = form.field == Field::Prompt && form.repo.picker().is_none();
     let text = form.prompt.text();
     if text.is_empty() && !focused {
         frame.render_widget(
