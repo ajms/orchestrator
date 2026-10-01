@@ -6,6 +6,7 @@ use ratatui::Frame;
 
 use crate::app::{App, Call, TuiConfig};
 use crate::event::{Effect, Event, PaneId};
+use crate::preparing::Preparing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RequestId(pub u64);
@@ -39,11 +40,7 @@ impl<L: DaemonLink> Tui<L> {
 
     pub fn auto_scrolling(&self) -> bool {
         crate::mouse::auto_scrolling(&self.app)
-            || self
-                .app
-                .preparing
-                .iter()
-                .any(|preparing| preparing.error.is_none() && !preparing.needs_trust)
+            || self.app.preparing.iter().any(Preparing::is_counting)
     }
 
     pub fn link_mut(&mut self) -> &mut L {

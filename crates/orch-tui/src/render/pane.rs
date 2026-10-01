@@ -153,8 +153,8 @@ fn preparing_title(preparing: &Preparing) -> Line<'static> {
             preparing.slug
         ))
         .bold(),
-        match preparing.error {
-            Some(_) => Span::raw("Failed ").red(),
+        match preparing.failure() {
+            Some(_) => Span::raw("Preparing failed ").red(),
             None => Span::raw("Preparing ").cyan(),
         },
     ])
@@ -173,9 +173,9 @@ fn preparing_lines(preparing: &Preparing) -> Vec<Line<'static>> {
             .map(|line| Line::from(line.to_string())),
     );
     lines.push(Line::default());
-    match &preparing.error {
-        Some(error) => {
-            lines.push(Line::from(error.clone()).red());
+    match preparing.failure() {
+        Some(reason) => {
+            lines.push(Line::from(reason.to_string()).red());
             lines.push(Line::default());
             lines.push(Line::from("Enter reopens the form · x dismisses").yellow());
         }

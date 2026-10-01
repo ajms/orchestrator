@@ -10,7 +10,7 @@ use ratatui::widgets::{Block, BorderType, Paragraph};
 
 use super::style;
 use crate::app::{App, Focus};
-use crate::preparing::Preparing;
+use crate::preparing::{Preparing, PreparingState};
 use crate::sessions::repo_label;
 use crate::sidebar::{FLAG_INDENT, FLAG_SEPARATOR, Flag, Folded, Row, Urgency};
 
@@ -53,7 +53,7 @@ fn line(app: &App, row: &Row, width: usize) -> Line<'static> {
         Row::Subagent(_, subagent) => subagent_line(subagent, width),
         Row::SubagentsDone(_, done) => Line::from(format!("    ↳ {done} done")).dark_gray(),
         Row::Preparing(preparing) => {
-            highlighted(preparing_line(preparing, (app.clock)()), selected)
+            highlighted(preparing_line(preparing, (app.clock)(), width), selected)
         }
     }
 }
@@ -120,12 +120,16 @@ fn first_line(view: &SessionView) -> Line<'static> {
     Line::from(first)
 }
 
-fn preparing_line(preparing: &Preparing, now: Instant) -> Line<'static> {
+fn preparing_line(preparing: &Preparing, now: Instant, width: usize) -> Line<'static> {
     let seconds = now.saturating_duration_since(preparing.since).as_secs();
-    let state = match (&preparing.error, preparing.needs_trust) {
-        (Some(_), _) => Span::styled("✗ failed", Style::new().fg(Color::Red)),
-        (None, true) => Span::styled("needs Trust", Style::new().fg(Color::Yellow)),
-        (None, false) => Span::styled(
+    let room = width.saturating_sub(SLUG_WIDTH + 5);
+    let state = match &preparing.state {
+        PreparingState::Failed(reason) => Span::styled(
+            format!("✗ {}", truncate(reason, room)),
+            Style::new().fg(Color::Red),
+        ),
+        PreparingState::NeedsTrust => Span::styled("needs Trust", Style::new().fg(Color::Yellow)),
+        PreparingState::Waiting => Span::styled(
             format!("Preparing… {seconds}s"),
             Style::new().fg(Color::Cyan),
         ),

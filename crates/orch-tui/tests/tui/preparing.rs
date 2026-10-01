@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
+use orch_protocol::FromDaemon;
 use orch_protocol::{CreateSession, Reply, RepoSettings, Request, RequestError};
-use orch_tui::TuiConfig;
+use orch_tui::{Event, TuiConfig};
 use ratatui::style::Color;
 
 use crate::common::*;
@@ -118,9 +119,10 @@ fn a_refused_creation_turns_the_row_into_an_error() {
     let mut tui = refused("Fix login timeout");
 
     let row = tui.sidebar_line_with("fix-login-timeout");
-    assert!(row.contains("✗ failed"), "{row}");
-    assert_eq!(tui.sidebar_colour_of("✗ failed"), Color::Red);
+    assert!(row.contains("✗ branch"), "{row}");
+    assert_eq!(tui.sidebar_colour_of("✗ branch"), Color::Red);
     let screen = tui.screen();
+    assert!(screen.contains("Preparing failed"), "{screen}");
     assert!(
         screen.contains("branch orch/fix-login-timeout already exists"),
         "{screen}"
@@ -174,7 +176,7 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
 
     tui.press(KeyCode::Enter);
     assert!(tui.screen().contains(":new Session"));
-    assert!(!tui.screen().contains("✗ failed"));
+    assert!(!tui.screen().contains("✗ branch"));
     tui.ctrl('s');
 
     let creates = create_requests(&mut tui);
@@ -237,6 +239,10 @@ fn declining_trust_removes_the_row() {
 #[test]
 fn approving_trust_prepares_the_same_row_again() {
     let mut tui = untrusted("Fix login timeout");
+    tui.daemon().script_reply(Ok(Reply::Done));
+    tui.daemon().script_reply(Ok(Reply::Created {
+        session: id("fix-login-timeout"),
+    }));
     tui.keys("y");
 
     let rows: Vec<String> = tui
@@ -247,4 +253,80 @@ fn approving_trust_prepares_the_same_row_again() {
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].contains("Preparing…"), "{rows:?}");
     assert_eq!(create_requests(&mut tui).len(), 2);
+}
+
+#[test]
+fn a_reply_without_a_session_fails_the_row() {
+    let mut tui = submitted("Fix login timeout");
+    tui.release_replies();
+
+    assert!(tui.sidebar_line_with("fix-login-timeout").contains("✗"));
+    assert!(!tui.tui.auto_scrolling());
+}
+
+#[test]
+fn a_failed_trust_approval_fails_the_row() {
+    let mut tui = untrusted("Fix login timeout");
+    tui.daemon().script_reply(Err(RequestError::Refused {
+        message: "config changed since it was shown".into(),
+    }));
+    tui.keys("y");
+
+    let row = tui.sidebar_line_with("fix-login-timeout");
+    assert!(row.contains("✗ config"), "{row}");
+}
+
+#[test]
+fn preparing_in_a_folded_repo_unfolds_it_to_show_the_row() {
+    let mut tui = Harness::with_config(TuiConfig {
+        repos: vec![PathBuf::from("/home/me/webshop")],
+        ..TuiConfig::default()
+    });
+    tui.sessions(vec![
+        session("recent", "aaa"),
+        session("webshop", "existing"),
+    ]);
+    tui.keys("j");
+    tui.keys("za");
+    tui.daemon().hold = true;
+    tui.command("new");
+    tui.keys("Fix login timeout");
+    tui.ctrl('s');
+
+    assert_ne!(tui.sidebar_background_of("fix-login-timeout"), Color::Reset);
+    assert_eq!(tui.sidebar_background_of("aaa"), Color::Reset);
+}
+
+#[test]
+fn dismissing_a_row_moves_the_cursor_to_its_neighbour() {
+    let mut tui = Harness::with_config(TuiConfig {
+        repos: vec![PathBuf::from("/home/me/webshop")],
+        ..TuiConfig::default()
+    });
+    tui.sessions(vec![
+        session("recent", "aaa"),
+        session("webshop", "existing"),
+    ]);
+    tui.daemon().script_reply(Err(RequestError::Refused {
+        message: "branch exists".into(),
+    }));
+    tui.command("new");
+    tui.keys("Fix login timeout");
+    tui.ctrl('s');
+    tui.keys("x");
+
+    assert_eq!(
+        tui.daemon().last_view(),
+        Some((Some("existing".into()), true))
+    );
+}
+
+#[test]
+fn a_trust_prompt_closed_another_way_fails_the_row() {
+    let mut tui = untrusted("Fix login timeout");
+    tui.send(Event::Daemon(FromDaemon::Focus {
+        session: id("existing"),
+    }));
+
+    assert!(tui.sidebar_line_with("fix-login-timeout").contains("✗"));
 }

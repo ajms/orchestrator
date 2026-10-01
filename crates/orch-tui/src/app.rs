@@ -22,7 +22,7 @@ use crate::link::RequestId;
 use crate::mouse::Region;
 use crate::new_form::NewForm;
 use crate::pane::PaneMirror;
-use crate::preparing::{Preparing, PreparingId};
+use crate::preparing::{Preparing, PreparingId, PreparingState};
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
 use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::selection::Selector;
@@ -135,9 +135,9 @@ pub(crate) struct TrustPrompt {
     retry: Box<Retry>,
 }
 
-impl TrustPrompt {
+impl Retry {
     fn preparing(&self) -> Option<PreparingId> {
-        match self.retry.pending {
+        match self.pending {
             Pending::Create(preparing) => Some(preparing),
             _ => None,
         }
@@ -145,6 +145,10 @@ impl TrustPrompt {
 }
 
 impl TrustPrompt {
+    fn preparing(&self) -> Option<PreparingId> {
+        self.retry.preparing()
+    }
+
     pub fn skipping_teardown(&self) -> Option<Request> {
         match &self.retry.request {
             Request::Discard {
@@ -268,6 +272,7 @@ impl App {
                 self.message = Some(format!("lost the Daemon: {reason}"));
             }
         }
+        self.fail_abandoned_trust();
         self.tell_focus();
         if self.calls.iter().any(Call::suspends) {
             self.end_gesture();
@@ -330,7 +335,7 @@ impl App {
                 if let Pending::Create(preparing) = pending
                     && let Some(preparing) = self.preparing_mut(preparing)
                 {
-                    preparing.needs_trust = true;
+                    preparing.state = PreparingState::NeedsTrust;
                 }
                 let retry = Box::new(Retry { request, pending });
                 self.popup = Some(Popup::Trust(TrustPrompt {
@@ -372,9 +377,19 @@ impl App {
                 }
                 self.select_when_listed = Some(session);
             }
+            (Pending::Create(preparing), Ok(_)) => {
+                if let Some(preparing) = self.preparing_mut(preparing) {
+                    preparing.fail("the Daemon did not report the new Session");
+                }
+            }
             (Pending::Create(preparing), Err(err)) => {
                 if let Some(preparing) = self.preparing_mut(preparing) {
-                    preparing.error = Some(err.to_string());
+                    preparing.fail(err.to_string());
+                }
+            }
+            (Pending::Trust(retry), Err(err)) if retry.preparing().is_some() => {
+                if let Some(preparing) = retry.preparing().and_then(|id| self.preparing_mut(id)) {
+                    preparing.fail(err.to_string());
                 }
             }
             (Pending::Trust(retry), Ok(_)) => {
@@ -553,9 +568,12 @@ impl App {
     }
 
     fn remove_session(&mut self, session: &SessionId) {
-        let removed = Stop::Session(session.clone());
         let before = self.sidebar.stops(&self.sessions, &self.preparing);
         self.sessions.remove(session);
+        self.step_off(Stop::Session(session.clone()), &before);
+    }
+
+    fn step_off(&mut self, removed: Stop, before: &[Stop]) {
         if self.cursor() != Some(removed.clone()) {
             return;
         }
@@ -715,7 +733,7 @@ impl App {
 
     pub fn failed_preparing(&self) -> Option<PreparingId> {
         self.cursor_preparing()
-            .filter(|preparing| preparing.error.is_some())
+            .filter(|preparing| preparing.failure().is_some())
             .map(|preparing| preparing.id)
     }
 
@@ -724,7 +742,9 @@ impl App {
             .preparing
             .iter()
             .position(|preparing| preparing.id == id)?;
+        let before = self.sidebar.stops(&self.sessions, &self.preparing);
         let removed = self.preparing.remove(at);
+        self.step_off(Stop::Preparing(id), &before);
         self.follow_selection();
         Some(removed.create)
     }
@@ -738,6 +758,18 @@ impl App {
             form.restore(create);
         }
         self.form_repo_changed();
+    }
+
+    fn fail_abandoned_trust(&mut self) {
+        let asking = match &self.popup {
+            Some(Popup::Trust(prompt)) => prompt.preparing(),
+            _ => None,
+        };
+        for preparing in &mut self.preparing {
+            if preparing.state == PreparingState::NeedsTrust && Some(preparing.id) != asking {
+                preparing.fail("the Trust prompt was closed without an answer");
+            }
+        }
     }
 
     fn preparing_mut(&mut self, id: PreparingId) -> Option<&mut Preparing> {
@@ -834,7 +866,11 @@ impl App {
     }
 
     fn settle_cursor(&mut self) {
-        if let Some(repo) = self.selected_view().map(|view| view.repo.clone()) {
+        let repo = match self.cursor_preparing() {
+            Some(preparing) => Some(preparing.create.repo.clone()),
+            None => self.selected_view().map(|view| view.repo.clone()),
+        };
+        if let Some(repo) = repo {
             self.sidebar.unfold(&repo);
         }
         let stops = self.sidebar.stops(&self.sessions, &self.preparing);
@@ -962,7 +998,7 @@ impl App {
 
     pub fn approve_trust(&mut self, prompt: TrustPrompt) {
         if let Some(preparing) = prompt.preparing().and_then(|id| self.preparing_mut(id)) {
-            preparing.needs_trust = false;
+            preparing.state = PreparingState::Waiting;
         }
         let request = Request::ApproveTrust {
             repo: prompt.repo,

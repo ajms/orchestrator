@@ -7,14 +7,20 @@ use orch_protocol::CreateSession;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PreparingId(pub u64);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PreparingState {
+    Waiting,
+    NeedsTrust,
+    Failed(String),
+}
+
 pub(crate) struct Preparing {
     pub id: PreparingId,
     pub create: CreateSession,
     pub slug: String,
     pub since: Instant,
     pub session: Option<SessionId>,
-    pub error: Option<String>,
-    pub needs_trust: bool,
+    pub state: PreparingState,
 }
 
 impl Preparing {
@@ -29,8 +35,22 @@ impl Preparing {
             slug,
             since,
             session: None,
-            error: None,
-            needs_trust: false,
+            state: PreparingState::Waiting,
         }
+    }
+
+    pub fn is_counting(&self) -> bool {
+        self.state == PreparingState::Waiting
+    }
+
+    pub fn failure(&self) -> Option<&str> {
+        match &self.state {
+            PreparingState::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    pub fn fail(&mut self, reason: impl Into<String>) {
+        self.state = PreparingState::Failed(reason.into());
     }
 }
