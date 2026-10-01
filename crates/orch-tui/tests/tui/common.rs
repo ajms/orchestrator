@@ -39,6 +39,8 @@ pub struct FakeDaemon {
     pub settings: Vec<RepoSettings>,
     replies: VecDeque<Result<Reply, RequestError>>,
     outbox: VecDeque<Event>,
+    pub hold: bool,
+    held: Vec<Event>,
 }
 
 impl FakeDaemon {
@@ -111,9 +113,13 @@ impl DaemonLink for FakeDaemon {
                 .map_or(Reply::Done, Reply::RepoSettings)),
             _ => self.replies.pop_front().unwrap_or(Ok(Reply::Done)),
         };
+        let held = self.hold && !matches!(request, Request::Repos | Request::RepoSettings { .. });
         self.requests.push((id, request));
-        self.outbox
-            .push_back(Event::Daemon(FromDaemon::Response { id: id.0, result }));
+        let response = Event::Daemon(FromDaemon::Response { id: id.0, result });
+        match held {
+            true => self.held.push(response),
+            false => self.outbox.push_back(response),
+        }
     }
 
     fn open_pane(&mut self, pane: PaneId, session: &SessionId, size: Size) {
@@ -215,6 +221,14 @@ impl Harness {
         while let Some(event) = self.tui.link_mut().outbox.pop_front() {
             let effects = self.tui.handle(event);
             self.effects.extend(effects);
+        }
+    }
+
+    pub fn release_replies(&mut self) {
+        let held = std::mem::take(&mut self.daemon().held);
+        self.daemon().hold = false;
+        for event in held {
+            self.send(event);
         }
     }
 

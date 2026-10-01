@@ -114,6 +114,13 @@ fn normal(app: &mut App, key: KeyEvent) {
         Some(Prefix::Z) if key.code == KeyCode::Char('a') => return app.toggle_cursor_fold(),
         _ => {}
     }
+    if let Some(failed) = app.failed_preparing() {
+        match key.code {
+            KeyCode::Enter => return app.reopen_preparing(failed),
+            KeyCode::Char('x') => return drop(app.dismiss_preparing(failed)),
+            _ => {}
+        }
+    }
     let in_pane = app.focus == Focus::Pane;
     let half_page = (app.pane_size().rows / 2).max(1) as isize;
     match key.code {

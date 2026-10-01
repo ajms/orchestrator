@@ -39,6 +39,11 @@ impl<L: DaemonLink> Tui<L> {
 
     pub fn auto_scrolling(&self) -> bool {
         crate::mouse::auto_scrolling(&self.app)
+            || self
+                .app
+                .preparing
+                .iter()
+                .any(|preparing| preparing.error.is_none() && !preparing.needs_trust)
     }
 
     pub fn link_mut(&mut self) -> &mut L {

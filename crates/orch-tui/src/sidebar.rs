@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use orch_core::SessionId;
 use orch_protocol::{PrChecksView, PrReviewView, ReconcileReport, SessionView, SubagentView};
 
+use crate::preparing::{Preparing, PreparingId};
 use crate::sessions::{Sessions, needs_input};
 
 pub(crate) const FLAG_INDENT: usize = 4;
@@ -13,6 +14,7 @@ pub(crate) const FLAG_SEPARATOR: &str = " · ";
 pub(crate) enum Stop {
     Session(SessionId),
     Heading(PathBuf),
+    Preparing(PreparingId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,12 +40,14 @@ pub(crate) enum Row<'a> {
     Flags(&'a SessionView, Vec<Flag>),
     Subagent(&'a SessionView, &'a SubagentView),
     SubagentsDone(&'a SessionView, usize),
+    Preparing(&'a Preparing),
 }
 
 impl Row<'_> {
     pub fn stop(&self) -> Option<Stop> {
         match self {
             Row::Blank | Row::MissingRepo(_) => None,
+            Row::Preparing(preparing) => Some(Stop::Preparing(preparing.id)),
             Row::Heading { repo, .. } => Some(Stop::Heading(repo.to_path_buf())),
             Row::Session(view)
             | Row::Flags(view, _)
@@ -107,6 +111,7 @@ pub(crate) struct SidebarView {
     folded: HashSet<PathBuf>,
     scroll: usize,
     pub heading: Option<PathBuf>,
+    pub preparing: Option<PreparingId>,
     pub revealed: Option<Stop>,
 }
 
@@ -143,16 +148,24 @@ impl SidebarView {
         };
     }
 
-    pub fn stops(&self, sessions: &Sessions) -> Vec<Stop> {
+    pub fn stops(&self, sessions: &Sessions, preparing: &[Preparing]) -> Vec<Stop> {
         let mut stops = Vec::new();
-        for repo in sessions.repos() {
+        for repo in repos(sessions, preparing) {
             match self.is_folded(repo) {
                 true => stops.push(Stop::Heading(repo.to_path_buf())),
-                false => stops.extend(
-                    sessions
-                        .in_repo(repo)
-                        .map(|view| Stop::Session(view.id.clone())),
-                ),
+                false => {
+                    stops.extend(
+                        sessions
+                            .in_repo(repo)
+                            .map(|view| Stop::Session(view.id.clone())),
+                    );
+                    stops.extend(
+                        preparing
+                            .iter()
+                            .filter(|preparing| preparing.create.repo == repo)
+                            .map(|preparing| Stop::Preparing(preparing.id)),
+                    );
+                }
             }
         }
         stops
@@ -161,11 +174,12 @@ impl SidebarView {
     pub fn rows<'a>(
         &self,
         sessions: &'a Sessions,
+        preparing: &'a [Preparing],
         report: &'a ReconcileReport,
         width: usize,
     ) -> Vec<Row<'a>> {
         let mut rows = Vec::new();
-        for repo in sessions.repos() {
+        for repo in repos(sessions, preparing) {
             if !rows.is_empty() {
                 rows.push(Row::Blank);
             }
@@ -183,6 +197,12 @@ impl SidebarView {
             });
             if unfolded {
                 rows.extend(views.into_iter().flat_map(|view| session_rows(view, width)));
+                rows.extend(
+                    preparing
+                        .iter()
+                        .filter(|preparing| preparing.create.repo == repo)
+                        .map(Row::Preparing),
+                );
             }
         }
         let listed = sessions.repos();
@@ -196,6 +216,16 @@ impl SidebarView {
         }
         rows
     }
+}
+
+fn repos<'a>(sessions: &'a Sessions, preparing: &'a [Preparing]) -> Vec<&'a Path> {
+    let mut repos = sessions.repos();
+    for preparing in preparing {
+        if !repos.contains(&preparing.create.repo.as_path()) {
+            repos.push(&preparing.create.repo);
+        }
+    }
+    repos
 }
 
 fn urgency(views: &[&SessionView]) -> Option<Urgency> {

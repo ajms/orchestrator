@@ -16,6 +16,7 @@ mod new_form;
 mod pane;
 mod passthrough;
 mod popup;
+mod preparing;
 mod reconcile;
 mod render;
 mod review;

@@ -45,6 +45,7 @@ pub struct NewForm {
     base_choice: usize,
     pub presets: Vec<String>,
     pub preset: Option<usize>,
+    wanted_preset: Option<String>,
     pub error: Option<String>,
 }
 
@@ -66,6 +67,7 @@ impl NewForm {
             base_choice: 0,
             presets,
             preset: None,
+            wanted_preset: None,
             error: None,
         };
         form.prefill_branch();
@@ -89,9 +91,36 @@ impl NewForm {
         self.prefill_branch();
     }
 
+    pub fn restore(&mut self, create: CreateSession) {
+        match self.repos.iter().position(|repo| *repo == create.repo) {
+            Some(at) => self.repo = at,
+            None => {
+                self.repo = self.repos.len();
+                self.other_path = create.repo.display().to_string();
+            }
+        }
+        self.prompt = create.prompt;
+        if let Some(branch) = create.branch {
+            self.branch = branch;
+            self.branch_edited = true;
+        }
+        self.base = create.base.unwrap_or_default();
+        self.preset = create
+            .preset
+            .as_ref()
+            .and_then(|name| self.presets.iter().position(|preset| preset == name));
+        self.wanted_preset = create.preset;
+        self.prefill_branch();
+    }
+
     pub fn apply(&mut self, settings: RepoSettings) {
+        let chosen = self
+            .wanted_preset
+            .take()
+            .or_else(|| self.preset.map(|at| self.presets[at].clone()));
         self.presets = settings.presets;
-        self.preset = None;
+        self.preset =
+            chosen.and_then(|name| self.presets.iter().position(|preset| *preset == name));
         self.default_preset = settings.default_preset;
         self.default_base = settings.default_base;
         self.branch_prefix = settings.branch_prefix;

@@ -49,7 +49,11 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
                     app.skip_teardown(prompt);
                 }
             }
-            KeyCode::Char('n') | KeyCode::Esc => app.popup = None,
+            KeyCode::Char('n') | KeyCode::Esc => {
+                if let Some(Popup::Trust(prompt)) = app.popup.take() {
+                    app.decline_trust(prompt);
+                }
+            }
             _ => {}
         },
         Popup::Discard(_) => {

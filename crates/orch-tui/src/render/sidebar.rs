@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Instant;
 
 use orch_protocol::{AgentStateView, PrChecksView, PrReviewView, SessionView, SubagentView};
 use ratatui::Frame;
@@ -9,6 +10,7 @@ use ratatui::widgets::{Block, BorderType, Paragraph};
 
 use super::style;
 use crate::app::{App, Focus};
+use crate::preparing::Preparing;
 use crate::sessions::repo_label;
 use crate::sidebar::{FLAG_INDENT, FLAG_SEPARATOR, Flag, Folded, Row, Urgency};
 
@@ -50,6 +52,9 @@ fn line(app: &App, row: &Row, width: usize) -> Line<'static> {
         Row::Flags(_, flags) => flag_line(flags),
         Row::Subagent(_, subagent) => subagent_line(subagent, width),
         Row::SubagentsDone(_, done) => Line::from(format!("    ↳ {done} done")).dark_gray(),
+        Row::Preparing(preparing) => {
+            highlighted(preparing_line(preparing, (app.clock)()), selected)
+        }
     }
 }
 
@@ -113,6 +118,25 @@ fn first_line(view: &SessionView) -> Line<'static> {
         ));
     }
     Line::from(first)
+}
+
+fn preparing_line(preparing: &Preparing, now: Instant) -> Line<'static> {
+    let seconds = now.saturating_duration_since(preparing.since).as_secs();
+    let state = match (&preparing.error, preparing.needs_trust) {
+        (Some(_), _) => Span::styled("✗ failed", Style::new().fg(Color::Red)),
+        (None, true) => Span::styled("needs Trust", Style::new().fg(Color::Yellow)),
+        (None, false) => Span::styled(
+            format!("Preparing… {seconds}s"),
+            Style::new().fg(Color::Cyan),
+        ),
+    };
+    Line::from(vec![
+        Span::raw(format!(
+            "  {:<SLUG_WIDTH$} ",
+            truncate(&preparing.slug, SLUG_WIDTH)
+        )),
+        state,
+    ])
 }
 
 fn subagent_line(subagent: &SubagentView, width: usize) -> Line<'static> {
