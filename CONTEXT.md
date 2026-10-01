@@ -69,6 +69,10 @@ _Avoid_: Allow-list, permission
 One Agent working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent, or starting a new Conversation, keeps the same Session.
 _Avoid_: Task, job, instance, run
 
+**Session title**:
+A name the user gave the Session through its Agent (e.g. Claude Code's `/rename`). It is shown in place of the slug and outlives the Conversation it was given in.
+_Avoid_: Session name, label, alias
+
 **Agent**:
 A coding-agent program (e.g. Claude Code) that the Orchestrator drives inside a Session.
 _Avoid_: Bot, assistant, model
