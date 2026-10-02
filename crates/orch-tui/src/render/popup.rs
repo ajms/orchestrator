@@ -212,19 +212,18 @@ fn guard_kind(kind: GuardKindView) -> &'static str {
 }
 
 fn show(frame: &mut Frame, title: &str, colour: Color, lines: Vec<Line<'static>>, width: u16) {
-    let height = lines.len() as u16 + 2;
-    let area = centered(frame.area(), width, height);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(colour))
         .title(title.to_string());
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .block(block);
+    let width = width.min(frame.area().width);
+    let height = paragraph.line_count(width.saturating_sub(2)) as u16;
+    let area = centered(frame.area(), width, height);
     frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .block(block),
-        area,
-    );
+    frame.render_widget(paragraph, area);
 }
 
 pub(super) fn centered(area: Rect, width: u16, height: u16) -> Rect {

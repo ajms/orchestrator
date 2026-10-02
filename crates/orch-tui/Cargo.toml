@@ -14,7 +14,7 @@ orch-protocol = { path = "../orch-protocol" }
 orch-holder.workspace = true
 base64 = "0.22"
 crossterm = "0.29"
-ratatui = "0.30"
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 tui-term = "0.3.4"
 vt100 = "0.16"
 unicode-width = "0.2"
