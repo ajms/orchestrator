@@ -135,7 +135,10 @@ fn normal(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') | KeyCode::Up if in_pane => scroll_by(app, 1),
         KeyCode::Char('j') | KeyCode::Down => app.select_offset(1),
         KeyCode::Char('k') | KeyCode::Up => app.select_offset(-1),
+        KeyCode::Char('J') => app.select_subagent_offset(1),
+        KeyCode::Char('K') => app.select_subagent_offset(-1),
         KeyCode::Enter if !in_pane && app.on_heading() => app.toggle_cursor_fold(),
+        KeyCode::Enter if !in_pane && app.on_subagents_done() => app.toggle_cursor_subagents_done(),
         KeyCode::Enter | KeyCode::Char('l') => app.focus = Focus::Pane,
         KeyCode::Char('h') | KeyCode::Char('-') => app.focus = Focus::Sidebar,
         KeyCode::Char('g') => app.prefix = Some(Prefix::G),
@@ -155,7 +158,7 @@ fn interrupt(app: &mut App, key: KeyEvent) {
     let live = app
         .selected_view()
         .is_some_and(|view| view.phase.is_live() && !agent_ended(view));
-    if live && app.shown_pane().is_some() {
+    if live && app.selected_pane().is_some() {
         send_key(app, key);
     }
 }
@@ -262,6 +265,7 @@ fn selected_text(
 }
 
 fn enter_insert(app: &mut App) {
+    app.leave_subagent();
     let Some(view) = app.selected_view() else {
         return;
     };

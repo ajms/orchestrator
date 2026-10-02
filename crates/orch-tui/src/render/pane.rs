@@ -1,4 +1,4 @@
-use orch_protocol::{PhaseView, SessionView};
+use orch_protocol::{PhaseView, SessionView, SubagentView};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -25,6 +25,16 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
         let block = block.title(preparing_title(preparing));
         frame.render_widget(
             Paragraph::new(preparing_lines(preparing))
+                .wrap(Wrap { trim: false })
+                .block(block),
+            area,
+        );
+        return;
+    }
+    if let Some((view, subagent)) = app.cursor_subagent() {
+        let block = block.title(subagent_title(view, subagent));
+        frame.render_widget(
+            Paragraph::new(subagent_lines(subagent))
                 .wrap(Wrap { trim: false })
                 .block(block),
             area,
@@ -146,6 +156,33 @@ fn title(view: &SessionView) -> Line<'static> {
         Span::styled(label, Style::new().fg(colour)),
         Span::raw(format!(" {mode} ")),
     ])
+}
+
+fn subagent_title(view: &SessionView, subagent: &SubagentView) -> Line<'static> {
+    let state = match subagent.done {
+        true => Span::raw("done ").dark_gray(),
+        false => Span::raw("running ").green(),
+    };
+    Line::from(vec![
+        Span::raw(" "),
+        Span::raw(format!(
+            "{} / {} ↳ {} ",
+            repo_name(&view.repo),
+            view.title_or_slug(),
+            subagent.agent_type
+        ))
+        .bold(),
+        state,
+    ])
+}
+
+fn subagent_lines(subagent: &SubagentView) -> Vec<Line<'static>> {
+    vec![
+        Line::from(format!("{}: {}", subagent.agent_type, subagent.description)),
+        Line::from(format!("{} tools", subagent.tool_count)).dark_gray(),
+        Line::default(),
+        Line::from("Nothing more is shown for this Subagent yet").yellow(),
+    ]
 }
 
 fn preparing_title(preparing: &Preparing) -> Line<'static> {

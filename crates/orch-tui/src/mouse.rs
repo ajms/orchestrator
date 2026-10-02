@@ -222,9 +222,12 @@ fn sidebar_click(app: &mut App, row: u16) {
         Some(Stop::Heading(repo)) => app.toggle_fold(&repo),
         Some(Stop::Session(session)) => app.show_session(session),
         Some(Stop::Preparing(preparing)) => app.show_preparing(preparing),
+        Some(Stop::SubagentsDone(session)) => app.expand_subagents_done(session),
+        Some(stop @ Stop::Subagent(..)) => app.show_subagent(stop),
         None => {}
     }
-    let stay_inserting = app.inserting() && app.selected_view().is_some_and(agent_running);
+    let stay_inserting =
+        app.inserting() && !app.on_subagent() && app.selected_view().is_some_and(agent_running);
     if app.inserting() && !stay_inserting {
         app.mode = Mode::Normal;
     }

@@ -50,8 +50,11 @@ fn line(app: &App, row: &Row, width: usize) -> Line<'static> {
         } => highlighted(folded_heading(repo, *missing, folded), selected),
         Row::Session(view) => highlighted(first_line(view), selected),
         Row::Flags(_, flags) => flag_line(flags),
-        Row::Subagent(_, subagent) => subagent_line(subagent, width),
-        Row::SubagentsDone(_, done) => Line::from(format!("    ↳ {done} done")).dark_gray(),
+        Row::Subagent(_, subagent) => highlighted(subagent_line(subagent, width), selected),
+        Row::SubagentsDone(_, done) => highlighted(
+            Line::from(format!("    ↳ {done} done")).dark_gray(),
+            selected,
+        ),
         Row::Preparing(preparing) => {
             highlighted(preparing_line(preparing, (app.clock)(), width), selected)
         }
@@ -151,10 +154,19 @@ fn subagent_line(subagent: &SubagentView, width: usize) -> Line<'static> {
         "{}: {} · {} tools",
         subagent.agent_type, subagent.description, subagent.tool_count
     );
-    Line::from(vec![
-        Span::raw("    ↳ ").dark_gray(),
-        Span::raw(truncate(&text, width.saturating_sub(6).max(1))),
-    ])
+    let marker = match subagent.done {
+        true => "      ✓ ",
+        false => "    ↳ ",
+    };
+    let room = width.saturating_sub(marker.chars().count()).max(1);
+    let line = Line::from(vec![
+        Span::raw(marker).dark_gray(),
+        Span::raw(truncate(&text, room)),
+    ]);
+    match subagent.done {
+        true => line.dark_gray(),
+        false => line,
+    }
 }
 
 fn flag_line(flags: &[Flag]) -> Line<'static> {

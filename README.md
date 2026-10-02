@@ -72,7 +72,9 @@ The TUI is modal, like nvim's `:terminal`. In **Insert** mode every key except `
 | `Ctrl-h` | Insert → Normal mode, focus sidebar |
 | `i` / `a` | Normal → Insert mode (focused Session) |
 | `Ctrl-c` | Normal mode: send Ctrl-c to the selected Session's Agent (interrupt) |
-| `j` / `k` | Sidebar: select a Session. Pane: scroll. |
+| `j` / `k` | Sidebar: select a Session, skipping Subagent rows. Pane: scroll. |
+| `J` / `K` | Step through the selected Session's Subagent rows |
+| `Enter` on `↳ N done` | Expand / collapse that Session's finished Subagents |
 | `za`, or `Enter` on a folded heading | Fold / unfold the selected Repo |
 | `Ctrl-d` / `Ctrl-u`, `gg` / `G` | Scroll history |
 | `Ctrl-w h` / `l` / `w` | Focus sidebar / pane / other |
@@ -87,7 +89,7 @@ Otherwise the pane has its own selection. Drag to select; dragging past the top 
 
 Hold Ctrl over a URL or a file path to underline it, and Ctrl+click to open it: URLs in your browser, files in `$EDITOR` at the line.
 
-In the sidebar, click a Session to show it, click a Repo heading to fold or unfold it, and the wheel scrolls the list.
+In the sidebar, click a Session to show it, click a Subagent to select it, click `↳ N done` to expand the finished Subagents (`Enter` collapses them), click a Repo heading to fold or unfold it, and the wheel scrolls the list.
 
 In the Review view the wheel scrolls the column under it, a click on a file shows it, a drag in the diff selects and copies on release, and Ctrl+click on a diff line opens `$EDITOR` at that line.
 
