@@ -81,6 +81,13 @@ fn region_at(app: &App, column: u16, row: u16) -> Region {
 }
 
 fn pane(app: &mut App, event: MouseEvent) {
+    if app.on_subagent() {
+        return match event.kind {
+            MouseEventKind::ScrollUp => app.scroll_transcript_up(WHEEL_LINES),
+            MouseEventKind::ScrollDown => app.scroll_transcript_up(-WHEEL_LINES),
+            _ => {}
+        };
+    }
     let point = clamped(app.areas().pane_body(), event);
     let requested = app
         .shown_pane()

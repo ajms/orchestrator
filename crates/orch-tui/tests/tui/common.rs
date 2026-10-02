@@ -402,6 +402,11 @@ impl Harness {
             .unwrap_or_else(|| panic!("no line contains {needle:?} in\n{}", self.screen()))
     }
 
+    pub fn colour_at(&mut self, column: u16, row: u16) -> Color {
+        self.draw();
+        self.terminal.backend().buffer()[(column, row)].fg
+    }
+
     pub fn colour_of(&mut self, needle: &str) -> Color {
         self.draw();
         let buffer = self.terminal.backend().buffer().clone();

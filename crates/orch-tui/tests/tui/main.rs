@@ -25,5 +25,6 @@ mod sidebar_mouse;
 mod socket_link;
 mod statusline;
 mod subagents;
+mod transcripts;
 mod trust;
 mod usage;

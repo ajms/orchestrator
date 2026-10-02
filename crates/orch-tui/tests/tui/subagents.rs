@@ -198,7 +198,7 @@ fn clicking_a_subagent_row_selects_that_subagent() {
 }
 
 #[test]
-fn a_selected_subagent_shows_a_placeholder_instead_of_the_agent_pane() {
+fn a_selected_subagent_shows_its_transcript_instead_of_the_agent_pane() {
     let mut tui = family();
     tui.keys("J");
 

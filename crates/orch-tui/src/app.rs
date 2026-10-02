@@ -29,6 +29,7 @@ use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
 use crate::sidebar::{Row, SidebarView, Stop, SubagentRow, Viewport};
+use crate::transcript::Transcript;
 
 pub(crate) const NO_SESSION: &str = "no Session selected";
 
@@ -202,6 +203,7 @@ pub(crate) struct App {
     pub links: Hyperlinks,
     pub sidebar: SidebarView,
     pub preparing: Vec<Preparing>,
+    pub transcript: Option<Transcript>,
     next_preparing: u64,
     pub clock: Box<dyn Fn() -> Instant>,
     size: Size,
@@ -239,6 +241,7 @@ impl App {
             links: Hyperlinks::default(),
             sidebar: SidebarView::default(),
             preparing: Vec::new(),
+            transcript: None,
             next_preparing: 0,
             clock: Box::new(Instant::now),
             size,
@@ -309,6 +312,15 @@ impl App {
             FromDaemon::Clipboard { session, text } => {
                 if self.selected.as_ref() == Some(&session) {
                     self.copy(&text);
+                }
+            }
+            FromDaemon::SubagentTranscript(update) => {
+                if let Some(transcript) = self
+                    .transcript
+                    .as_mut()
+                    .filter(|transcript| transcript.is_of(&update.session, &update.subagent))
+                {
+                    transcript.receive(update.entries, update.replace);
                 }
             }
             FromDaemon::Response { id, result } => {
@@ -1363,6 +1375,7 @@ impl App {
         }
         self.settle_cursor();
         self.sync_pane();
+        self.sync_transcript();
         self.report_view();
         self.reveal_cursor();
     }
@@ -1401,6 +1414,63 @@ impl App {
         {
             self.focus = Focus::Pane;
             self.mode = Mode::Insert;
+        }
+    }
+
+    fn sync_transcript(&mut self) {
+        let wanted = self
+            .cursor_subagent()
+            .map(|(view, subagent)| (view.id.clone(), subagent.id.clone()));
+        let current = self
+            .transcript
+            .as_ref()
+            .map(|transcript| (transcript.session.clone(), transcript.subagent.clone()));
+        if wanted == current {
+            return;
+        }
+        self.transcript = None;
+        match wanted {
+            Some((session, subagent)) => {
+                self.report(Request::SubscribeSubagent {
+                    session: session.clone(),
+                    subagent: subagent.clone(),
+                });
+                self.transcript = Some(Transcript::new(session, subagent));
+            }
+            None => self.report(Request::UnsubscribeSubagent),
+        }
+    }
+
+    pub fn toggle_transcript_full(&mut self) {
+        if let Some(transcript) = &mut self.transcript {
+            transcript.toggle_full();
+        }
+    }
+
+    pub fn scroll_height(&self) -> u16 {
+        match self.on_subagent() {
+            true => self.areas().transcript_body().height,
+            false => self.pane_size().rows,
+        }
+    }
+
+    pub fn scroll_transcript_up(&mut self, lines: isize) {
+        let body = self.areas().transcript_body();
+        if let Some(transcript) = &mut self.transcript {
+            let rows = transcript.rows(body.width).len();
+            transcript.scroll_up(lines, rows, usize::from(body.height));
+        }
+    }
+
+    pub fn transcript_to_start(&mut self) {
+        if let Some(transcript) = &mut self.transcript {
+            transcript.scroll_to_start();
+        }
+    }
+
+    pub fn transcript_follow(&mut self) {
+        if let Some(transcript) = &mut self.transcript {
+            transcript.follow();
         }
     }
 

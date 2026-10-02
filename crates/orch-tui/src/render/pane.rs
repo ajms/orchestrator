@@ -9,6 +9,7 @@ use tui_term::widget::PseudoTerminal;
 use super::style;
 use crate::app::{App, Focus, Mode, Selection};
 use crate::hyperlinks::Hyperlink;
+use crate::layout::Areas;
 use crate::pane::PaneMirror;
 use crate::preparing::Preparing;
 use crate::selection::{Point, columns_on};
@@ -16,7 +17,8 @@ use crate::selection::{Point, columns_on};
 const SELECTION: Color = Color::Rgb(70, 70, 110);
 use crate::sessions::repo_name;
 
-pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
+pub(super) fn draw(app: &App, frame: &mut Frame, areas: &Areas) {
+    let area = areas.pane;
     let focused = app.focus == Focus::Pane;
     let mut block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -32,13 +34,8 @@ pub(super) fn draw(app: &App, frame: &mut Frame, area: Rect) {
         return;
     }
     if let Some((view, subagent)) = app.cursor_subagent() {
-        let block = block.title(subagent_title(view, subagent));
-        frame.render_widget(
-            Paragraph::new(subagent_lines(subagent))
-                .wrap(Wrap { trim: false })
-                .block(block),
-            area,
-        );
+        frame.render_widget(block.title(subagent_title(view, subagent)), area);
+        transcript(app, subagent, frame, areas);
         return;
     }
     let Some(view) = app.selected_view() else {
@@ -159,10 +156,6 @@ fn title(view: &SessionView) -> Line<'static> {
 }
 
 fn subagent_title(view: &SessionView, subagent: &SubagentView) -> Line<'static> {
-    let state = match subagent.done {
-        true => Span::raw("done ").dark_gray(),
-        false => Span::raw("running ").green(),
-    };
     Line::from(vec![
         Span::raw(" "),
         Span::raw(format!(
@@ -172,17 +165,43 @@ fn subagent_title(view: &SessionView, subagent: &SubagentView) -> Line<'static> 
             subagent.agent_type
         ))
         .bold(),
-        state,
     ])
 }
 
-fn subagent_lines(subagent: &SubagentView) -> Vec<Line<'static>> {
-    vec![
-        Line::from(format!("{}: {}", subagent.agent_type, subagent.description)),
-        Line::from(format!("{} tools", subagent.tool_count)).dark_gray(),
-        Line::default(),
-        Line::from("Nothing more is shown for this Subagent yet").yellow(),
-    ]
+fn transcript(app: &App, subagent: &SubagentView, frame: &mut Frame, areas: &Areas) {
+    let header = Paragraph::new(subagent_header(subagent));
+    frame.render_widget(header, areas.transcript_header());
+    let Some(transcript) = &app.transcript else {
+        return;
+    };
+    let body = areas.transcript_body();
+    let height = usize::from(body.height);
+    let rows = transcript.rows(body.width);
+    if rows.is_empty() {
+        let empty = Line::from("No Subagent transcript yet").dark_gray();
+        frame.render_widget(Paragraph::new(empty), body);
+        return;
+    }
+    let top = transcript.top(rows.len(), height);
+    let shown: Vec<Line> = rows.iter().skip(top).take(height).cloned().collect();
+    frame.render_widget(Paragraph::new(shown), body);
+}
+
+fn subagent_header(subagent: &SubagentView) -> Line<'static> {
+    let name = match subagent.description.is_empty() {
+        true => subagent.agent_type.clone(),
+        false => format!("{}: {}", subagent.agent_type, subagent.description),
+    };
+    let state = match subagent.done {
+        true => Span::raw("done").dark_gray(),
+        false => Span::raw("running").green(),
+    };
+    Line::from(vec![
+        Span::raw(name).bold(),
+        Span::raw(" · "),
+        state,
+        Span::raw(format!(" · {} tools", subagent.tool_count)),
+    ])
 }
 
 fn preparing_title(preparing: &Preparing) -> Line<'static> {
