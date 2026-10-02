@@ -60,6 +60,16 @@ fn a_version_mismatch_offers_to_restart_the_daemon() {
 }
 
 #[test]
+fn a_long_version_mismatch_message_still_shows_the_keys() {
+    let mut tui = Harness::new();
+    tui.send(Event::VersionMismatch {
+        message: "the running Daemon speaks protocol 7 but this Client speaks 8; restart the Daemon to upgrade it".repeat(2),
+    });
+    let screen = tui.screen();
+    assert!(screen.contains("r restart the Daemon · q quit"), "{screen}");
+}
+
+#[test]
 fn losing_the_daemon_is_shown() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "first")]);

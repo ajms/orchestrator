@@ -37,6 +37,21 @@ fn a_guard_hit_on_the_selected_session_shows_a_prompt() {
 }
 
 #[test]
+fn a_guard_on_a_long_target_still_shows_the_keys() {
+    let mut view = with_agent(session("webshop", "guarded"), AgentStateView::NeedsInput);
+    view.guard_prompts = vec![GuardPrompt {
+        id: 7,
+        tool: "Bash".into(),
+        kind: GuardKindView::WriteOutsideWorktree,
+        target: "cat notes.txt > /home/someone/a/very/deep/directory/structure/outside/of/the/worktree/notes.txt".into(),
+    }];
+    let mut tui = Harness::new();
+    tui.sessions(vec![view]);
+    let screen = tui.screen();
+    assert!(screen.contains("3 deny · Esc later"), "{screen}");
+}
+
+#[test]
 fn each_answer_is_sent_to_the_daemon() {
     for (key, choice) in [
         ('1', GuardChoice::AllowOnce),
