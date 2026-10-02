@@ -293,7 +293,7 @@ fn restart_unit() -> io::Result<()> {
     }
 }
 
-pub fn daemon_under_systemd(runtime_dir: &Path) -> bool {
+fn daemon_under_systemd(runtime_dir: &Path) -> bool {
     let Ok(holder) = std::fs::read_to_string(daemon_lock(runtime_dir)) else {
         return false;
     };

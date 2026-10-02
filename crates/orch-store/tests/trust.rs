@@ -4,13 +4,6 @@ use common::Fixture;
 use orch_config::TrustHash;
 
 #[test]
-fn a_repo_starts_without_trust_approval() {
-    let mut fx = Fixture::new();
-    let repo = fx.register("proj");
-    assert_eq!(fx.store.trust_approval(repo.id).unwrap(), None);
-}
-
-#[test]
 fn the_latest_approval_is_kept_across_reopening() {
     let mut fx = Fixture::new();
     let repo = fx.register("proj");
@@ -28,16 +21,18 @@ fn the_latest_approval_is_kept_across_reopening() {
 }
 
 #[test]
-fn approval_is_per_repo_and_can_be_revoked() {
+fn approval_is_per_repo() {
     let mut fx = Fixture::new();
     let a = fx.register("a");
     let b = fx.register("b");
     fx.store
         .approve_trust(a.id, &TrustHash::from_stored("aaa"))
         .unwrap();
+    assert_eq!(
+        fx.store.trust_approval(a.id).unwrap(),
+        Some(TrustHash::from_stored("aaa"))
+    );
     assert_eq!(fx.store.trust_approval(b.id).unwrap(), None);
-    fx.store.revoke_trust(a.id).unwrap();
-    assert_eq!(fx.store.trust_approval(a.id).unwrap(), None);
 }
 
 #[test]

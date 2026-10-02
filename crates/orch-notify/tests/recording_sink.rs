@@ -1,19 +1,7 @@
 mod common;
 
-use common::{close_merged, close_session, notification, session, show_merged, show_session};
+use common::{close_merged, notification, session, show_merged, show_session};
 use orch_notify::{NotificationKey, NotificationSink, RecordingSink};
-
-#[test]
-fn records_every_action_in_order() {
-    let mut sink = RecordingSink::new();
-    let actions = [show_session("a", "a", ""), close_session("a")];
-
-    for action in &actions {
-        sink.apply(action);
-    }
-
-    assert_eq!(sink.actions(), actions);
-}
 
 #[test]
 fn shows_replace_in_place_and_closes_remove() {

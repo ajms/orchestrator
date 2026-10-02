@@ -8,17 +8,12 @@ pub trait NotificationSink {
 
 #[derive(Debug, Default)]
 pub struct RecordingSink {
-    actions: Vec<DesktopAction>,
     visible: Vec<(NotificationKey, Notification)>,
 }
 
 impl RecordingSink {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn actions(&self) -> &[DesktopAction] {
-        &self.actions
     }
 
     pub fn visible(&self) -> Vec<(&NotificationKey, &Notification)> {
@@ -35,7 +30,6 @@ impl RecordingSink {
 
 impl NotificationSink for RecordingSink {
     fn apply(&mut self, action: &DesktopAction) {
-        self.actions.push(action.clone());
         let (key, shown) = match action {
             DesktopAction::Show { key, notification } => (key, Some(notification)),
             DesktopAction::Close { key } => (key, None),

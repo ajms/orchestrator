@@ -10,11 +10,6 @@ use orch_notify::{
 };
 
 #[test]
-fn connecting_to_a_missing_bus_is_an_error_not_a_panic() {
-    assert!(FreedesktopBus::connect_to("unix:path=/nonexistent/orch-notify-bus").is_err());
-}
-
-#[test]
 #[ignore = "needs a session bus"]
 fn the_click_listener_stops_when_the_bus_disconnects() {
     let bus = FreedesktopBus::connect().expect("session bus");

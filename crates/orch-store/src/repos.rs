@@ -45,17 +45,6 @@ impl Store {
             .ok_or(StoreError::UnknownRepo)
     }
 
-    pub fn touch_repo(&mut self, id: RepoId) -> Result<(), StoreError> {
-        let changed = self.conn.execute(
-            "UPDATE repos SET last_used = (SELECT MAX(last_used) + 1 FROM repos) WHERE id = ?1",
-            params![id.0],
-        )?;
-        match changed {
-            0 => Err(StoreError::UnknownRepo),
-            _ => Ok(()),
-        }
-    }
-
     pub fn repos(&self) -> Result<Vec<Repo>, StoreError> {
         let mut statement = self.conn.prepare(&format!(
             "SELECT {COLUMNS} FROM repos ORDER BY last_used DESC"

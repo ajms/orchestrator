@@ -53,10 +53,6 @@ impl FreedesktopBus {
         Self::open(Builder::session().map_err(bus_error)?)
     }
 
-    pub fn connect_to(address: &str) -> Result<Self, BusError> {
-        Self::open(Builder::address(address).map_err(bus_error)?)
-    }
-
     fn open(builder: Builder<'_>) -> Result<Self, BusError> {
         let connection = builder
             .method_timeout(CALL_TIMEOUT)

@@ -51,10 +51,3 @@ async fn a_client_spawns_the_daemon_when_none_is_running() {
     let unused = || -> std::io::Result<()> { panic!("a running Daemon is reused") };
     connect_or_spawn(&env.socket(), unused, WAIT).await.unwrap();
 }
-
-#[tokio::test]
-async fn a_daemon_started_outside_systemd_is_restarted_by_kill_and_spawn() {
-    let env = Env::new();
-    let _daemon = env.start_daemon().await;
-    assert!(!orch_protocol::daemon_under_systemd(&env.runtime_dir()));
-}
