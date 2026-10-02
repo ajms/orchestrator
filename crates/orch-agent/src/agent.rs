@@ -1,6 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use orch_core::{AgentEvent, ConversationId, PermissionMode, SessionId, SessionStatus};
+use orch_core::{
+    AgentEvent, ConversationId, PermissionMode, SessionId, SessionStatus, SubagentId,
+    TranscriptEntry,
+};
 
 use crate::{GuardAnswer, Preset};
 
@@ -13,6 +16,7 @@ pub struct Capabilities {
     pub guards: bool,
     pub subagents: bool,
     pub titles: bool,
+    pub transcripts: bool,
 }
 
 impl Capabilities {
@@ -77,6 +81,22 @@ pub trait TitleWatch: Send {
     fn poll(&mut self) -> Vec<AgentEvent>;
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TranscriptRead {
+    pub reset: bool,
+    pub entries: Vec<TranscriptEntry>,
+}
+
+pub trait SubagentTranscripts: Send {
+    fn follow(&mut self, payload: &str);
+    fn locate(&self, subagent: &SubagentId) -> Option<PathBuf>;
+    fn reader(&self) -> Box<dyn TranscriptReader>;
+}
+
+pub trait TranscriptReader: Send {
+    fn read(&mut self, path: &Path) -> TranscriptRead;
+}
+
 pub trait AgentAdapter {
     fn capabilities(&self) -> Capabilities;
 
@@ -115,6 +135,10 @@ pub trait AgentAdapter {
     }
 
     fn title_watch(&self) -> Option<Box<dyn TitleWatch>> {
+        None
+    }
+
+    fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>> {
         None
     }
 

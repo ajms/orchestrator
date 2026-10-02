@@ -89,6 +89,10 @@ _Avoid_: Chat, thread, transcript
 A helper the Agent spawns inside its own Session; it shares the Session's Worktree and is not a Session itself.
 _Avoid_: Child session, worker, sub-session
 
+**Subagent transcript**:
+A read-only, live record of what a Subagent was asked and did (its prompt, its text, and its tool calls with their results), followed from the Agent's own files and shown when the Subagent is selected.
+_Avoid_: Subagent log, Subagent conversation, Subagent output
+
 **Worktree**:
 The git worktree dedicated to a single Session, checked out on that Session's Branch.
 _Avoid_: Checkout, sandbox

@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use orch_core::SessionId;
+use orch_core::{SessionId, TranscriptEntry};
 use orch_holder::{ScreenSnapshot, Size};
 use serde::{Deserialize, Serialize};
 
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -155,6 +155,11 @@ pub enum Request {
         from: PathBuf,
         to: PathBuf,
     },
+    SubscribeSubagent {
+        session: SessionId,
+        subagent: String,
+    },
+    UnsubscribeSubagent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -260,6 +265,15 @@ pub enum FromDaemon {
         session: SessionId,
         text: String,
     },
+    SubagentTranscript(SubagentTranscript),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentTranscript {
+    pub session: SessionId,
+    pub subagent: String,
+    pub entries: Vec<TranscriptEntry>,
+    pub replace: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

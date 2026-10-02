@@ -18,6 +18,7 @@ mod setup;
 mod state;
 mod store;
 mod subprocess;
+mod transcript;
 mod usage;
 
 use std::fs::File;

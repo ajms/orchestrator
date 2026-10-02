@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use orch_core::SubagentId;
 use orch_holder::{read_frame_async, write_frame_async};
 use orch_protocol::{FromDaemon, PROTOCOL_VERSION, Reply, Request, RequestError, ToDaemon};
 use tokio::net::UnixStream;
@@ -148,6 +149,13 @@ async fn handle(
         Request::MoveRepo { from, to } => {
             let daemon = daemon.clone();
             detached(async move { daemon.move_repo(from, to).await }).await
+        }
+        Request::SubscribeSubagent { session, subagent } => {
+            daemon.subscribe_subagent(client, &session, SubagentId(subagent))
+        }
+        Request::UnsubscribeSubagent => {
+            daemon.lock().follow(client, None);
+            Ok(Reply::Done)
         }
         Request::Fix { fix } => {
             let daemon = daemon.clone();
