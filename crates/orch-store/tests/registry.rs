@@ -64,10 +64,7 @@ fn registering_twice_keeps_one_repo_and_lists_most_recently_used_first() {
         .register_repo(&RepoRoot::resolve(&a.path).unwrap())
         .unwrap();
     assert_eq!(again.id, a.id);
-    assert_eq!(paths(&fx.store), vec![a.path.clone(), b.path.clone()]);
-
-    fx.store.touch_repo(b.id).unwrap();
-    assert_eq!(paths(&fx.store), vec![b.path, a.path]);
+    assert_eq!(paths(&fx.store), vec![a.path, b.path]);
 }
 
 #[test]

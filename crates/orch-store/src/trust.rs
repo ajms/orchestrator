@@ -25,10 +25,4 @@ impl Store {
         )?;
         Ok(())
     }
-
-    pub fn revoke_trust(&mut self, repo: RepoId) -> Result<(), StoreError> {
-        self.conn
-            .execute("DELETE FROM trust WHERE repo_id = ?1", params![repo.0])?;
-        Ok(())
-    }
 }
