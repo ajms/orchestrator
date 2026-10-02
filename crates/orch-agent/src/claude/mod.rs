@@ -1,6 +1,8 @@
 mod hooks;
+mod lines;
 mod settings;
 mod statusline;
+mod subagents;
 mod transcript;
 
 use std::path::PathBuf;
@@ -8,10 +10,14 @@ use std::path::PathBuf;
 use hooks::HookEvent;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
 use serde_json::{Map, Value, json};
+use subagents::ClaudeSubagentTranscripts;
 use transcript::TranscriptTitles;
 
 use crate::shell::quote;
-use crate::{AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, TitleWatch};
+use crate::{
+    AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, SubagentTranscripts,
+    TitleWatch,
+};
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
 const GUARD_WAIT_SECS: u64 = 7 * 24 * 60 * 60;
@@ -90,6 +96,7 @@ impl AgentAdapter for ClaudeCode {
             guards: true,
             subagents: true,
             titles: true,
+            transcripts: true,
         }
     }
 
@@ -121,6 +128,10 @@ impl AgentAdapter for ClaudeCode {
 
     fn title_watch(&self) -> Option<Box<dyn TitleWatch>> {
         Some(Box::new(TranscriptTitles::default()))
+    }
+
+    fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>> {
+        Some(Box::new(ClaudeSubagentTranscripts::default()))
     }
 
     fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {

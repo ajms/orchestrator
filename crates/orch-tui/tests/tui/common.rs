@@ -10,7 +10,7 @@ use crossterm::event::{
 use orch_core::SessionId;
 use orch_protocol::{
     AgentStateView, CreateSession, FlagsView, FromDaemon, PhaseView, Reply, RepoSettings, Request,
-    RequestError, ScreenSnapshot, SessionView, Size,
+    RequestError, ScreenSnapshot, SessionView, Size, SubagentView,
 };
 use orch_tui::{DaemonLink, Effect, Event, PaneId, RequestId, Tui, TuiConfig};
 use ratatui::Terminal;
@@ -387,12 +387,24 @@ impl Harness {
         self.terminal.backend().buffer()[(column, y as u16)].clone()
     }
 
+    pub fn pane_lines(&mut self) -> Vec<String> {
+        self.lines()
+            .into_iter()
+            .map(|line| line.chars().skip(usize::from(PANE_LEFT)).collect())
+            .collect()
+    }
+
     pub fn line_with(&mut self, needle: &str) -> String {
         let lines = self.lines();
         lines
             .into_iter()
             .find(|line| line.contains(needle))
             .unwrap_or_else(|| panic!("no line contains {needle:?} in\n{}", self.screen()))
+    }
+
+    pub fn colour_at(&mut self, column: u16, row: u16) -> Color {
+        self.draw();
+        self.terminal.backend().buffer()[(column, row)].fg
     }
 
     pub fn colour_of(&mut self, needle: &str) -> Color {
@@ -425,6 +437,28 @@ impl Harness {
         }
         panic!("{needle:?} not on screen:\n{}", self.screen());
     }
+}
+
+pub fn sidebar_row_of(tui: &mut Harness, needle: &str) -> u16 {
+    let lines = tui.sidebar_lines();
+    lines
+        .iter()
+        .position(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} not in the sidebar:\n{}", lines.join("\n")))
+        as u16
+}
+
+pub fn click_row(tui: &mut Harness, needle: &str) {
+    let row = sidebar_row_of(tui, needle);
+    tui.click(5, row);
+}
+
+pub fn shown(tui: &mut Harness) -> Option<String> {
+    tui.daemon().last_view().and_then(|(session, _)| session)
+}
+
+pub fn in_sidebar(tui: &mut Harness, needle: &str) -> bool {
+    tui.sidebar_lines().iter().any(|line| line.contains(needle))
 }
 
 pub fn create_requests(tui: &mut Harness) -> Vec<CreateSession> {
@@ -468,6 +502,16 @@ pub fn session(repo: &str, slug: &str) -> SessionView {
         context_used_percent: None,
         cost_usd: None,
         subagents: Vec::new(),
+    }
+}
+
+pub fn subagent(id: &str, agent_type: &str, description: &str, done: bool) -> SubagentView {
+    SubagentView {
+        id: id.into(),
+        agent_type: agent_type.into(),
+        description: description.into(),
+        tool_count: 3,
+        done,
     }
 }
 

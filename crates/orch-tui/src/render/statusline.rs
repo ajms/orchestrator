@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::app::{App, Mode};
+use crate::app::{App, Focus, Mode};
 
 const BADGE_FROM: f64 = 80.0;
 const BADGE_RED_FROM: f64 = 95.0;
@@ -35,6 +35,14 @@ fn mode_line(app: &App) -> Line<'static> {
             "keys go to the Agent · Ctrl-\\ Ctrl-n → Normal · Ctrl-h → sidebar".into()
         }
         (Mode::Visual(_), None) => "h/j/k/l extend · y yank · Esc cancel".into(),
+        (Mode::Normal, None) if app.on_subagent() => match app.focus {
+            Focus::Sidebar => {
+                "Enter/l focus · J/K subagents · o full results · Esc/h back · i insert".into()
+            }
+            Focus::Pane => {
+                "j/k Ctrl-d/u gg/G scroll · o full results · Esc/h back · i insert".into()
+            }
+        },
         (Mode::Normal, None) => {
             "j/k select · i insert · za fold · Ctrl-w h/l focus · d review · : commands".into()
         }

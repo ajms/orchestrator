@@ -3,6 +3,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 
 pub const SIDEBAR_WIDTH: u16 = 40;
 const FILE_LIST_WIDTH: u16 = 40;
+const TRANSCRIPT_HEADER: u16 = 2;
 
 pub struct Areas {
     pub sidebar: Rect,
@@ -36,6 +37,14 @@ impl Areas {
         self.pane.inner(Margin::new(1, 1))
     }
 
+    pub fn transcript_header(&self) -> Rect {
+        transcript_split(self.pane_body())[0]
+    }
+
+    pub fn transcript_body(&self) -> Rect {
+        transcript_split(self.pane_body())[1]
+    }
+
     pub fn pane_inner(&self) -> Size {
         let body = self.pane_body();
         Size {
@@ -43,6 +52,10 @@ impl Areas {
             cols: body.width.max(1),
         }
     }
+}
+
+fn transcript_split(body: Rect) -> [Rect; 2] {
+    Layout::vertical([Constraint::Length(TRANSCRIPT_HEADER), Constraint::Min(0)]).areas(body)
 }
 
 pub struct Columns {

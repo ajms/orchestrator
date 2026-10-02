@@ -16,6 +16,7 @@ pub trait AgentAdapter {
     fn map_hook(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError>;
     fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError>;
     fn title_watch(&self) -> Option<Box<dyn TitleWatch>>;
+    fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>>;
     fn is_guard_payload(&self, payload: &str) -> bool;
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String>;
 }
@@ -31,11 +32,12 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | `map_hook` | Parses one hook payload, which `orch hook` forwards through the Holder, into normalized events. |
 | `map_tap` | Parses one statusline payload, which `orch tap` forwards, into `UsageSample`s. |
 | `title_watch` | A stateful `TitleWatch` that reports the Session title. The Daemon keeps one per Holder connection in its own task: it hands the watch every hook and statusline payload (`follow`, which only notes where to look) and calls `poll` right after each payload and about once a second, off the Daemon's state lock, so a title shows without waiting for the next hook. `poll` returns `TitleChanged` only when the title differs from the last one it reported. Claude follows `transcript_path`, reads the transcript incrementally and reports the last `custom-title` entry (`/rename`); the `session_title` field of SessionStart/UserPromptSubmit hooks only fills in while the transcript has no `custom-title` entry, and is forgotten when the transcript changes (a new Conversation). |
+| `subagent_transcripts` | A stateful `SubagentTranscripts` per Session that finds each Subagent's transcript file. The Daemon hands it every hook payload (`follow`) and asks it for a Subagent's file (`locate`) and for a `TranscriptReader` per subscribing Client. `read` returns the entries added since the last read, and `reset` when it started over because the file changed or shrank. Claude derives `<transcript dir>/<conversation>/subagents/agent-<id>.jsonl` from the `transcript_path` of the Subagent's first hook (so it survives a new Conversation) and switches to `agent_transcript_path` once `SubagentStop` names it. It drops thinking, and a tool call's key argument is the first of `command`, `file_path`, `notebook_path`, `pattern`, `url`, `query`, `skill`, `description`, `prompt` in its input. |
 | `is_guard_payload` / `guard_answer` | Marks the hook payloads that block until the Daemon answers a Guard, and renders the answer in the Agent's hook-output format. |
 
 ## Capabilities and graceful degrade
 
-`Capabilities { hooks, resume, usage, modes, guards, subagents, titles }` declares what the Agent can do. Sessions of an Agent that lacks a capability still work, with less information:
+`Capabilities { hooks, resume, usage, modes, guards, subagents, titles, transcripts }` declares what the Agent can do. Sessions of an Agent that lacks a capability still work, with less information:
 
 | Missing | Behaviour |
 |---|---|
@@ -46,6 +48,7 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | `guards` | The Daemon lets every blocking hook proceed without evaluating it (`Capabilities::guards_available`, which needs both hooks and guards, gates the Guard path). |
 | `subagents` | No `SubagentStarted`/`SubagentFinished`, so no nested Subagent rows. |
 | `titles` | `title_watch` returns `None` and no `TitleChanged` is reported, so the Session keeps showing its slug. |
+| `transcripts` | `subagent_transcripts` returns `None`, so subscribing to a Subagent is refused and there is no Subagent transcript (ADR 0004). |
 
 ## Normalized event vocabulary
 
@@ -61,6 +64,13 @@ The events come from `orch_core::AgentEvent`:
 - `SubagentStarted { id, agent_type, description }`, `SubagentFinished { id }`
 - `GuardCheck { tool, input_json, cwd }`, which the Daemon answers with allow, deny or ask
 
+A Subagent transcript is a list of `orch_core::TranscriptEntry`, which the Daemon streams to subscribed Clients as is:
+
+- `Prompt { text }`, what the Subagent was asked
+- `Text { text }`, what it said
+- `ToolCall { id, tool, argument }`, a tool it called and that call's key argument, if any
+- `ToolResult { id, text, error }`, the full result of the call with the same `id`, and whether it failed
+
 The mapping from these events to Agent states (Starting, Working, Needs input, Idle, Errored, Exited) is fixed in `orch-core` and is the same for every Agent.
 
 ## Checklist: adding an Agent (e.g. Codex CLI)
@@ -72,9 +82,10 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
    - write `launch`, and `resume` / `draft` if the Agent supports them;
    - write `map_hook` / `map_tap` into the vocabulary above, and map anything that doesn't fit to nothing rather than inventing events;
    - if the Agent lets the user name a Conversation, implement `title_watch`; keep file reads there, so `map_hook` / `map_tap` stay pure;
+   - if the Agent writes its Subagents' transcripts to files, implement `subagent_transcripts` into the entries above;
    - for Guards, implement `is_guard_payload` and `guard_answer` for the Agent's blocking-hook protocol.
 4. **Never write to the user's own Agent config.** Inject everything per launch through flags or env, as the Claude adapter does with `--settings`.
-5. **Test the mapping as pure functions** (Seam 3): fixture → events, and launch/resume argv for each Preset and capability combination. Test a `TitleWatch` through `follow` / `poll` against temporary transcript files. See `crates/orch-agent/tests/claude_*.rs`.
+5. **Test the mapping as pure functions** (Seam 3): fixture → events, and launch/resume argv for each Preset and capability combination. Test a `TitleWatch` through `follow` / `poll` and `SubagentTranscripts` through `follow` / `locate` / `read` against temporary transcript files. See `crates/orch-agent/tests/claude_*.rs`.
 6. **Register the adapter** in `crates/orch-daemon/src/agents.rs` (`adapter_for`) under its config name, so that `[defaults.agent] name = "<agent>"` (or a Repo's `[agent]`) selects it.
 7. **Run it end to end** with the scriptable fake Agent (`orch fake-agent`) through the Daemon tests, if the new adapter changes launch or event routing.
 8. **Update this document** and `CONTEXT.md` if the Agent brings a concept the glossary lacks.

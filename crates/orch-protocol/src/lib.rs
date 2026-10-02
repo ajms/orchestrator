@@ -11,8 +11,9 @@ pub use client::{
 pub use message::{
     CommitView, CreateSession, DisplayVars, FromDaemon, GuardChoice, Landing, LandingMode,
     OpenPane, PROTOCOL_VERSION, Reply, RepoSettings, RepoUsage, Request, RequestError,
-    StaleOverrides, ToDaemon, TrustNeeded, UsageReport, UsageTotalsView,
+    StaleOverrides, SubagentTranscript, ToDaemon, TrustNeeded, UsageReport, UsageTotalsView,
 };
+pub use orch_core::TranscriptEntry;
 pub use orch_holder::{ScreenSnapshot, Size};
 pub use reconcile::{Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, RepoReport};
 pub use view::{

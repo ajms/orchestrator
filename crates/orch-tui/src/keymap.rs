@@ -113,7 +113,7 @@ fn normal(app: &mut App, key: KeyEvent) {
     app.message = None;
     match app.prefix.take() {
         Some(Prefix::CtrlW) => return window(app, key),
-        Some(Prefix::G) if key.code == KeyCode::Char('g') => return scroll_to(app, usize::MAX),
+        Some(Prefix::G) if key.code == KeyCode::Char('g') => return scroll_to_start(app),
         Some(Prefix::Z) if key.code == KeyCode::Char('a') => return app.toggle_cursor_fold(),
         _ => {}
     }
@@ -125,22 +125,30 @@ fn normal(app: &mut App, key: KeyEvent) {
         }
     }
     let in_pane = app.focus == Focus::Pane;
-    let half_page = (app.pane_size().rows / 2).max(1) as isize;
+    let half_page = (app.scroll_height() / 2).max(1) as isize;
     match key.code {
         KeyCode::Char('c') if ctrl(key) => interrupt(app, key),
         KeyCode::Char('w') if ctrl(key) => app.prefix = Some(Prefix::CtrlW),
+        KeyCode::Esc | KeyCode::Char('h') if app.on_subagent() => {
+            app.leave_subagent();
+            app.focus = Focus::Sidebar;
+        }
+        KeyCode::Char('o') if app.on_subagent() => app.toggle_transcript_full(),
         KeyCode::Char('u') if ctrl(key) => scroll_by(app, half_page),
         KeyCode::Char('d') if ctrl(key) => scroll_by(app, -half_page),
         KeyCode::Char('j') | KeyCode::Down if in_pane => scroll_by(app, -1),
         KeyCode::Char('k') | KeyCode::Up if in_pane => scroll_by(app, 1),
         KeyCode::Char('j') | KeyCode::Down => app.select_offset(1),
         KeyCode::Char('k') | KeyCode::Up => app.select_offset(-1),
+        KeyCode::Char('J') => app.select_subagent_offset(1),
+        KeyCode::Char('K') => app.select_subagent_offset(-1),
         KeyCode::Enter if !in_pane && app.on_heading() => app.toggle_cursor_fold(),
+        KeyCode::Enter if !in_pane && app.on_subagents_done() => app.toggle_cursor_subagents_done(),
         KeyCode::Enter | KeyCode::Char('l') => app.focus = Focus::Pane,
         KeyCode::Char('h') | KeyCode::Char('-') => app.focus = Focus::Sidebar,
         KeyCode::Char('g') => app.prefix = Some(Prefix::G),
         KeyCode::Char('z') => app.prefix = Some(Prefix::Z),
-        KeyCode::Char('G') => scroll_to(app, 0),
+        KeyCode::Char('G') => scroll_to_end(app),
         KeyCode::Char('v') => start_visual(app, false),
         KeyCode::Char('V') => start_visual(app, true),
         KeyCode::Char('i') | KeyCode::Char('a') => enter_insert(app),
@@ -155,7 +163,7 @@ fn interrupt(app: &mut App, key: KeyEvent) {
     let live = app
         .selected_view()
         .is_some_and(|view| view.phase.is_live() && !agent_ended(view));
-    if live && app.shown_pane().is_some() {
+    if live && app.selected_pane().is_some() {
         send_key(app, key);
     }
 }
@@ -182,14 +190,29 @@ fn command_line(app: &mut App, key: KeyEvent) {
 }
 
 fn scroll_by(app: &mut App, lines: isize) {
+    if app.on_subagent() {
+        return app.scroll_transcript_up(lines);
+    }
     if let Some(pane) = &mut app.pane {
         pane.scroll_by(lines);
     }
 }
 
-fn scroll_to(app: &mut App, offset: usize) {
+fn scroll_to_start(app: &mut App) {
+    if app.on_subagent() {
+        return app.transcript_to_start();
+    }
     if let Some(pane) = &mut app.pane {
-        pane.set_scroll(offset);
+        pane.set_scroll(usize::MAX);
+    }
+}
+
+fn scroll_to_end(app: &mut App) {
+    if app.on_subagent() {
+        return app.transcript_follow();
+    }
+    if let Some(pane) = &mut app.pane {
+        pane.set_scroll(0);
     }
 }
 
@@ -204,6 +227,9 @@ fn window(app: &mut App, key: KeyEvent) {
 }
 
 fn start_visual(app: &mut App, linewise: bool) {
+    if app.on_subagent() {
+        return;
+    }
     let Some(pane) = &app.pane else {
         return;
     };
@@ -262,6 +288,7 @@ fn selected_text(
 }
 
 fn enter_insert(app: &mut App) {
+    app.leave_subagent();
     let Some(view) = app.selected_view() else {
         return;
     };
@@ -273,7 +300,7 @@ fn enter_insert(app: &mut App) {
         app.message = Some(format!("no live Agent while {}", phase_label(view.phase)));
         return;
     }
-    scroll_to(app, 0);
+    scroll_to_end(app);
     app.focus = Focus::Pane;
     app.mode = Mode::Insert;
 }

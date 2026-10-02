@@ -27,6 +27,7 @@ mod sessions;
 mod sidebar;
 mod socket;
 mod text_input;
+mod transcript;
 
 pub use config::TuiConfig;
 pub use event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};

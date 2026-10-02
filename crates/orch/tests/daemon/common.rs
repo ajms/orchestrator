@@ -9,7 +9,7 @@ use orch_core::SessionId;
 use orch_git::ENV_REDIRECTING_GIT;
 use orch_protocol::{
     Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport, Reply, Request,
-    RequestError, SessionView, Size, daemon_socket, open_control,
+    RequestError, SessionView, Size, SubagentTranscript, daemon_socket, open_control,
 };
 use tempfile::TempDir;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
@@ -443,6 +443,7 @@ pub struct TestClient {
     pub focused: Vec<SessionId>,
     pub rate_limits: Vec<RateLimits>,
     pub copies: Vec<(SessionId, String)>,
+    pub transcripts: Vec<SubagentTranscript>,
     session_in_view: Option<SessionId>,
     focused_terminal: bool,
 }
@@ -460,6 +461,7 @@ impl From<Client> for TestClient {
             focused: Vec::new(),
             rate_limits: Vec::new(),
             copies: Vec::new(),
+            transcripts: Vec::new(),
             session_in_view: None,
             focused_terminal: false,
         }
@@ -559,6 +561,7 @@ impl TestClient {
             FromDaemon::Clipboard { session, text } => {
                 self.copies.push((session.clone(), text.clone()))
             }
+            FromDaemon::SubagentTranscript(transcript) => self.transcripts.push(transcript.clone()),
             _ => {}
         }
     }

@@ -261,6 +261,9 @@ impl Daemon {
                 live.status.observe(exit_observation(&exit), now)
             }
             HolderEvent::Hook { payload, guard } => {
+                if let Some(transcripts) = &mut live.transcripts {
+                    transcripts.follow(&payload);
+                }
                 let events = live.adapter.map_hook(&payload).unwrap_or_default();
                 let effects = observe(live, &events, now, &mut conversations, &mut usage);
                 if let Some(guard) = guard {

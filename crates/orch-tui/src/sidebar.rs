@@ -15,6 +15,32 @@ pub(crate) enum Stop {
     Session(SessionId),
     Heading(PathBuf),
     Preparing(PreparingId),
+    Subagent(SessionId, String),
+    SubagentsDone(SessionId),
+}
+
+impl Stop {
+    pub fn session(&self) -> Option<&SessionId> {
+        match self {
+            Stop::Session(session) | Stop::Subagent(session, _) | Stop::SubagentsDone(session) => {
+                Some(session)
+            }
+            Stop::Heading(_) | Stop::Preparing(_) => None,
+        }
+    }
+
+    pub fn outer(self) -> Stop {
+        match self {
+            Stop::Subagent(session, _) | Stop::SubagentsDone(session) => Stop::Session(session),
+            stop => stop,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SubagentRow {
+    Subagent(String),
+    Done,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,10 +75,11 @@ impl Row<'_> {
             Row::Blank | Row::MissingRepo(_) => None,
             Row::Preparing(preparing) => Some(Stop::Preparing(preparing.id)),
             Row::Heading { repo, .. } => Some(Stop::Heading(repo.to_path_buf())),
-            Row::Session(view)
-            | Row::Flags(view, _)
-            | Row::Subagent(view, _)
-            | Row::SubagentsDone(view, _) => Some(Stop::Session(view.id.clone())),
+            Row::Session(view) | Row::Flags(view, _) => Some(Stop::Session(view.id.clone())),
+            Row::Subagent(view, subagent) => {
+                Some(Stop::Subagent(view.id.clone(), subagent.id.clone()))
+            }
+            Row::SubagentsDone(view, _) => Some(Stop::SubagentsDone(view.id.clone())),
         }
     }
 }
@@ -109,9 +136,11 @@ impl Viewport {
 #[derive(Default)]
 pub(crate) struct SidebarView {
     folded: HashSet<PathBuf>,
+    expanded: HashSet<SessionId>,
     scroll: usize,
     pub heading: Option<PathBuf>,
     pub preparing_row: Option<PreparingId>,
+    pub subagent_row: Option<SubagentRow>,
     pub revealed: Option<Stop>,
 }
 
@@ -126,6 +155,30 @@ impl SidebarView {
 
     pub fn unfold(&mut self, repo: &Path) {
         self.folded.remove(repo);
+    }
+
+    pub fn is_expanded(&self, session: &SessionId) -> bool {
+        self.expanded.contains(session)
+    }
+
+    pub fn expand(&mut self, session: &SessionId) {
+        self.expanded.insert(session.clone());
+    }
+
+    pub fn toggle_expanded(&mut self, session: &SessionId) {
+        if !self.expanded.remove(session) {
+            self.expand(session);
+        }
+    }
+
+    pub fn subagent_stops(&self, view: &SessionView) -> Vec<Stop> {
+        let mut stops = vec![Stop::Session(view.id.clone())];
+        stops.extend(
+            subagent_rows(view, self.is_expanded(&view.id))
+                .iter()
+                .filter_map(Row::stop),
+        );
+        stops
     }
 
     pub fn offset(&self, viewport: Viewport) -> usize {
@@ -196,7 +249,10 @@ impl SidebarView {
                 folded,
             });
             if unfolded {
-                rows.extend(views.into_iter().flat_map(|view| session_rows(view, width)));
+                rows.extend(views.into_iter().flat_map(|view| {
+                    let expanded = self.is_expanded(&view.id);
+                    session_rows(view, width, expanded)
+                }));
                 rows.extend(
                     preparing
                         .iter()
@@ -238,13 +294,19 @@ fn urgency(views: &[&SessionView]) -> Option<Urgency> {
         .then_some(Urgency::Unseen)
 }
 
-fn session_rows(view: &SessionView, width: usize) -> Vec<Row<'_>> {
+fn session_rows(view: &SessionView, width: usize, expanded: bool) -> Vec<Row<'_>> {
     let mut rows = vec![Row::Session(view)];
     rows.extend(
         wrap(flags(view), width)
             .into_iter()
             .map(|flags| Row::Flags(view, flags)),
     );
+    rows.extend(subagent_rows(view, expanded));
+    rows
+}
+
+fn subagent_rows(view: &SessionView, expanded: bool) -> Vec<Row<'_>> {
+    let mut rows = Vec::new();
     rows.extend(
         view.subagents
             .iter()
@@ -258,6 +320,14 @@ fn session_rows(view: &SessionView, width: usize) -> Vec<Row<'_>> {
         .count();
     if done > 0 {
         rows.push(Row::SubagentsDone(view, done));
+    }
+    if expanded {
+        rows.extend(
+            view.subagents
+                .iter()
+                .filter(|subagent| subagent.done)
+                .map(|subagent| Row::Subagent(view, subagent)),
+        );
     }
     rows
 }

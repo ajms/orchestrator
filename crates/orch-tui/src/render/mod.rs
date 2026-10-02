@@ -24,7 +24,7 @@ pub(crate) fn draw(app: &App, frame: &mut Frame) {
         (None, Some(open)) => review::draw(open, frame, main),
         (None, None) => {
             sidebar::draw(app, frame, areas.sidebar);
-            pane::draw(app, frame, areas.pane);
+            pane::draw(app, frame, &areas);
         }
     }
     statusline::draw(app, frame, areas.statusline);

@@ -1,31 +1,9 @@
 use crossterm::event::{KeyCode, MouseEventKind};
-use orch_protocol::{AgentStateView, FromDaemon, PhaseView, Request, SubagentView};
+use orch_protocol::{AgentStateView, FromDaemon, PhaseView, Request};
 use orch_tui::Event;
 use ratatui::style::Color;
 
 use crate::common::*;
-
-fn row_of(tui: &mut Harness, needle: &str) -> u16 {
-    let lines = tui.sidebar_lines();
-    lines
-        .iter()
-        .position(|line| line.contains(needle))
-        .unwrap_or_else(|| panic!("{needle:?} not in the sidebar:\n{}", lines.join("\n")))
-        as u16
-}
-
-fn click_row(tui: &mut Harness, needle: &str) {
-    let row = row_of(tui, needle);
-    tui.click(5, row);
-}
-
-fn shown(tui: &mut Harness) -> Option<String> {
-    tui.daemon().last_view().and_then(|(session, _)| session)
-}
-
-fn in_sidebar(tui: &mut Harness, needle: &str) -> bool {
-    tui.sidebar_lines().iter().any(|line| line.contains(needle))
-}
 
 fn two_repos() -> Harness {
     let mut tui = Harness::new();
@@ -55,24 +33,6 @@ fn clicking_a_session_row_shows_that_session() {
     assert_eq!(tui.daemon().open_panes(), vec!["first", "third"]);
     assert_eq!(shown(&mut tui).as_deref(), Some("third"));
     assert_ne!(tui.sidebar_background_of("third"), Color::Reset);
-}
-
-#[test]
-fn clicking_a_subagent_row_shows_its_parent_session() {
-    let mut parent = with_agent(session("webshop", "parent"), AgentStateView::Working);
-    parent.subagents = vec![SubagentView {
-        id: "a".into(),
-        agent_type: "Explore".into(),
-        description: "find callers".into(),
-        tool_count: 7,
-        done: false,
-    }];
-    let mut tui = Harness::new();
-    tui.sessions(vec![session("webshop", "sibling"), parent]);
-
-    click_row(&mut tui, "find callers");
-
-    assert_eq!(shown(&mut tui).as_deref(), Some("parent"));
 }
 
 #[test]

@@ -7,7 +7,7 @@ use orch_core::SessionId;
 use orch_protocol::{
     AgentStateView, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt, LandingMode,
     LeftoverView, PhaseView, ReconcileReport, Reply, Request, RequestError, SessionView, Size,
-    UsageReport,
+    SubagentView, UsageReport,
 };
 
 use crate::clipboard::copy_effects;
@@ -28,7 +28,8 @@ use crate::repo_picker::KnownRepo;
 use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
-use crate::sidebar::{Row, SidebarView, Stop, Viewport};
+use crate::sidebar::{Row, SidebarView, Stop, SubagentRow, Viewport};
+use crate::transcript::Transcript;
 
 pub(crate) const NO_SESSION: &str = "no Session selected";
 
@@ -202,6 +203,7 @@ pub(crate) struct App {
     pub links: Hyperlinks,
     pub sidebar: SidebarView,
     pub preparing: Vec<Preparing>,
+    pub transcript: Option<Transcript>,
     next_preparing: u64,
     pub clock: Box<dyn Fn() -> Instant>,
     size: Size,
@@ -239,6 +241,7 @@ impl App {
             links: Hyperlinks::default(),
             sidebar: SidebarView::default(),
             preparing: Vec::new(),
+            transcript: None,
             next_preparing: 0,
             clock: Box::new(Instant::now),
             size,
@@ -309,6 +312,15 @@ impl App {
             FromDaemon::Clipboard { session, text } => {
                 if self.selected.as_ref() == Some(&session) {
                     self.copy(&text);
+                }
+            }
+            FromDaemon::SubagentTranscript(update) => {
+                if let Some(transcript) = self
+                    .transcript
+                    .as_mut()
+                    .filter(|transcript| transcript.is_of(&update.session, &update.subagent))
+                {
+                    transcript.receive(update.entries, update.replace);
                 }
             }
             FromDaemon::Response { id, result } => {
@@ -573,7 +585,7 @@ impl App {
     }
 
     fn step_off(&mut self, removed: Stop, before: &[Stop]) {
-        if self.cursor() != Some(removed.clone()) {
+        if self.cursor().map(Stop::outer) != Some(removed.clone()) {
             return;
         }
         let at = before.iter().position(|stop| *stop == removed).unwrap_or(0);
@@ -646,6 +658,10 @@ impl App {
     }
 
     pub fn shown_pane(&self) -> Option<&PaneMirror> {
+        self.selected_pane().filter(|_| !self.on_subagent())
+    }
+
+    pub fn selected_pane(&self) -> Option<&PaneMirror> {
         self.pane
             .as_ref()
             .filter(|pane| self.selected.as_ref() == Some(&pane.session) && pane.closed.is_none())
@@ -691,10 +707,42 @@ impl App {
 
     pub fn select_offset(&mut self, offset: isize) {
         let stops = self.sidebar.stops(&self.sessions, &self.preparing);
-        let Some(at) = self
-            .cursor()
-            .and_then(|cursor| stops.iter().position(|stop| *stop == cursor))
+        let Some(cursor) = self.cursor() else {
+            return;
+        };
+        let outer = cursor.clone().outer();
+        let nested = outer != cursor;
+        let Some(at) = stops.iter().position(|stop| *stop == outer) else {
+            return;
+        };
+        let next = match nested && offset < 0 {
+            true => Some(outer),
+            false => {
+                let next = at
+                    .saturating_add_signed(offset)
+                    .min(stops.len().saturating_sub(1));
+                (next != at).then(|| stops[next].clone())
+            }
+        };
+        if let Some(next) = next {
+            self.set_cursor(next);
+            self.reveal_guards();
+        }
+        self.follow_selection();
+    }
+
+    pub fn select_subagent_offset(&mut self, offset: isize) {
+        let Some(cursor) = self.cursor() else {
+            return;
+        };
+        let Some(view) = cursor
+            .session()
+            .and_then(|session| self.sessions.get(session))
         else {
+            return;
+        };
+        let stops = self.sidebar.subagent_stops(view);
+        let Some(at) = stops.iter().position(|stop| *stop == cursor) else {
             return;
         };
         let next = at
@@ -702,14 +750,56 @@ impl App {
             .min(stops.len().saturating_sub(1));
         if next != at {
             self.set_cursor(stops[next].clone());
-            self.reveal_guards();
         }
         self.follow_selection();
     }
 
-    pub fn show_session(&mut self, session: SessionId) {
-        if self.selected.as_ref() != Some(&session) {
+    pub fn show_subagent(&mut self, stop: Stop) {
+        self.set_cursor(stop);
+        self.follow_selection();
+    }
+
+    pub fn expand_subagents_done(&mut self, session: SessionId) {
+        self.sidebar.expand(&session);
+        self.set_cursor(Stop::SubagentsDone(session));
+        self.follow_selection();
+    }
+
+    pub fn toggle_cursor_subagents_done(&mut self) {
+        if let Some(Stop::SubagentsDone(session)) = self.cursor() {
+            self.sidebar.toggle_expanded(&session);
+            self.follow_selection();
+        }
+    }
+
+    pub fn on_subagent(&self) -> bool {
+        matches!(self.sidebar.subagent_row, Some(SubagentRow::Subagent(_)))
+    }
+
+    pub fn on_subagents_done(&self) -> bool {
+        self.sidebar.subagent_row == Some(SubagentRow::Done)
+    }
+
+    pub fn cursor_subagent(&self) -> Option<(&SessionView, &SubagentView)> {
+        let Some(SubagentRow::Subagent(id)) = &self.sidebar.subagent_row else {
+            return None;
+        };
+        let view = self.selected_view()?;
+        let subagent = view.subagents.iter().find(|subagent| &subagent.id == id)?;
+        Some((view, subagent))
+    }
+
+    pub fn leave_subagent(&mut self) {
+        if let Some(session) = self.selected.clone().filter(|_| self.on_subagent()) {
             self.set_cursor(Stop::Session(session));
+            self.follow_selection();
+        }
+    }
+
+    pub fn show_session(&mut self, session: SessionId) {
+        let stop = Stop::Session(session);
+        if self.cursor() != Some(stop.clone()) {
+            self.set_cursor(stop);
             self.reveal_guards();
         }
         self.follow_selection();
@@ -722,7 +812,12 @@ impl App {
         if let Some(preparing) = self.sidebar.preparing_row {
             return Some(Stop::Preparing(preparing));
         }
-        self.selected.clone().map(Stop::Session)
+        let session = self.selected.clone()?;
+        Some(match &self.sidebar.subagent_row {
+            None => Stop::Session(session),
+            Some(SubagentRow::Subagent(id)) => Stop::Subagent(session, id.clone()),
+            Some(SubagentRow::Done) => Stop::SubagentsDone(session),
+        })
     }
 
     pub fn cursor_preparing(&self) -> Option<&Preparing> {
@@ -778,9 +873,18 @@ impl App {
     fn set_cursor(&mut self, stop: Stop) {
         self.sidebar.heading = None;
         self.sidebar.preparing_row = None;
+        self.sidebar.subagent_row = None;
         self.selected = None;
         match stop {
             Stop::Session(session) => self.selected = Some(session),
+            Stop::Subagent(session, id) => {
+                self.selected = Some(session);
+                self.sidebar.subagent_row = Some(SubagentRow::Subagent(id));
+            }
+            Stop::SubagentsDone(session) => {
+                self.selected = Some(session);
+                self.sidebar.subagent_row = Some(SubagentRow::Done);
+            }
             Stop::Heading(repo) => self.sidebar.heading = Some(repo),
             Stop::Preparing(preparing) => self.sidebar.preparing_row = Some(preparing),
         }
@@ -855,10 +959,10 @@ impl App {
     fn cursor_repo(&self) -> Option<PathBuf> {
         match self.cursor()? {
             Stop::Heading(repo) => Some(repo),
-            Stop::Session(_) => self.selected_view().map(|view| view.repo.clone()),
             Stop::Preparing(_) => self
                 .cursor_preparing()
                 .map(|preparing| preparing.create.repo.clone()),
+            _ => self.selected_view().map(|view| view.repo.clone()),
         }
     }
 
@@ -870,15 +974,35 @@ impl App {
         if let Some(repo) = repo {
             self.sidebar.unfold(&repo);
         }
-        let stops = self.sidebar.stops(&self.sessions, &self.preparing);
-        if self.cursor().is_some_and(|cursor| stops.contains(&cursor)) {
-            return;
+        if let Some((view, subagent)) = self.cursor_subagent()
+            && subagent.done
+        {
+            let session = view.id.clone();
+            self.sidebar.expand(&session);
         }
+        let stops = self.sidebar.stops(&self.sessions, &self.preparing);
+        let Some(cursor) = self.cursor() else {
+            return self.settle_on_first(stops);
+        };
+        if !stops.contains(&cursor.clone().outer()) {
+            return self.settle_on_first(stops);
+        }
+        if let Some(view) = cursor
+            .session()
+            .and_then(|session| self.sessions.get(session))
+            && !self.sidebar.subagent_stops(view).contains(&cursor)
+        {
+            self.set_cursor(cursor.outer());
+        }
+    }
+
+    fn settle_on_first(&mut self, stops: Vec<Stop>) {
         match stops.into_iter().next() {
             Some(first) => self.set_cursor(first),
             None => {
                 self.selected = None;
                 self.sidebar.heading = None;
+                self.sidebar.subagent_row = None;
             }
         }
     }
@@ -1251,6 +1375,7 @@ impl App {
         }
         self.settle_cursor();
         self.sync_pane();
+        self.sync_transcript();
         self.report_view();
         self.reveal_cursor();
     }
@@ -1289,6 +1414,63 @@ impl App {
         {
             self.focus = Focus::Pane;
             self.mode = Mode::Insert;
+        }
+    }
+
+    fn sync_transcript(&mut self) {
+        let wanted = self
+            .cursor_subagent()
+            .map(|(view, subagent)| (view.id.clone(), subagent.id.clone()));
+        let current = self
+            .transcript
+            .as_ref()
+            .map(|transcript| (transcript.session.clone(), transcript.subagent.clone()));
+        if wanted == current {
+            return;
+        }
+        self.transcript = None;
+        match wanted {
+            Some((session, subagent)) => {
+                self.report(Request::SubscribeSubagent {
+                    session: session.clone(),
+                    subagent: subagent.clone(),
+                });
+                self.transcript = Some(Transcript::new(session, subagent));
+            }
+            None => self.report(Request::UnsubscribeSubagent),
+        }
+    }
+
+    pub fn toggle_transcript_full(&mut self) {
+        if let Some(transcript) = &mut self.transcript {
+            transcript.toggle_full();
+        }
+    }
+
+    pub fn scroll_height(&self) -> u16 {
+        match self.on_subagent() {
+            true => self.areas().transcript_body().height,
+            false => self.pane_size().rows,
+        }
+    }
+
+    pub fn scroll_transcript_up(&mut self, lines: isize) {
+        let body = self.areas().transcript_body();
+        if let Some(transcript) = &mut self.transcript {
+            let rows = transcript.rows(body.width).len();
+            transcript.scroll_up(lines, rows, usize::from(body.height));
+        }
+    }
+
+    pub fn transcript_to_start(&mut self) {
+        if let Some(transcript) = &mut self.transcript {
+            transcript.scroll_to_start();
+        }
+    }
+
+    pub fn transcript_follow(&mut self) {
+        if let Some(transcript) = &mut self.transcript {
+            transcript.follow();
         }
     }
 

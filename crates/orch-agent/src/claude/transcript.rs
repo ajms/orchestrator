@@ -1,11 +1,10 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use orch_core::AgentEvent;
 use serde::Deserialize;
 
 use super::hooks::HookEvent;
+use super::lines::FollowedLines;
 use crate::TitleWatch;
 
 const CUSTOM_TITLE: &str = "custom-title";
@@ -64,8 +63,7 @@ impl TitleWatch for TranscriptTitles {
 
 #[derive(Debug, Default)]
 struct TitleReader {
-    path: PathBuf,
-    offset: u64,
+    lines: FollowedLines,
     title: Option<String>,
 }
 
@@ -79,24 +77,12 @@ struct TranscriptLine {
 
 impl TitleReader {
     fn latest(&mut self, path: &Path) -> Option<String> {
-        let mut file = File::open(path).ok()?;
-        let len = file.metadata().ok()?.len();
-        if self.path != path || len < self.offset {
-            *self = Self {
-                path: path.to_path_buf(),
-                ..Self::default()
-            };
+        let read = self.lines.read(path)?;
+        if read.reset {
+            self.title = None;
         }
-        file.seek(SeekFrom::Start(self.offset)).ok()?;
-        let mut reader = BufReader::new(file);
-        let mut line = Vec::new();
-        while matches!(reader.read_until(b'\n', &mut line), Ok(read) if read > 0 && line.ends_with(b"\n"))
-        {
-            self.offset += line.len() as u64;
-            if let Some(title) = custom_title(&line) {
-                self.title = Some(title);
-            }
-            line.clear();
+        if let Some(title) = read.lines.iter().rev().find_map(|line| custom_title(line)) {
+            self.title = Some(title);
         }
         self.title.clone()
     }

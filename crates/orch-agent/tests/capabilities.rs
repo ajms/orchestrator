@@ -41,6 +41,7 @@ fn claude_declares_every_capability() {
             guards: true,
             subagents: true,
             titles: true,
+            transcripts: true,
         }
     );
 }
@@ -111,4 +112,5 @@ fn an_agent_without_hooks_or_usage_maps_nothing() {
     assert_eq!(Bare.map_hook(r#"{"hook_event_name":"Stop"}"#), Ok(vec![]));
     assert_eq!(Bare.map_tap("{}"), Ok(vec![]));
     assert!(Bare.title_watch().is_none());
+    assert!(Bare.subagent_transcripts().is_none());
 }

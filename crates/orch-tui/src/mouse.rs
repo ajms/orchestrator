@@ -81,6 +81,13 @@ fn region_at(app: &App, column: u16, row: u16) -> Region {
 }
 
 fn pane(app: &mut App, event: MouseEvent) {
+    if app.on_subagent() {
+        return match event.kind {
+            MouseEventKind::ScrollUp => app.scroll_transcript_up(WHEEL_LINES),
+            MouseEventKind::ScrollDown => app.scroll_transcript_up(-WHEEL_LINES),
+            _ => {}
+        };
+    }
     let point = clamped(app.areas().pane_body(), event);
     let requested = app
         .shown_pane()
@@ -222,9 +229,12 @@ fn sidebar_click(app: &mut App, row: u16) {
         Some(Stop::Heading(repo)) => app.toggle_fold(&repo),
         Some(Stop::Session(session)) => app.show_session(session),
         Some(Stop::Preparing(preparing)) => app.show_preparing(preparing),
+        Some(Stop::SubagentsDone(session)) => app.expand_subagents_done(session),
+        Some(stop @ Stop::Subagent(..)) => app.show_subagent(stop),
         None => {}
     }
-    let stay_inserting = app.inserting() && app.selected_view().is_some_and(agent_running);
+    let stay_inserting =
+        app.inserting() && !app.on_subagent() && app.selected_view().is_some_and(agent_running);
     if app.inserting() && !stay_inserting {
         app.mode = Mode::Normal;
     }

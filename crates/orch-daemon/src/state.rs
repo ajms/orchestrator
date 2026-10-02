@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use orch_agent::{GuardHit, GuardKind, mode_name};
+use orch_agent::{GuardHit, GuardKind, SubagentTranscripts, mode_name};
 use orch_core::{AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus};
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
@@ -23,6 +23,7 @@ use crate::outbox::Outbox;
 use crate::rate_limits::RateLimits;
 use crate::recency::{LastUsed, UseClock};
 use crate::store::StoreHandle;
+use crate::transcript::Following;
 
 const IDLE_CHECK: Duration = Duration::from_millis(100);
 const STALL_CHECK: Duration = Duration::from_secs(1);
@@ -67,6 +68,7 @@ struct ClientLink {
     focused: bool,
     last_used: LastUsed,
     peer: Option<i32>,
+    following: Option<Following>,
 }
 
 impl ClientLink {
@@ -93,6 +95,7 @@ pub(crate) struct Live {
     pub(crate) recheck: Recheck,
     pub(crate) launching: bool,
     pub(crate) repo_missing: bool,
+    pub(crate) transcripts: Option<Box<dyn SubagentTranscripts>>,
     end_noticed: bool,
     holder: Option<HolderLink>,
     generation: u64,
@@ -182,8 +185,13 @@ impl PaneSizes {
 
 impl Live {
     pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Adapter) -> Self {
-        let mut status = adapter.capabilities().session_status();
+        let capabilities = adapter.capabilities();
+        let mut status = capabilities.session_status();
         status.restore(record.phase, record.flags.clone());
+        let transcripts = capabilities
+            .transcripts
+            .then(|| adapter.subagent_transcripts())
+            .flatten();
         Self {
             record,
             repo,
@@ -198,6 +206,7 @@ impl Live {
             recheck: Recheck::default(),
             launching: false,
             repo_missing: false,
+            transcripts,
             end_noticed: false,
             holder: None,
             generation: 0,
@@ -599,6 +608,7 @@ impl State {
             focused: false,
             last_used: self.use_clock.stamp(),
             peer,
+            following: None,
         };
         let last_used = link.last_used.clone();
         self.notifier
@@ -627,6 +637,16 @@ impl State {
                 .client_view(client.view(id), client.outbox.clone());
         }
         self.refresh_watched();
+    }
+
+    pub(crate) fn client_outbox(&self, id: ClientId) -> Option<Arc<Outbox>> {
+        self.clients.get(&id).map(|client| client.outbox.clone())
+    }
+
+    pub(crate) fn follow(&mut self, id: ClientId, following: Option<Following>) {
+        if let Some(client) = self.clients.get_mut(&id) {
+            client.following = following;
+        }
     }
 
     pub(crate) fn client_using(&self, peer: Option<i32>, session: &SessionId) -> Option<LastUsed> {
