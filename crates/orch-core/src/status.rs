@@ -288,13 +288,16 @@ impl SessionStatus {
                 id,
                 agent_type,
                 description,
-            } => self.subagents.push(Subagent {
-                id: id.clone(),
-                agent_type: agent_type.clone(),
-                description: description.clone(),
-                tool_count: 0,
-                done: false,
-            }),
+            } => match self.subagent_mut(id) {
+                Some(resumed) => resumed.done = false,
+                None => self.subagents.push(Subagent {
+                    id: id.clone(),
+                    agent_type: agent_type.clone(),
+                    description: description.clone(),
+                    tool_count: 0,
+                    done: false,
+                }),
+            },
             AgentEvent::ToolStarted {
                 subagent: Some(id), ..
             } => {

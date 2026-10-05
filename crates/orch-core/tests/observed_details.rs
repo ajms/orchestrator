@@ -80,3 +80,26 @@ fn subagents_are_listed_with_their_tool_count_until_done() {
         ]
     );
 }
+
+#[test]
+fn a_resumed_subagent_runs_again_in_its_own_row() {
+    let mut status = working_session();
+    status.feed_event(subagent_started("a1"));
+    status.feed_event(tool_in("a1"));
+    status.feed_event(AgentEvent::SubagentFinished {
+        id: SubagentId("a1".into()),
+    });
+    status.feed_event(subagent_started("a1"));
+    status.feed_event(tool_in("a1"));
+
+    assert_eq!(
+        status.subagents(),
+        [Subagent {
+            id: SubagentId("a1".into()),
+            agent_type: "Explore".into(),
+            description: "map the code".into(),
+            tool_count: 2,
+            done: false,
+        }]
+    );
+}
