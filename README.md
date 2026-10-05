@@ -155,6 +155,27 @@ deny = ["Bash(rm *)"]
 
 Precedence is: personal override > Repo file > global defaults.
 
+Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml` unless noted):
+
+| Key | Meaning |
+| --- | --- |
+| `setup` | Setup script, run in each new Worktree before its Agent starts |
+| `teardown` | Teardown script, run in a Worktree just before it is removed |
+| `base` | Base branch for new Sessions; unset means origin's default branch, else the Repo's current branch |
+| `preset` | Default Preset for new Sessions (built-in default: `edits`) |
+| `review_command` | Command shown when reviewing a Session; not allowed in `.orchestrator.toml` |
+| `[agent]` | `name` (default `claude`), `binary`, `args` |
+| `[presets.<name>]` | `mode`, `allow`, `deny` |
+| `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
+
+**Setup and Teardown scripts** run with `sh -c` in the Worktree, with stdin closed. Setup output streams into the TUI; a non-zero exit puts the Session in *Setup failed*. Both scripts get these variables:
+
+| Variable | Value |
+| --- | --- |
+| `ORCH_SESSION` | The Session id |
+| `ORCH_WORKTREE` | Absolute path of the Worktree |
+| `ORCH_PORT_BASE` | First port of the Session's block (see `ports`), e.g. `PORT=$((ORCH_PORT_BASE + 1))` |
+
 **Trust:** scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
 
 State lives in `~/.local/state/orchestrator/state.db`. Runtime sockets live under `$XDG_RUNTIME_DIR/orchestrator`.
