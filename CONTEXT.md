@@ -74,12 +74,16 @@ A name the user gave the Session through its Agent (e.g. Claude Code's `/rename`
 _Avoid_: Session name, label, alias
 
 **Agent**:
-A coding-agent program (e.g. Claude Code) that the Orchestrator drives inside a Session.
+A coding-agent program (e.g. Claude Code or Antigravity) that the Orchestrator drives inside a Session. A Session's Agent is chosen when the Session is created, defaulting to its Repo's, and never changes.
 _Avoid_: Bot, assistant, model
 
 **Agent adapter**:
 What teaches the Orchestrator to launch, resume and observe one kind of Agent, and which capabilities that Agent has.
 _Avoid_: Driver, plugin, integration
+
+**Agent hookup**:
+The Orchestrator's hooks and statusline installed into an Agent's own global configuration, for Agents that cannot take them per Session; that Agent's Sessions cannot start without it.
+_Avoid_: Integration, setup, plugin
 
 **Conversation**:
 The Agent's own chat history within a Session; a Session can move through several (e.g. after the Agent's history is cleared), and only the latest is resumed.
@@ -122,7 +126,7 @@ A named level of Agent autonomy: a permission mode plus allow and deny rules, ch
 _Avoid_: Profile, policy, autonomy level
 
 **Guard**:
-An Orchestrator rule that stops an Agent from acting outside its Session (its Worktree and Branch) unless the user allows it.
+An Orchestrator rule that stops an Agent from acting outside its Session (its Worktree and Branch), or through tools that reach beyond it, unless the user allows it.
 _Avoid_: Sandbox, restriction, deny rule
 
 **Insert mode**:
