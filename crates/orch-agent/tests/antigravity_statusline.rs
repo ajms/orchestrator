@@ -55,11 +55,15 @@ fn mode(mode: PermissionMode) -> AgentEvent {
 }
 
 #[test]
-fn the_trust_screen_needs_input_before_any_conversation_mode_or_usage_exists() {
-    assert_eq!(
-        all_events("trust_screen"),
-        [AgentEvent::PermissionRequested]
-    );
+fn the_trust_screen_reports_neither_needs_input_nor_readiness_nor_usage() {
+    assert_eq!(all_events("trust_screen"), [AgentEvent::PermissionCleared]);
+}
+
+#[test]
+fn an_idle_line_before_agy_has_a_conversation_is_not_readiness() {
+    let line = r#"{"conversation_id":"","agent_state":"idle"}"#;
+    let events = Antigravity::default().map_tap(line).unwrap();
+    assert!(!events.contains(&AgentEvent::AwaitingPrompt), "{events:?}");
 }
 
 #[test]

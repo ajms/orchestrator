@@ -37,7 +37,9 @@ pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         .map(|mode| AgentEvent::ModeChanged { mode });
     let prompt = match line.tool_confirmation_pending {
         Some(true) => vec![AgentEvent::PermissionRequested],
-        _ if state == "idle" => vec![AgentEvent::PermissionCleared, AgentEvent::AwaitingPrompt],
+        _ if state == "idle" && conversation.is_some() => {
+            vec![AgentEvent::PermissionCleared, AgentEvent::AwaitingPrompt]
+        }
         _ => vec![AgentEvent::PermissionCleared],
     };
     Ok(conversation

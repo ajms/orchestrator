@@ -11,7 +11,7 @@ The domain vocabulary (Session, Repo, Worktree, Landing, Preset, Guard, Trust…
 - Linux (other platforms are out of scope)
 - git ≥ 2.40
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` on `PATH`), set up as you normally use it; `orch` uses your own `~/.claude` configuration. Since Antigravity support, Claude Sessions show a few visible changes: the statusline always shows Claude's 5h/7d usage windows, `mcp__*` tools raise the new ExternalTool Guard, and the stricter shell parsing may bring new Guard prompts
-- [Antigravity CLI](https://antigravity.google/) (`agy` on `PATH`), optional, for Antigravity Sessions. It can't take orch's hooks per launch, so install the **Agent hookup** once with `orch agent install antigravity` (see [Commands](#commands)); until then `orch` refuses to create Antigravity Sessions
+- [Antigravity CLI](https://antigravity.google/) (`agy` on `PATH`), optional, for Antigravity Sessions. It can't take orch's hooks per launch, so install the **Agent hookup** once with `orch agent install antigravity` (see [Commands](#commands)); until then `orch` refuses to create Antigravity Sessions. `orch` never pre-trusts a Worktree, so agy asks once per Worktree whether to trust it: answer that screen in the Session's pane. agy reports nothing while it waits there, so the Session shows Starting meanwhile, not Needs input
 - [`gh`](https://cli.github.com/), authenticated, for PR Landing and PR status
 - a freedesktop notification daemon for desktop notifications (optional)
 - Rust 1.88+ to build (development uses the version pinned in `rust-toolchain.toml`)

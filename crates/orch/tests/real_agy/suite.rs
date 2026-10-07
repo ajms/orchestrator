@@ -13,6 +13,7 @@ use crate::fixtures::{Recording, fully_idle_stop};
 use crate::osc;
 
 const READY: &str = "Reply with the single word ready and nothing else.";
+const TRUST_DWELL: Duration = Duration::from_secs(3);
 
 fn window(argv: &[String], pair: [&str; 2]) -> bool {
     argv.windows(2).any(|window| window == pair)
@@ -20,7 +21,7 @@ fn window(argv: &[String], pair: [&str; 2]) -> bool {
 
 #[tokio::test]
 #[ignore = "runs the real agy; set ORCH_REAL_AGY=1"]
-async fn each_fresh_worktree_needs_input_on_agys_trust_screen() {
+async fn each_fresh_worktree_shows_agys_trust_screen_while_the_session_is_starting() {
     let Some(agy) = RealAgy::new().await else {
         return;
     };
@@ -30,7 +31,18 @@ async fn each_fresh_worktree_needs_input_on_agys_trust_screen() {
 
     for first in [true, false] {
         let (id, mut pane) = agy.session(&mut client, &repo, "edits", READY).await;
-        answer_trust(&mut client, &id, &mut pane).await;
+        wait_for_trust_screen(&mut pane).await;
+        tokio::time::sleep(TRUST_DWELL).await;
+        settled(&mut client).await;
+        let trusting = &client.sessions[&id];
+        assert_eq!(trusting.agent, Some(State::Starting), "{}", pane.text());
+        let needed_input = client
+            .history
+            .iter()
+            .any(|view| view.id == id && view.agent == Some(State::NeedsInput));
+        assert!(!needed_input, "Needs input on the trust screen");
+
+        answer_trust(&mut pane).await;
         until_state(&mut client, &id, State::Idle, TURN).await;
         if first {
             agy.record(&client, &id, Recording::Trust);
@@ -58,7 +70,7 @@ async fn the_initial_prompt_reaches_orch_through_the_hookup_until_a_fully_idle_s
     let (id, mut pane) = agy.session(&mut client, &repo, "ask", &prompt).await;
     agy.agy_argv("-i and the prompt", |argv| window(argv, ["-i", &prompt]))
         .await;
-    answer_trust(&mut client, &id, &mut pane).await;
+    answer_trust(&mut pane).await;
     let denied = deny_guards_until_idle(&mut client, &id).await;
 
     assert_eq!(
@@ -87,7 +99,7 @@ async fn a_permission_prompt_needs_input_until_the_user_answers_it() {
     let prompt = "Run exactly this shell command with your run_command tool in the workspace root and nothing else: touch permission-granted";
 
     let (id, mut pane) = agy.session(&mut client, &repo, "edits", prompt).await;
-    answer_trust(&mut client, &id, &mut pane).await;
+    answer_trust(&mut pane).await;
     until_state(&mut client, &id, State::NeedsInput, TURN).await;
     let worktree = client.sessions[&id].worktree.clone();
     assert!(!worktree.join("permission-granted").exists());
@@ -109,7 +121,7 @@ async fn resume_reopens_the_conversation_in_the_mode_cycled_with_shift_tab() {
     let mut client = agy.env.client().await;
     let repo = agy.env.repo("app");
     let (id, mut pane) = agy.session(&mut client, &repo, "edits", READY).await;
-    answer_trust(&mut client, &id, &mut pane).await;
+    answer_trust(&mut pane).await;
     until_state(&mut client, &id, State::Idle, TURN).await;
     let conversation = agy.conversations(&client, &id).root;
 
@@ -161,7 +173,7 @@ async fn a_subagent_becomes_a_subagent_row_with_its_transcript() {
     let prompt = "Use your invoke_subagent tool to start exactly one subagent. Its task: reply with the single word pong and nothing else. Wait for its reply, then tell me what it said.";
 
     let (id, mut pane) = agy.session(&mut client, &repo, "edits", prompt).await;
-    answer_trust(&mut client, &id, &mut pane).await;
+    answer_trust(&mut pane).await;
     let finished = client
         .until_within(&id, "a finished Subagent row", TURN, |view| {
             view.subagents.iter().any(|row| row.done)
@@ -243,7 +255,7 @@ async fn a_draft_comes_from_a_fresh_headless_agy_over_the_base_diff() {
     let mut client = agy.env.client().await;
     let repo = agy.env.repo("app");
     let (id, mut pane) = agy.session(&mut client, &repo, "edits", READY).await;
-    answer_trust(&mut client, &id, &mut pane).await;
+    answer_trust(&mut pane).await;
     until_state(&mut client, &id, State::Idle, TURN).await;
     let conversation = agy.conversations(&client, &id).root;
     let transcript = agy.transcript(&conversation);
