@@ -36,7 +36,10 @@ struct Parser {
     current: SimpleCommand,
     word: Option<Word>,
     redirect: Option<Redirect>,
+    tilde: bool,
 }
+
+const SAFE: &str = "_./:=@%+,-";
 
 impl Parser {
     fn word(&mut self) -> &mut Word {
@@ -50,6 +53,14 @@ impl Parser {
         self.word().text.push(c);
     }
 
+    fn push_unquoted(&mut self, c: char) {
+        let starts = self.word.as_ref().is_none_or(|word| word.text.is_empty());
+        self.tilde |= starts && c == '~';
+        let word = self.word();
+        word.dynamic |= !(c.is_ascii_alphanumeric() || SAFE.contains(c) || c == '~');
+        word.text.push(c);
+    }
+
     fn push_dynamic(&mut self) {
         let word = self.word();
         word.text.push('$');
@@ -57,7 +68,11 @@ impl Parser {
     }
 
     fn end_word(&mut self) {
-        let Some(word) = self.word.take() else { return };
+        let tilde = std::mem::take(&mut self.tilde);
+        let Some(mut word) = self.word.take() else {
+            return;
+        };
+        word.dynamic |= tilde && word.text != "~" && !word.text.starts_with("~/");
         match self.redirect.take() {
             Some(Redirect::Write) => self.current.written.push(word),
             Some(Redirect::Ignore) => {}
@@ -109,7 +124,11 @@ impl Parser {
         while let Some(c) = chars.next() {
             match c {
                 '"' => break,
-                '\\' => self.escaped(chars),
+                '\\' if chars.peek() == Some(&'\n') => self.escaped(chars),
+                '\\' => {
+                    self.escaped(chars);
+                    self.word().dynamic = true;
+                }
                 '$' | '`' => self.expansion(c, chars),
                 c => self.push(c),
             }
@@ -239,7 +258,7 @@ pub(crate) fn parse(script: &str) -> Vec<SimpleCommand> {
             '<' => parser.start_redirect(Redirect::Ignore),
             ';' | '&' | '|' | '\n' | '(' | ')' => parser.end_command(),
             c if c.is_whitespace() => parser.end_word(),
-            c => parser.push(c),
+            c => parser.push_unquoted(c),
         }
     }
     parser.end_command();

@@ -161,6 +161,17 @@ fn an_unreadable_tool_call_forces_agy_to_ask_while_guards_are_on() {
     }
 }
 
+#[test]
+fn an_unreadable_tool_call_under_deny_rules_forces_agy_to_ask_even_with_guards_off() {
+    assert_eq!(
+        answered(guard_outcome(
+            GuardDecision::Allow,
+            Some(RuleVerdict::Unverifiable)
+        )),
+        json!({ "decision": "force_ask" })
+    );
+}
+
 fn reply(answer: &GuardAnswer) -> Value {
     serde_json::from_str(&Antigravity::default().guard_answer(answer).unwrap()).unwrap()
 }

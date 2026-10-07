@@ -61,6 +61,7 @@ pub fn guard_outcome(decision: GuardDecision, verdict: Option<RuleVerdict>) -> G
                 reason: format!("The Preset rule {rule} denies this (Orchestrator)."),
             });
         }
+        Some(RuleVerdict::Unverifiable) => return GuardOutcome::Answer(GuardAnswer::Ask),
         Some(RuleVerdict::Allow { .. }) => GuardAnswer::PresetAllow,
         None => GuardAnswer::Proceed,
     };
@@ -106,6 +107,19 @@ pub fn evaluate_guard(
     hits.into_iter()
         .find(|hit| !context.allowed.contains(hit))
         .map_or(GuardDecision::Allow, GuardDecision::Ask)
+}
+
+fn loses_directory(command: &SimpleCommand) -> bool {
+    let words = command.invocation();
+    let Some((program, args)) = words.split_first() else {
+        return false;
+    };
+    let operand = args.iter().find(|word| !word.text.starts_with('-'));
+    match program.text.as_str() {
+        "cd" | "pushd" => operand.is_none_or(|dir| dir.dynamic),
+        "popd" => true,
+        _ => false,
+    }
 }
 
 fn other_ref(target: &str) -> GuardHit {
@@ -178,16 +192,34 @@ impl<'a> GuardScope<'a> {
 
     fn bash(&self, cwd: &Path, script: &str) -> Vec<GuardHit> {
         let mut cwd = cwd.to_path_buf();
+        let mut cwds = vec![cwd.clone()];
+        let mut lost = false;
         let mut hits = Vec::new();
         for command in shell::parse(script) {
-            let written: Vec<&Word> = command.written.iter().collect();
-            hits.extend(self.written(&cwd, &written));
+            for target in &command.written {
+                hits.extend(self.redirect(&cwds, lost, target));
+            }
             for nested in &command.nested {
                 hits.extend(self.bash(&cwd, nested));
             }
             hits.extend(self.simple_command(&mut cwd, &command));
+            lost |= loses_directory(&command);
+            if !cwds.contains(&cwd) {
+                cwds.push(cwd.clone());
+            }
         }
         hits
+    }
+
+    fn redirect(&self, cwds: &[PathBuf], lost: bool, target: &Word) -> Option<GuardHit> {
+        let unknown = target.dynamic || lost && !Path::new(&target.text).is_absolute();
+        if unknown {
+            return Some(GuardHit {
+                kind: GuardKind::WriteOutsideWorktree,
+                target: target.text.clone(),
+            });
+        }
+        cwds.iter().find_map(|cwd| self.write(cwd, &target.text))
     }
 
     fn simple_command(&self, cwd: &mut PathBuf, command: &SimpleCommand) -> Vec<GuardHit> {
