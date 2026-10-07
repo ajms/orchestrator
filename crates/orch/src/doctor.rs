@@ -27,11 +27,8 @@ pub fn run(args: DoctorArgs) -> ExitCode {
     };
     let hookups = hookup_problems();
     match args.json {
-        true => match serde_json::to_string_pretty(&report) {
-            Ok(json) => {
-                println!("{json}");
-                hookups.iter().for_each(|problem| eprintln!("{problem}"));
-            }
+        true => match render_json(&report, &hookups) {
+            Ok(json) => println!("{json}"),
             Err(err) => return failed(err),
         },
         false => print!("{}", render(&report, &hookups)),
@@ -40,6 +37,14 @@ pub fn run(args: DoctorArgs) -> ExitCode {
         true => ExitCode::from(FINDINGS),
         false => ExitCode::SUCCESS,
     }
+}
+
+fn render_json(report: &ReconcileReport, hookups: &[String]) -> serde_json::Result<String> {
+    let mut json = serde_json::to_value(report)?;
+    if let Some(fields) = json.as_object_mut() {
+        fields.insert("hookups".into(), hookups.into());
+    }
+    serde_json::to_string_pretty(&json)
 }
 
 fn hookup_problems() -> Vec<String> {

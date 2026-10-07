@@ -47,6 +47,7 @@ impl Sandbox {
         let mut command = Command::new(env!("CARGO_BIN_EXE_orch"));
         command
             .env("HOME", self.path("home"))
+            .env("XDG_STATE_HOME", self.path("state"))
             .env("ORCH_RUNTIME_DIR", self.runtime_dir())
             .env(
                 "ORCH_CLAUDE_MANAGED_SETTINGS",

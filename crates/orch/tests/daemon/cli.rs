@@ -12,7 +12,7 @@ pub(crate) async fn run(mut command: Command) -> Output {
         .unwrap()
 }
 
-pub(crate) async fn orch_with_input(env: &Env, args: &[&str], input: &str) -> Output {
+pub(crate) async fn orch_with_input(env: &Env, args: &[&str], input: impl AsRef<[u8]>) -> Output {
     use std::io::Write;
     let mut command = env.orch();
     command
@@ -20,15 +20,10 @@ pub(crate) async fn orch_with_input(env: &Env, args: &[&str], input: &str) -> Ou
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    let input = input.to_string();
+    let input = input.as_ref().to_vec();
     let running = tokio::task::spawn_blocking(move || {
         let mut child = command.spawn().unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(input.as_bytes())
-            .unwrap();
+        child.stdin.take().unwrap().write_all(&input).unwrap();
         child.wait_with_output().unwrap()
     });
     tokio::time::timeout(WAIT, running)

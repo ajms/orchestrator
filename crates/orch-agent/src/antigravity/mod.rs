@@ -51,6 +51,14 @@ impl AgentAdapter for Antigravity {
         Some(answer.to_string())
     }
 
+    fn fallback_hook_reply(&self) -> Option<String> {
+        Some(json!({ "decision": "ask" }).to_string())
+    }
+
+    fn fallback_statusline(&self, _payload: &str) -> String {
+        String::new()
+    }
+
     fn hookup(&self) -> Option<Box<dyn AgentHookup>> {
         Some(Box::new(AntigravityHookup))
     }
