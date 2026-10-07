@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use orch_agent::{
     Adapter, Capabilities, ConversationTree, GuardAnswer, GuardHit, GuardKind, PayloadError,
-    Preset, RuleVerdict, SubagentTranscripts, TitleWatch, mode_name,
+    Preset, RuleScope, RuleVerdict, SubagentTranscripts, TitleWatch, mode_name,
 };
 use orch_core::{
     AgentEvent, AgentState, Effect, GateRefusal, GuardedAction, Observation, Phase, PhaseEvent,
@@ -153,11 +153,14 @@ pub(crate) struct HolderLink {
     pub(crate) closed: watch::Receiver<bool>,
 }
 
+#[derive(Debug)]
+pub(crate) struct RulesUnavailable;
+
 pub(crate) struct PendingGuard {
     pub(crate) id: u64,
     pub(crate) tool: String,
     pub(crate) hit: GuardHit,
-    pub(crate) allowed: GuardAnswer,
+    pub(crate) on_allow: GuardAnswer,
 }
 
 #[derive(Default)]
@@ -250,13 +253,22 @@ impl Live {
         &self,
         action: &GuardedAction,
         cwd: Option<&Path>,
-    ) -> Option<RuleVerdict> {
-        self.adapter.as_ref()?.rule_verdict(
-            self.preset.as_ref()?,
-            action,
+    ) -> Result<Option<RuleVerdict>, RulesUnavailable> {
+        let Some(adapter) = self.adapter.as_ref() else {
+            return Ok(None);
+        };
+        let Some(preset) = self.preset.as_ref() else {
+            return match adapter.enforces_rules() {
+                true => Err(RulesUnavailable),
+                false => Ok(None),
+            };
+        };
+        let scope = RuleScope {
             cwd,
-            &self.record.worktree,
-        )
+            worktree: &self.record.worktree,
+            lookup: &orch_config::xdg::process_env,
+        };
+        Ok(adapter.rule_verdict(preset, action, &scope))
     }
 
     pub(crate) fn hook_events(&mut self, payload: &str) -> Vec<AgentEvent> {

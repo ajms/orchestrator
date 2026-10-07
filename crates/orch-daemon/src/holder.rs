@@ -355,10 +355,10 @@ impl Daemon {
                 .ok_or("no such Guard prompt is pending")?;
             let pending = live.prompts.remove(at);
             let answer = match choice {
-                GuardChoice::AllowOnce => pending.allowed,
+                GuardChoice::AllowOnce => pending.on_allow,
                 GuardChoice::AllowForSession => {
                     live.record.guard_allowances.push(pending.hit);
-                    pending.allowed
+                    pending.on_allow
                 }
                 GuardChoice::Deny => GuardAnswer::Deny {
                     reason: DENIED_BY_USER.into(),
@@ -424,17 +424,20 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
             agent_dirs: &agent_dirs,
         };
         let decision = evaluate_guard(check.action, check.cwd, &context);
-        let verdict = live.rule_verdict(check.action, check.cwd);
-        (check.tool.to_owned(), guard_outcome(decision, verdict))
+        let outcome = match live.rule_verdict(check.action, check.cwd) {
+            Ok(verdict) => guard_outcome(decision, verdict),
+            Err(_) => GuardOutcome::Answer(GuardAnswer::Ask),
+        };
+        (check.tool.to_owned(), outcome)
     });
     match outcome {
-        Some((tool, GuardOutcome::Prompt { hit, allowed })) => {
+        Some((tool, GuardOutcome::Prompt { hit, on_allow })) => {
             live.send_to_holder(ToHolder::GuardHeld { id: guard });
             live.prompts.push(PendingGuard {
                 id: guard,
                 tool,
                 hit,
-                allowed,
+                on_allow,
             });
             live.status.observe(Observation::GuardPrompted, now);
         }

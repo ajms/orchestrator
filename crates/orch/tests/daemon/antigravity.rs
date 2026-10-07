@@ -33,6 +33,15 @@ async fn antigravity_session_with(
     scripted_antigravity_session(env, client, preset, config, &[]).await
 }
 
+fn write_agy_config(env: &Env, config: &str, lines: &[String]) {
+    let script = env.path("agy.script");
+    std::fs::write(&script, format!("draft -p\n{}", lines.join("\n"))).unwrap();
+    env.write_config(&format!(
+        "[defaults.agents.antigravity]\nbinary = {:?}\nargs = [\"fake-agent\", \"--script\", {script:?}, \"--\"]\n{config}",
+        env!("CARGO_BIN_EXE_orch")
+    ));
+}
+
 async fn scripted_antigravity_session(
     env: &Env,
     client: &mut TestClient,
@@ -40,12 +49,7 @@ async fn scripted_antigravity_session(
     config: &str,
     lines: &[String],
 ) -> (SessionId, PaneView) {
-    let script = env.path("agy.script");
-    std::fs::write(&script, format!("draft -p\n{}", lines.join("\n"))).unwrap();
-    env.write_config(&format!(
-        "[defaults.agents.antigravity]\nbinary = {:?}\nargs = [\"fake-agent\", \"--script\", {script:?}, \"--\"]\n{config}",
-        env!("CARGO_BIN_EXE_orch")
-    ));
+    write_agy_config(env, config, lines);
     let installed = orch(env, &["agent", "install", "antigravity", "--yes"]).await;
     assert!(installed.status.success(), "{installed:?}");
     let repo = env.repo("app");
@@ -589,4 +593,25 @@ async fn an_adopted_agy_keeps_its_conversation_when_a_subagent_hooks_first() {
         .await;
     assert_eq!(adopted.conversation.as_deref(), Some(CONVERSATION));
     assert_eq!(adopted.subagents[0].id, CHILD);
+}
+
+#[tokio::test]
+async fn agy_must_ask_the_user_while_a_restarted_daemon_cannot_load_the_sessions_preset() {
+    let env = Env::new();
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _) = antigravity_session_with(&env, &mut client, "tight", TIGHT).await;
+
+    daemon.kill();
+    write_agy_config(&env, "", &[]);
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    client
+        .until(&id, "the Agent again", |view| view.agent.is_some())
+        .await;
+    let mut pane = env.pane(&id, PANE).await;
+    let npm = json!({ "CommandLine": "npm test" });
+    tool_call(&mut pane, "run_command", npm).await;
+    pane.wait_for_text(r#"hook> {"decision":"force_ask"}"#)
+        .await;
 }

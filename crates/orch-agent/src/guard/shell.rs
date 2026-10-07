@@ -11,6 +11,7 @@ pub(crate) struct Word {
 pub(crate) struct SimpleCommand {
     pub words: Vec<Word>,
     pub written: Vec<Word>,
+    pub nested: Vec<String>,
 }
 
 impl SimpleCommand {
@@ -106,23 +107,40 @@ impl Parser {
                         self.push(escaped);
                     }
                 }
-                '$' | '`' => self.push_dynamic(),
+                '$' | '`' => self.expansion(c, chars),
                 c => self.push(c),
             }
         }
     }
+
+    fn expansion(&mut self, c: char, chars: &mut Peekable<Chars>) {
+        self.push_dynamic();
+        let nested = match c {
+            '`' => Some(chars.by_ref().take_while(|&c| c != '`').collect()),
+            _ if chars.peek() == Some(&'(') => Some(substitution(chars)),
+            _ => None,
+        };
+        self.current.nested.extend(nested);
+    }
 }
 
-fn skip_substitution(chars: &mut Peekable<Chars>) {
+fn substitution(chars: &mut Peekable<Chars>) -> String {
     let mut depth = 0;
+    let mut inner = String::new();
     for c in chars.by_ref() {
         match c {
+            '(' if depth == 0 => {
+                depth = 1;
+                continue;
+            }
             '(' => depth += 1,
             ')' if depth == 1 => break,
             ')' => depth -= 1,
             _ => {}
         }
+        inner.push(c);
     }
+    inner
 }
 
 fn eat(chars: &mut Peekable<Chars>, expected: char) -> bool {
@@ -141,12 +159,7 @@ pub(crate) fn parse(script: &str) -> Vec<SimpleCommand> {
                     parser.push(escaped);
                 }
             }
-            '$' | '`' => {
-                parser.push_dynamic();
-                if c == '$' && chars.peek() == Some(&'(') {
-                    skip_substitution(&mut chars);
-                }
-            }
+            '$' | '`' => parser.expansion(c, &mut chars),
             '>' => {
                 eat(&mut chars, '>');
                 let duplicates_fd = eat(&mut chars, '&');

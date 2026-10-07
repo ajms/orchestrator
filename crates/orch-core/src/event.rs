@@ -151,6 +151,7 @@ pub enum GuardedAction {
     WriteFile { path: String },
     Shell { command: String },
     ExternalTool { name: String },
+    Unreadable,
 }
 
 #[derive(Debug, Clone, PartialEq)]

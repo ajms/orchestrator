@@ -93,6 +93,12 @@ impl LaunchSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayloadError(pub String);
 
+pub struct RuleScope<'a> {
+    pub cwd: Option<&'a Path>,
+    pub worktree: &'a Path,
+    pub lookup: &'a dyn Fn(&str) -> Option<String>,
+}
+
 pub trait TitleWatch: Send {
     fn follow(&mut self, payload: &str);
     fn poll(&mut self) -> Vec<AgentEvent>;
@@ -181,12 +187,15 @@ pub trait AgentAdapter {
         None
     }
 
+    fn enforces_rules(&self) -> bool {
+        false
+    }
+
     fn rule_verdict(
         &self,
         _preset: &Preset,
         _action: &GuardedAction,
-        _cwd: Option<&Path>,
-        _worktree: &Path,
+        _scope: &RuleScope,
     ) -> Option<RuleVerdict> {
         None
     }
