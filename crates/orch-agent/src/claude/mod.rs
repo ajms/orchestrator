@@ -15,12 +15,11 @@ use transcript::TranscriptTitles;
 
 use crate::shell::quote;
 use crate::{
-    AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, SubagentTranscripts,
-    TitleWatch,
+    AgentAdapter, Argv, Capabilities, GUARD_WAIT_SECS, GuardAnswer, LaunchSpec, PayloadError,
+    SubagentTranscripts, TitleWatch,
 };
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
-const GUARD_WAIT_SECS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeCode {

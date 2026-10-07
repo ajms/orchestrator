@@ -6,6 +6,7 @@ mod discard;
 mod display;
 mod guards;
 mod handshake;
+mod hookup;
 mod idle;
 mod landing;
 mod lifecycle;

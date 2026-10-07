@@ -11,6 +11,7 @@ The domain vocabulary (Session, Repo, Worktree, Landing, Preset, Guard, Trust…
 - Linux (other platforms are out of scope)
 - git ≥ 2.40
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` on `PATH`), set up as you normally use it; `orch` uses your own `~/.claude` configuration
+- [Antigravity CLI](https://antigravity.google/) (`agy` on `PATH`), optional, for Antigravity Sessions. It can't take orch's hooks per launch, so install the **Agent hookup** once with `orch agent install antigravity` (see [Commands](#commands)); until then `orch` refuses to create Antigravity Sessions
 - [`gh`](https://cli.github.com/), authenticated, for PR Landing and PR status
 - a freedesktop notification daemon for desktop notifications (optional)
 - Rust 1.88+ to build (development uses the version pinned in `rust-toolchain.toml`)
@@ -53,14 +54,16 @@ When the Agent is done, press `d` to review, then run `:land` to squash onto the
 | Command | |
 |---|---|
 | `orch` | TUI Client (auto-starts the Daemon) |
-| `orch doctor [--json]` | Run Reconciliation and print findings per Repo with the fixes available. Exits 1 if there are findings. |
+| `orch agent install <agent> [--yes]` | Install the Agent hookup for an Agent that can't take orch's hooks per launch (`antigravity`). Shows the diff of the Agent's global config and asks y/N. For agy it adds an `"orch"` entry to `~/.gemini/config/hooks.json` and points `statusLine` in `~/.gemini/antigravity-cli/settings.json` at `orch tap`, saving your own statusline command in `orch`'s state, where the tap keeps running it. Outside an `orch` Session the hook lets agy decide as usual and the tap only runs your own statusline. Running it again changes nothing. |
+| `orch agent uninstall <agent> [--yes]` | Remove the `"orch"` hook and restore your previous statusline. |
+| `orch doctor [--json]` | Run Reconciliation and print findings per Repo with the fixes available, and check that an installed Agent hookup is still in place. Exits 1 if there are findings. |
 | `orch repo move <old> <new>` | Tell `orch` a known Repo now lives at a new path. Its Sessions follow it, and Agents keep running if you already moved the directory. |
 | `orch repo forget <path>` | Make `orch` forget a known Repo. This is refused while it has Sessions or running Agents. |
 | `orch trust <repo> [--yes]` | Show what in the Repo's config needs Trust and approve it after a y/N prompt. |
 | `orch daemon [--no-idle-exit]` | Run the Daemon in the foreground |
 | `orch daemon install` / `uninstall` | Manage the systemd user unit |
 
-`orch hold`, `orch hook` and `orch tap` are internal plumbing. The Daemon and the Agent's hooks call them.
+`orch hold`, `orch hook` and `orch tap` are internal plumbing. The Daemon and the Agent's hooks call them. `orch hook` and `orch tap` take the Session from `--session`, or from `ORCH_SESSION` for an Agent hookup's global commands; without either they do nothing.
 
 ## Keymap
 

@@ -127,6 +127,29 @@ async fn tap_forwards_the_statusline_payload_to_the_holder() {
     wait_for_screen(&mut client, |text| text.contains("tap> Opus · 42%")).await;
 }
 
+#[tokio::test]
+async fn a_global_hook_reports_to_the_session_named_by_orch_session() {
+    let sandbox = Sandbox::new();
+    let held = sandbox.hold("s1", "");
+    let (mut client, _) = held.attach().await;
+    let stop = r#"{"conversationId":"c1","fullyIdle":true}"#;
+
+    let mut hook = sandbox.orch();
+    hook.args(["hook", "--agent", "antigravity"])
+        .env("ORCH_SESSION", "s1");
+    let output = run_with_stdin(&mut hook, stop);
+
+    assert!(output.status.success());
+    assert_eq!(
+        next_hook_or_tap(&mut client).await,
+        HolderEvent::Hook {
+            agent: Some("antigravity".into()),
+            payload: stop.into(),
+            guard: None,
+        }
+    );
+}
+
 #[test]
 fn tap_prefers_the_worktrees_local_project_statusline() {
     let sandbox = Sandbox::new();

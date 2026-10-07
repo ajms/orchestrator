@@ -55,6 +55,7 @@ impl Sandbox {
             .current_dir(self.path("work"))
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ORCH_HOLDER_SOCKET")
+            .env_remove("ORCH_SESSION")
             .env_remove("XDG_RUNTIME_DIR")
             .stdin(Stdio::null());
         command

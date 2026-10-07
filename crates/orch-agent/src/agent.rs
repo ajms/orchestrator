@@ -5,6 +5,7 @@ use orch_core::{
     TranscriptEntry,
 };
 
+use crate::hookup::AgentHookup;
 use crate::{GuardAnswer, Preset};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -151,6 +152,10 @@ pub trait AgentAdapter {
     }
 
     fn guard_answer(&self, _answer: &GuardAnswer) -> Option<String> {
+        None
+    }
+
+    fn hookup(&self) -> Option<Box<dyn AgentHookup>> {
         None
     }
 

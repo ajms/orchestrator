@@ -13,7 +13,7 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{default_program, installed_adapter, known_adapter, modes};
+use crate::agents::{default_program, hooked_up, installed_adapter, known_adapter, modes};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
 
@@ -225,6 +225,7 @@ impl Daemon {
             .agent(&agent_name)
             .map_err(|_| untrusted(root.path(), &config))?;
         let adapter = known_adapter(&agent).map_err(refused)?;
+        hooked_up(&adapter, &agent_name, &self.config.orch_program).map_err(refused)?;
         let preset = select_preset(root.path(), &config, create.preset.as_deref(), &agent_name)?;
         if config.setup_script().is_err() {
             return Err(untrusted(root.path(), &config));

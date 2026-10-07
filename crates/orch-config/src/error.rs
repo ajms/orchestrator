@@ -45,7 +45,7 @@ impl fmt::Display for ConfigProblem {
             ConfigProblem::UnknownRuleAgent { preset, agent } => write!(
                 f,
                 "preset {preset}: [presets.{preset}.{agent}] names no known Agent ({})",
-                orch_agent::known_agents().collect::<Vec<_>>().join(", ")
+                orch_agent::built_in_names().collect::<Vec<_>>().join(", ")
             ),
             ConfigProblem::EmptyPortRange(range) => write!(
                 f,

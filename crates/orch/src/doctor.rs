@@ -1,6 +1,8 @@
 use std::process::ExitCode;
 
 use clap::Args;
+use orch_agent::{HookupState, built_in_names, by_name};
+use orch_config::xdg;
 use orch_protocol::{Finding, ReconcileReport, Repair, Reply, Request};
 
 use crate::client;
@@ -23,31 +25,59 @@ pub fn run(args: DoctorArgs) -> ExitCode {
         Ok(report) => report,
         Err(err) => return failed(err),
     };
+    let hookups = hookup_problems();
     match args.json {
         true => match serde_json::to_string_pretty(&report) {
-            Ok(json) => println!("{json}"),
+            Ok(json) => {
+                println!("{json}");
+                hookups.iter().for_each(|problem| eprintln!("{problem}"));
+            }
             Err(err) => return failed(err),
         },
-        false => print!("{}", render(&report)),
+        false => print!("{}", render(&report, &hookups)),
     }
-    match report.findings().next() {
-        Some(_) => ExitCode::from(FINDINGS),
-        None => ExitCode::SUCCESS,
+    match report.findings().next().is_some() || !hookups.is_empty() {
+        true => ExitCode::from(FINDINGS),
+        false => ExitCode::SUCCESS,
     }
+}
+
+fn hookup_problems() -> Vec<String> {
+    let Ok(program) = client::orch_program() else {
+        return Vec::new();
+    };
+    let program = program.to_string_lossy();
+    built_in_names()
+        .filter_map(|name| {
+            let hookup = by_name(name)?.hookup()?;
+            match hookup.state(&program, &xdg::process_env) {
+                HookupState::Broken(problem) => Some(format!(
+                    "The {name} Agent hookup is no longer in place: {problem}. \
+                     Run `orch agent install {name}` to put it back."
+                )),
+                HookupState::Missing | HookupState::Installed => None,
+            }
+        })
+        .collect()
 }
 
 fn failed(message: impl std::fmt::Display) -> ExitCode {
     client::fail("doctor", FAILED, message)
 }
 
-pub fn render(report: &ReconcileReport) -> String {
+pub fn render(report: &ReconcileReport, hookups: &[String]) -> String {
     let mut out = String::new();
     for repair in &report.repaired {
         out.push_str(&format!("Reconciled: {}\n", describe_repair(repair)));
     }
+    for problem in hookups {
+        out.push_str(&format!("! {problem}\n"));
+    }
     let count = report.findings().count();
     if count == 0 {
-        out.push_str("No problems found.\n");
+        if hookups.is_empty() {
+            out.push_str("No problems found.\n");
+        }
         return out;
     }
     for repo in report.repos.iter().filter(|repo| !repo.findings.is_empty()) {

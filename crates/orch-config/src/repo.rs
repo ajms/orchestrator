@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use orch_agent::{
-    ClaudeCode, EDITS, INHERIT, Preset, Presets, Rules, known_agents, mode_from_name,
+    ClaudeCode, EDITS, INHERIT, Preset, Presets, Rules, built_in_names, mode_from_name,
 };
 use orch_core::PermissionMode;
 use serde::Deserialize;
@@ -143,7 +143,7 @@ impl PresetLayer {
         if let Some(agent) = self
             .agents
             .keys()
-            .find(|agent| !known_agents().any(|known| known == agent.as_str()))
+            .find(|agent| !built_in_names().any(|known| known == agent.as_str()))
         {
             return Err(ConfigProblem::UnknownRuleAgent {
                 preset: name.into(),
