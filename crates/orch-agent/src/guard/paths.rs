@@ -12,6 +12,17 @@ pub(crate) fn resolve(cwd: &Path, raw: &str) -> PathBuf {
     resolve_symlinks(&normalize(&cwd.join(expanded)))
 }
 
+pub(crate) fn widest(pattern: &str) -> String {
+    pattern
+        .split('/')
+        .map(|part| {
+            let climbs = part.starts_with('.') && part.contains(['*', '?', '[']);
+            if climbs { ".." } else { part }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 pub(crate) fn is_harmless(path: &Path) -> bool {
     HARMLESS_TARGETS
         .iter()

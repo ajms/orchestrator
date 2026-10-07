@@ -168,9 +168,21 @@ impl<'a> GuardScope<'a> {
     fn written(&self, cwd: &Path, words: &[&Word]) -> Vec<GuardHit> {
         words
             .iter()
-            .filter(|word| !word.dynamic)
-            .filter_map(|word| self.write(cwd, &word.text))
+            .filter(|word| !word.expanded)
+            .filter_map(|word| self.operand(cwd, word))
             .collect()
+    }
+
+    fn operand(&self, cwd: &Path, word: &Word) -> Option<GuardHit> {
+        let Some(candidates) = word.candidates() else {
+            return Some(GuardHit {
+                kind: GuardKind::WriteOutsideWorktree,
+                target: word.text.clone(),
+            });
+        };
+        candidates
+            .iter()
+            .find_map(|candidate| self.write(cwd, &paths::widest(candidate)))
     }
 
     fn ref_hit(&self, name: &str) -> Option<GuardHit> {

@@ -1,10 +1,69 @@
+use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::str::Chars;
+
+const MAX_CANDIDATES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Word {
     pub text: String,
     pub dynamic: bool,
+    pub expanded: bool,
+}
+
+impl Word {
+    pub(crate) fn candidates(&self) -> Option<Vec<String>> {
+        if self.expanded || self.dynamic && self.text.starts_with('~') {
+            return None;
+        }
+        let mut pending = VecDeque::from([self.text.clone()]);
+        let mut done = Vec::new();
+        while let Some(text) = pending.pop_front() {
+            match braces(&text) {
+                Some(alternatives) => alternatives
+                    .into_iter()
+                    .rev()
+                    .for_each(|alternative| pending.push_front(alternative)),
+                None => done.push(text),
+            }
+            if done.len() + pending.len() > MAX_CANDIDATES {
+                return None;
+            }
+        }
+        Some(done)
+    }
+}
+
+fn braces(text: &str) -> Option<Vec<String>> {
+    text.match_indices('{').find_map(|(open, _)| {
+        let mut depth = 0;
+        let mut commas = Vec::new();
+        for (at, c) in text[open..].char_indices().map(|(at, c)| (open + at, c)) {
+            match c {
+                '{' => depth += 1,
+                '}' if depth == 1 => {
+                    if commas.is_empty() {
+                        return None;
+                    }
+                    let (head, tail) = (&text[..open], &text[at + 1..]);
+                    let bounds: Vec<usize> = std::iter::once(open)
+                        .chain(commas)
+                        .chain(std::iter::once(at))
+                        .collect();
+                    return Some(
+                        bounds
+                            .windows(2)
+                            .map(|pair| format!("{head}{}{tail}", &text[pair[0] + 1..pair[1]]))
+                            .collect(),
+                    );
+                }
+                '}' => depth -= 1,
+                ',' if depth == 1 => commas.push(at),
+                _ => {}
+            }
+        }
+        None
+    })
 }
 
 #[derive(Debug, Default)]
@@ -46,6 +105,7 @@ impl Parser {
         self.word.get_or_insert_with(|| Word {
             text: String::new(),
             dynamic: false,
+            expanded: false,
         })
     }
 
@@ -65,6 +125,7 @@ impl Parser {
         let word = self.word();
         word.text.push('$');
         word.dynamic = true;
+        word.expanded = true;
     }
 
     fn end_word(&mut self) {
