@@ -1,3 +1,5 @@
+use std::ffi::OsString;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -8,9 +10,12 @@ use orch_protocol::{
     AgentStateView as State, CreateSession, GuardChoice, GuardPrompt, Reply, Request, Size,
 };
 use serde_json::{Value, json};
+use tokio::sync::{Mutex, MutexGuard};
 
 use crate::common::*;
-use crate::{fixtures, template};
+use crate::fixtures::{self, Capture, Conversations, Recording};
+use crate::isolation::{Isolation, copy_dir};
+use crate::template;
 
 pub const STARTUP: Duration = Duration::from_secs(90);
 pub const TURN: Duration = Duration::from_secs(300);
@@ -25,6 +30,10 @@ const GATE: &str = "ORCH_REAL_AGY";
 const RECORD: &str = "ORCH_REAL_AGY_RECORD";
 const CAPTURE_ENV: &str = "ORCH_REAL_AGY_CAPTURE";
 const CAPTURE_HOOK: &str = "orch-real-agy-capture";
+const BRAIN: &str = ".gemini/antigravity-cli/brain";
+
+static SERIAL: Mutex<()> = Mutex::const_new(());
+static SKIPPED: std::sync::Once = std::sync::Once::new();
 
 fn enabled(var: &str) -> bool {
     std::env::var(var).is_ok_and(|value| value == "1")
@@ -34,14 +43,8 @@ pub fn is_trust_screen(lower: &str) -> bool {
     lower.contains("trust")
 }
 
-pub fn isolate<'c>(command: &'c mut Command, home: &Path) -> &'c mut Command {
-    command
-        .env("HOME", home)
-        .env("XDG_DATA_HOME", home.join(".local/share"))
-        .env("XDG_CACHE_HOME", home.join(".cache"))
-        .env_remove("ORCH_SESSION")
-        .env_remove("ORCH_HOLDER_SOCKET")
-        .env_remove("XDG_RUNTIME_DIR")
+pub fn report(text: &str) {
+    let _ = std::io::stderr().write_all(text.as_bytes());
 }
 
 fn find_agy() -> PathBuf {
@@ -51,22 +54,6 @@ fn find_agy() -> PathBuf {
         .map(|dir| dir.join("agy"))
         .find(|path| path.is_file())
         .expect("ORCH_REAL_AGY=1 needs agy on PATH")
-}
-
-fn copy_dir(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).unwrap();
-    for entry in std::fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let kind = entry.file_type().unwrap();
-        let target = to.join(entry.file_name());
-        if kind.is_dir() {
-            copy_dir(&entry.path(), &target);
-        } else if kind.is_symlink() {
-            std::os::unix::fs::symlink(std::fs::read_link(entry.path()).unwrap(), target).unwrap();
-        } else if kind.is_file() {
-            std::fs::copy(entry.path(), target).unwrap();
-        }
-    }
 }
 
 pub struct Held {
@@ -87,7 +74,7 @@ pub async fn hold(
     runtime: &Path,
     session: &str,
     cwd: &Path,
-    agy: &Path,
+    argv: &[OsString],
 ) -> Held {
     let output = command
         .env("ORCH_RUNTIME_DIR", runtime)
@@ -96,7 +83,7 @@ pub async fn hold(
         .arg("--cwd")
         .arg(cwd)
         .arg("--")
-        .arg(agy)
+        .args(argv)
         .stdin(Stdio::null())
         .output()
         .unwrap();
@@ -116,49 +103,93 @@ pub async fn hold(
     }
 }
 
+fn capture_command(event: &str, answer: &str) -> String {
+    format!(
+        r#"d="$ORCH_REAL_AGY_CAPTURE/$ORCH_SESSION"; if [ -n "$ORCH_REAL_AGY_CAPTURE" ] && [ -n "$ORCH_SESSION" ]; then mkdir -p "$d" && cat > "$d/{event}-$(date +%s%N).json"; else cat > /dev/null; fi; printf '%s' '{answer}'"#
+    )
+}
+
+fn add_capture_hooks(home: &Path, record: bool) {
+    let path = home.join(".gemini/config/hooks.json");
+    let mut hooks: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let hook = |event: &str, answer: &str| json!({ "type": "command", "command": capture_command(event, answer) });
+    let mut capture = json!({
+        "PostToolUse": [{ "matcher": "*", "hooks": [hook("PostToolUse", "{}")] }],
+        "PreInvocation": [hook("PreInvocation", "{}")],
+        "PostInvocation": [hook("PostInvocation", "{}")],
+        "Stop": [hook("Stop", "{}")],
+    });
+    if record {
+        let ask = hook("PreToolUse", r#"{"decision":"ask"}"#);
+        capture["PreToolUse"] = json!([{ "matcher": "*", "hooks": [ask] }]);
+    }
+    hooks[CAPTURE_HOOK] = capture;
+    std::fs::write(path, serde_json::to_string_pretty(&hooks).unwrap()).unwrap();
+}
+
+fn hostname() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .map(|name| name.trim().to_string())
+}
+
 pub struct RealAgy {
     pub env: Env,
     pub agy: PathBuf,
-    captures: Option<PathBuf>,
+    isolation: Isolation,
+    captures: PathBuf,
+    record: bool,
+    _serial: MutexGuard<'static, ()>,
 }
 
 impl RealAgy {
     pub async fn new() -> Option<Self> {
         if !enabled(GATE) {
-            eprintln!("skipped: set {GATE}=1 to run against a real, authenticated agy");
+            SKIPPED.call_once(|| {
+                report(&format!(
+                    "real-agy suite skipped: set {GATE}=1 to run it against a real, signed-in agy\n"
+                ))
+            });
             return None;
         }
+        let serial = SERIAL.lock().await;
         let agy = find_agy();
         let template = template::prepare(&agy).await;
         let env = Env::new();
-        copy_dir(&template.join("home"), &env.path("home"));
-        copy_dir(&template.join("state"), &env.path("state"));
+        for dir in ["home", "state", "config"] {
+            copy_dir(&template.join(dir), &env.path(dir));
+        }
         env.write_config(&format!(
             "[defaults.agents.antigravity]\nbinary = {:?}\n",
             agy.display().to_string()
         ));
-        let captures = enabled(RECORD).then(|| {
-            let dir = env.path("captures");
-            std::fs::create_dir_all(&dir).unwrap();
-            add_capture_hooks(&env.path("home"), &dir);
-            dir
-        });
-        Some(Self { env, agy, captures })
+        let record = enabled(RECORD);
+        add_capture_hooks(&env.path("home"), record);
+        let captures = env.path("captures");
+        std::fs::create_dir_all(&captures).unwrap();
+        Some(Self {
+            isolation: Isolation {
+                home: env.path("home"),
+                config: env.path("config"),
+                state: env.path("state"),
+            },
+            env,
+            agy,
+            captures,
+            record,
+            _serial: serial,
+        })
     }
 
     fn isolate<'c>(&self, command: &'c mut Command) -> &'c mut Command {
-        isolate(command, &self.env.path("home"));
-        if let Some(dir) = &self.captures {
-            command.env(CAPTURE_ENV, dir);
-        }
-        command
+        self.isolation
+            .apply(command)
+            .env(CAPTURE_ENV, &self.captures)
     }
 
     pub fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
         let mut command = Command::new(program);
-        self.isolate(&mut command)
-            .env("XDG_CONFIG_HOME", self.env.path("config"))
-            .env("XDG_STATE_HOME", self.env.path("state"));
+        self.isolate(&mut command);
         command
     }
 
@@ -168,10 +199,10 @@ impl RealAgy {
         self.env.spawn_daemon(&mut command).await
     }
 
-    pub async fn hold(&self, session: &str, cwd: &Path) -> Held {
+    pub async fn hold(&self, session: &str, cwd: &Path, argv: &[OsString]) -> Held {
         let mut command = self.env.orch();
         self.isolate(&mut command);
-        hold(command, &self.env.runtime_dir(), session, cwd, &self.agy).await
+        hold(command, &self.env.runtime_dir(), session, cwd, argv).await
     }
 
     pub async fn session(
@@ -226,12 +257,35 @@ impl RealAgy {
         }
     }
 
-    pub fn record(&self, client: &TestClient, id: &SessionId) {
-        let Some(captures) = &self.captures else {
+    pub fn captures(&self, id: &SessionId) -> Vec<Capture> {
+        fixtures::read_captures(&self.captures.join(id.as_str()))
+    }
+
+    pub fn transcript(&self, conversation: &str) -> String {
+        let path = self
+            .env
+            .path("home")
+            .join(BRAIN)
+            .join(conversation)
+            .join(".system_generated/logs/transcript_full.jsonl");
+        std::fs::read_to_string(path).unwrap_or_default()
+    }
+
+    pub fn conversations(&self, client: &TestClient, id: &SessionId) -> Conversations {
+        let root = client.sessions[id]
+            .conversation
+            .clone()
+            .expect("agy's statusline names the Session's Conversation");
+        let subagents = fixtures::spawned_subagents(&self.transcript(&root));
+        Conversations { root, subagents }
+    }
+
+    pub fn record(&self, client: &TestClient, id: &SessionId, owner: Recording) {
+        if !self.record {
             return;
-        };
+        }
         let view = &client.sessions[id];
-        let root = view.conversation.clone().expect("a Conversation to record");
+        let root = self.env.path("");
         let mut replacements = vec![
             (
                 view.worktree.display().to_string(),
@@ -242,35 +296,27 @@ impl RealAgy {
                 self.env.path("home").display().to_string(),
                 "/home/dev".into(),
             ),
-            (self.env.path("").display().to_string(), "/home/dev/".into()),
+            (root.display().to_string(), "/home/dev/".into()),
         ];
+        if let Ok(canonical) = root.canonicalize() {
+            replacements.push((format!("{}/", canonical.display()), "/home/dev/".into()));
+        }
+        let mut forbidden = vec!["/tmp/".to_string()];
         if let Ok(home) = std::env::var("HOME") {
-            replacements.push((home, "/home/dev".into()));
+            replacements.push((home.clone(), "/home/dev".into()));
+            forbidden.push(home);
         }
-        let written = fixtures::record(captures, &root, replacements);
-        eprintln!("re-recorded {written:?}");
+        forbidden.extend(std::env::var("USER").ok().filter(|user| user != "dev"));
+        forbidden.extend(hostname());
+        let written = fixtures::record(
+            &self.captures.join(id.as_str()),
+            &self.conversations(client, id),
+            owner,
+            replacements,
+            forbidden,
+        );
+        report(&format!("re-recorded {written:?}\n"));
     }
-}
-
-fn add_capture_hooks(home: &Path, dir: &Path) {
-    let path = home.join(".gemini/config/hooks.json");
-    let mut hooks: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let hook = |event: &str| {
-        let mut command = format!("cat > '{}/{event}-'\"$(date +%s%N)\"'.json'", dir.display());
-        if event == "PreToolUse" {
-            command.push_str(r#"; printf '{"decision":"ask"}'"#);
-        }
-        json!({ "type": "command", "command": command })
-    };
-    let tool = |event: &str| json!([{ "matcher": "*", "hooks": [hook(event)] }]);
-    hooks[CAPTURE_HOOK] = json!({
-        "PreToolUse": tool("PreToolUse"),
-        "PostToolUse": tool("PostToolUse"),
-        "PreInvocation": [hook("PreInvocation")],
-        "PostInvocation": [hook("PostInvocation")],
-        "Stop": [hook("Stop")],
-    });
-    std::fs::write(path, serde_json::to_string_pretty(&hooks).unwrap()).unwrap();
 }
 
 pub async fn until_state(client: &mut TestClient, id: &SessionId, state: State, wait: Duration) {
@@ -324,7 +370,6 @@ pub async fn deny_guards_until_idle(client: &mut TestClient, id: &SessionId) -> 
 }
 
 pub fn run_with_stdin(mut command: Command, input: &str, wait: Duration) -> Output {
-    use std::io::Write;
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -346,36 +391,4 @@ pub fn run_with_stdin(mut command: Command, input: &str, wait: Duration) -> Outp
         std::thread::sleep(Duration::from_millis(100));
     }
     child.wait_with_output().unwrap()
-}
-
-pub fn osc_11_stall(chunks: &[(Duration, Vec<u8>)], end: Duration) -> Option<(Duration, Duration)> {
-    const QUERY: &[u8] = b"\x1b]11;?";
-    let bytes: Vec<u8> = chunks.iter().flat_map(|(_, chunk)| chunk.clone()).collect();
-    let start = bytes
-        .windows(QUERY.len())
-        .position(|window| window == QUERY)?;
-    let after = start + QUERY.len();
-    let terminator = if bytes.get(after) == Some(&0x07) {
-        1
-    } else {
-        2
-    };
-    let query_end = after + terminator;
-    let mut offset = 0;
-    let mut asked_at = None;
-    for (at, chunk) in chunks {
-        let chunk_end = offset + chunk.len();
-        match asked_at {
-            None if query_end <= chunk_end => {
-                if query_end < chunk_end {
-                    return Some((*at, Duration::ZERO));
-                }
-                asked_at = Some(*at);
-            }
-            Some(asked) => return Some((asked, *at - asked)),
-            None => {}
-        }
-        offset = chunk_end;
-    }
-    asked_at.map(|asked| (asked, end - asked))
 }

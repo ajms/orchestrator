@@ -117,10 +117,10 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
 
 ## Testing against a real agy
 
-Adapter and Daemon tests never start a real Agent. For Antigravity there is an opt-in suite, `crates/orch/tests/real_agy/`, that drives a signed-in `agy` through the Daemon and Holder in a cached template HOME (onboarded with data sharing off, Agent hookup installed by `orch agent install`), so your `~/.gemini` is never touched:
+Adapter and Daemon tests never start a real Agent. For Antigravity there is an opt-in suite, `crates/orch/tests/real_agy/`, that drives a signed-in `agy` through the Daemon and Holder in a cached template HOME (onboarded with data sharing off, Agent hookup installed by `orch agent install`), with a cleared environment, so your `~/.gemini` is never touched:
 
 ```sh
-ORCH_REAL_AGY=1 cargo test -p orch --test real_agy -- --ignored --test-threads=1
+ORCH_REAL_AGY=1 cargo test -p orch --test real_agy -- --ignored
 ```
 
 It covers launch with `-i`, hooks through the hookup, Needs input on the trust screen and a permission prompt, Idle on `fullyIdle`, resume with `--mode`, one Subagent, a Draft (including whether `agy -p` reads its prompt from stdin) and whether agy's OSC 11 query stalls its start in the Holder. Adding `ORCH_REAL_AGY_RECORD=1` re-records the scrubbed fixtures in `crates/orch-agent/tests/fixtures/antigravity/`. Its README lists the prerequisites and what each test checks. Without `ORCH_REAL_AGY=1` the tests are no-ops, and CI never runs them.

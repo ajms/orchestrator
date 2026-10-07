@@ -1,13 +1,16 @@
-use std::time::{Duration, Instant};
+use std::path::Path;
+use std::time::Duration;
 
 use orch_agent::{AgentAdapter, Antigravity, Draft};
-use orch_holder::{FromHolder, ToHolder};
+use orch_core::ConversationId;
 use orch_protocol::{
     AgentStateView as State, GuardKindView, LandingMode, PhaseView, Reply, Request, TranscriptEntry,
 };
 
 use crate::agy::*;
 use crate::common::*;
+use crate::fixtures::{Recording, fully_idle_stop};
+use crate::osc;
 
 const READY: &str = "Reply with the single word ready and nothing else.";
 
@@ -25,11 +28,13 @@ async fn each_fresh_worktree_needs_input_on_agys_trust_screen() {
     let mut client = agy.env.client().await;
     let repo = agy.env.repo("app");
 
-    for _ in 0..2 {
+    for first in [true, false] {
         let (id, mut pane) = agy.session(&mut client, &repo, "edits", READY).await;
         answer_trust(&mut client, &id, &mut pane).await;
         until_state(&mut client, &id, State::Idle, TURN).await;
-        agy.record(&client, &id);
+        if first {
+            agy.record(&client, &id, Recording::Trust);
+        }
     }
 }
 
@@ -62,7 +67,12 @@ async fn the_initial_prompt_reaches_orch_through_the_hookup_until_a_fully_idle_s
         "{denied:?}"
     );
     assert!(!target.exists());
-    agy.record(&client, &id);
+    let root = agy.conversations(&client, &id).root;
+    assert!(
+        fully_idle_stop(&agy.captures(&id), &root),
+        "no Stop with fullyIdle: true from {root}"
+    );
+    agy.record(&client, &id, Recording::Hookup);
 }
 
 #[tokio::test]
@@ -86,7 +96,7 @@ async fn a_permission_prompt_needs_input_until_the_user_answers_it() {
     until_state(&mut client, &id, State::Idle, TURN).await;
 
     assert!(worktree.join("permission-granted").exists());
-    agy.record(&client, &id);
+    agy.record(&client, &id, Recording::Permission);
 }
 
 #[tokio::test]
@@ -101,10 +111,7 @@ async fn resume_reopens_the_conversation_in_the_mode_cycled_with_shift_tab() {
     let (id, mut pane) = agy.session(&mut client, &repo, "edits", READY).await;
     answer_trust(&mut client, &id, &mut pane).await;
     until_state(&mut client, &id, State::Idle, TURN).await;
-    let conversation = client.sessions[&id]
-        .conversation
-        .clone()
-        .expect("agy's statusline names the Conversation");
+    let conversation = agy.conversations(&client, &id).root;
 
     pane.pane.input(SHIFT_TAB.to_vec()).await.unwrap();
     client
@@ -112,7 +119,6 @@ async fn resume_reopens_the_conversation_in_the_mode_cycled_with_shift_tab() {
             view.mode.as_deref() == Some("plan")
         })
         .await;
-    agy.record(&client, &id);
     kill(client.holder_pid(&id).unwrap(), "-KILL");
     client
         .until_within(&id, "Suspended", STARTUP, |view| {
@@ -162,9 +168,10 @@ async fn a_subagent_becomes_a_subagent_row_with_its_transcript() {
         })
         .await;
     assert_eq!(finished.subagents.len(), 1, "{:?}", finished.subagents);
+    let row = finished.subagents[0].id.clone();
     let subscribe = Request::SubscribeSubagent {
         session: id.clone(),
-        subagent: finished.subagents[0].id.clone(),
+        subagent: row.clone(),
     };
     client.request(subscribe).await.unwrap();
     client
@@ -172,14 +179,23 @@ async fn a_subagent_becomes_a_subagent_row_with_its_transcript() {
             !client.transcripts.is_empty()
         })
         .await;
-
     let asked = client.transcripts[0]
         .entries
         .iter()
         .any(|entry| matches!(entry, TranscriptEntry::Prompt { text } if text.contains("pong")));
     assert!(asked, "{:?}", client.transcripts[0].entries);
     until_state(&mut client, &id, State::Idle, TURN).await;
-    agy.record(&client, &id);
+
+    let conversations = agy.conversations(&client, &id);
+    assert_eq!(conversations.subagents, [row]);
+    let idle_while_running = client.history.iter().any(|view| {
+        view.id == id
+            && view.agent == Some(State::Idle)
+            && view.subagents.iter().any(|row| !row.done)
+    });
+    assert!(!idle_while_running, "Idle while a Subagent row ran");
+    assert!(fully_idle_stop(&agy.captures(&id), &conversations.root));
+    agy.record(&client, &id, Recording::Subagent);
 }
 
 #[tokio::test]
@@ -224,12 +240,24 @@ async fn a_draft_comes_from_a_fresh_headless_agy_over_the_base_diff() {
     let (id, mut pane) = agy.session(&mut client, &repo, "edits", READY).await;
     answer_trust(&mut client, &id, &mut pane).await;
     until_state(&mut client, &id, State::Idle, TURN).await;
+    let conversation = agy.conversations(&client, &id).root;
+    let transcript = agy.transcript(&conversation);
+    assert!(!transcript.is_empty(), "no transcript for {conversation}");
     let worktree = client.sessions[&id].worktree.clone();
     std::fs::write(
         worktree.join("greeting.txt"),
         "Hello from the greeting module\n",
     )
     .unwrap();
+    let adapter = Antigravity {
+        program: agy.agy.display().to_string(),
+    };
+    let current = ConversationId(conversation.clone());
+    let draft_argv = adapter.draft(Some(&current)).unwrap().argv.args;
+    assert!(
+        !draft_argv.iter().any(|arg| arg == "--conversation"),
+        "{draft_argv:?}"
+    );
 
     let draft = Request::Draft {
         session: id.clone(),
@@ -247,6 +275,12 @@ async fn a_draft_comes_from_a_fresh_headless_agy_over_the_base_diff() {
             .contains("greeting"),
         "{title}\n{body}"
     );
+    settled(&mut client).await;
+    assert_eq!(
+        client.sessions[&id].conversation.as_deref(),
+        Some(conversation.as_str())
+    );
+    assert_eq!(agy.transcript(&conversation), transcript);
 }
 
 #[tokio::test]
@@ -256,37 +290,15 @@ async fn agys_osc_11_query_does_not_stall_its_start_in_the_holder() {
         return;
     };
     let repo = agy.env.repo("app");
-    let started = Instant::now();
-    let mut held = agy.hold("osc11", &repo).await;
-    held.client.send(&ToHolder::Subscribe).await.unwrap();
-    let mut chunks = Vec::new();
-    let mut screen = vt100::Parser::new(24, 80, 0);
 
-    while !is_trust_screen(&screen.screen().contents().to_lowercase()) {
-        let remaining = STARTUP.saturating_sub(started.elapsed());
-        let message = tokio::time::timeout(remaining, held.client.recv()).await;
-        let Ok(Ok(Some(message))) = message else {
-            panic!(
-                "agy never showed its trust screen in the Holder:\n{}",
-                screen.screen().contents()
-            );
-        };
-        match message {
-            FromHolder::Screen(snapshot) => screen = snapshot.restore(0),
-            FromHolder::Output { bytes } => {
-                screen.process(&bytes);
-                chunks.push((started.elapsed(), bytes));
-            }
-            _ => {}
-        }
-    }
-    let trusted_at = started.elapsed();
+    let unanswered = osc::probe(&agy, "osc11", &repo, false).await;
+    let answered = osc::probe(&agy, "osc11-answered", &repo, true).await;
 
-    let stall = osc_11_stall(&chunks, trusted_at);
-    eprintln!(
-        "OSC 11 finding: query (asked at, silence after) = {stall:?}; trust screen after {trusted_at:?}"
-    );
-    if let Some((_, silence)) = stall {
-        assert!(silence < Duration::from_secs(1), "{silence:?}");
+    let finding = osc::finding(&unanswered, &answered);
+    let file = Path::new(env!("CARGO_TARGET_TMPDIR")).join("real-agy-osc11.txt");
+    std::fs::write(&file, &finding).unwrap();
+    report(&format!("{finding}(saved to {})\n", file.display()));
+    if let Some((_, silence)) = unanswered.asked {
+        assert!(silence < Duration::from_secs(1), "{finding}");
     }
 }
