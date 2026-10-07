@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
-use orch_protocol::{RepoSettings, Request};
+use orch_protocol::{AgentChoice, RepoSettings, Request};
 use orch_tui::{Effect, Event, ReviewData, ReviewPurpose, TuiConfig};
 
 use crate::common::*;
@@ -16,6 +16,7 @@ fn settings(repo: &str, base: &str) -> RepoSettings {
         review_command: None,
         branch_prefix: "me/".into(),
         trust: None,
+        ..RepoSettings::default()
     }
 }
 
@@ -57,6 +58,59 @@ fn the_new_form_shows_the_repos_resolved_default_base_presets_and_branch_prefix(
     tui.press(KeyCode::BackTab);
     tui.press(KeyCode::Right);
     assert!(field(&mut tui, "Preset").contains("◂ careful ▸"));
+}
+
+fn agent_settings(repo: &str) -> RepoSettings {
+    RepoSettings {
+        agents: vec![
+            AgentChoice {
+                name: "claude".into(),
+                unavailable: None,
+            },
+            AgentChoice {
+                name: "antigravity".into(),
+                unavailable: Some("unknown Agent \"antigravity\"".into()),
+            },
+        ],
+        default_agent: "antigravity".into(),
+        ..settings(repo, "main")
+    }
+}
+
+fn to_agent_field(tui: &mut Harness) {
+    for _ in 0..4 {
+        tui.press(KeyCode::Tab);
+    }
+}
+
+#[test]
+fn the_agent_field_starts_on_the_repos_default_agent_and_cycles_the_built_in_ones() {
+    let mut tui = Harness::with_config(config());
+    tui.daemon().settings = vec![agent_settings("/home/me/recent")];
+    tui.command("new");
+    tui.keys("Fix it");
+    assert!(field(&mut tui, "Agent").contains("antigravity"));
+
+    to_agent_field(&mut tui);
+    tui.press(KeyCode::Right);
+    assert!(field(&mut tui, "Agent").contains("◂ claude ▸"));
+    tui.ctrl('s');
+
+    let create = create_requests(&mut tui).pop().expect("no Session created");
+    assert_eq!(create.agent.as_deref(), Some("claude"));
+}
+
+#[test]
+fn an_unavailable_agent_is_refused_at_submit_with_the_reason() {
+    let mut tui = Harness::with_config(config());
+    tui.daemon().settings = vec![agent_settings("/home/me/recent")];
+    tui.command("new");
+    tui.keys("Fix it");
+    tui.ctrl('s');
+
+    assert!(create_requests(&mut tui).is_empty());
+    let screen = tui.screen();
+    assert!(screen.contains("unknown Agent \"antigravity\""), "{screen}");
 }
 
 #[test]

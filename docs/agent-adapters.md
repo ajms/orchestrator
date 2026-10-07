@@ -96,6 +96,6 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
    - if the Agent can isolate Subagents in worktrees through a hook, route that hook to `orch worktree-hook` and implement `worktree_request`.
 4. **Never write to the user's own Agent config.** Inject everything per launch through flags or env, as the Claude adapter does with `--settings`.
 5. **Test the mapping as pure functions** (Seam 3): fixture → events, and launch/resume argv for each Preset and capability combination. Test a `TitleWatch` through `follow` / `poll` and `SubagentTranscripts` through `follow` / `locate` / `read` against temporary transcript files. See `crates/orch-agent/tests/claude_*.rs`.
-6. **Register the adapter** in `crates/orch-daemon/src/agents.rs` (`adapter_for`) under its config name, so that `[defaults.agent] name = "<agent>"` (or a Repo's `[agent]`) selects it.
+6. **Register the adapter** in `crates/orch-daemon/src/agents.rs` (`BUILT_IN` and `build`) under its config name, so that `agent = "<agent>"` or the `:new` form selects it and `[agents.<agent>]` configures its `binary` and `args`.
 7. **Run it end to end** with the scriptable fake Agent (`orch fake-agent`) through the Daemon tests, if the new adapter changes launch or event routing.
 8. **Update this document** and `CONTEXT.md` if the Agent brings a concept the glossary lacks.

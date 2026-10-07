@@ -143,8 +143,9 @@ impl Daemon {
             .lock()
             .sessions
             .get(id)
-            .filter(|live| live.adapter.capabilities().titles)
-            .and_then(|live| live.adapter.title_watch())?;
+            .and_then(|live| live.adapter.as_ref())
+            .filter(|adapter| adapter.capabilities().titles)
+            .and_then(|adapter| adapter.title_watch())?;
         let (payloads, followed) = mpsc::channel(HOLDER_QUEUE);
         tokio::spawn(self.clone().follow_titles(id.clone(), watch, followed));
         Some(payloads)
@@ -266,7 +267,11 @@ impl Daemon {
                 if let Some(transcripts) = &mut live.transcripts {
                     transcripts.follow(&payload);
                 }
-                let events = live.adapter.map_hook(&payload).unwrap_or_default();
+                let events = live
+                    .adapter
+                    .as_ref()
+                    .and_then(|adapter| adapter.map_hook(&payload).ok())
+                    .unwrap_or_default();
                 let effects = observe(live, &events, now, &mut conversations, &mut usage);
                 describe_subagents(live, &events);
                 if let Some(guard) = guard {
@@ -275,7 +280,11 @@ impl Daemon {
                 effects
             }
             HolderEvent::Tap { payload } => {
-                let events = live.adapter.map_tap(&payload).unwrap_or_default();
+                let events = live
+                    .adapter
+                    .as_ref()
+                    .and_then(|adapter| adapter.map_tap(&payload).ok())
+                    .unwrap_or_default();
                 observe(live, &events, now, &mut conversations, &mut usage)
             }
         };
@@ -377,8 +386,16 @@ fn retitle(live: &mut Live, title: &str) {
 }
 
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
-    let check = guard_check(live.adapter.capabilities(), events);
-    let agent_dirs = guard_dirs(live.adapter.as_ref(), &live.record.worktree);
+    let adapter = live.adapter.as_ref();
+    let check = guard_check(
+        adapter
+            .map(|adapter| adapter.capabilities())
+            .unwrap_or_default(),
+        events,
+    );
+    let agent_dirs = adapter
+        .map(|adapter| guard_dirs(adapter.as_ref(), &live.record.worktree))
+        .unwrap_or_default();
     let decision = check.map(|check| {
         let context = GuardContext {
             worktree: &live.record.worktree,

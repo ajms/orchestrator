@@ -193,6 +193,7 @@ pub struct CreateSession {
     pub branch: Option<String>,
     pub base: Option<String>,
     pub preset: Option<String>,
+    pub agent: Option<String>,
 }
 
 impl CreateSession {
@@ -203,6 +204,7 @@ impl CreateSession {
             branch: None,
             base: None,
             preset: None,
+            agent: None,
         }
     }
 }
@@ -324,10 +326,18 @@ pub struct RepoSettings {
     pub repo: PathBuf,
     pub presets: Vec<String>,
     pub default_preset: Option<String>,
+    pub agents: Vec<AgentChoice>,
+    pub default_agent: String,
     pub default_base: Option<String>,
     pub review_command: Option<String>,
     pub branch_prefix: String,
     pub trust: Option<TrustNeeded>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentChoice {
+    pub name: String,
+    pub unavailable: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

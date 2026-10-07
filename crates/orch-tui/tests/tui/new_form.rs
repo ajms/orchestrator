@@ -18,7 +18,7 @@ fn prompt_of_create(tui: &mut Harness) -> String {
 }
 
 #[test]
-fn tab_goes_from_the_prompt_through_repo_branch_base_and_preset_back_to_the_prompt() {
+fn tab_goes_from_the_prompt_through_repo_branch_base_agent_and_preset_back_to_the_prompt() {
     let mut tui = form(config());
     tui.keys("Fix");
     tui.press(KeyCode::Tab);
@@ -30,6 +30,7 @@ fn tab_goes_from_the_prompt_through_repo_branch_base_and_preset_back_to_the_prom
     tui.keys("main");
     assert!(field(&mut tui, "Base").contains("main"));
 
+    tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Right);
     assert!(field(&mut tui, "Preset").contains("plan"));
@@ -48,13 +49,14 @@ fn shift_tab_goes_back_from_the_prompt_to_the_preset() {
 }
 
 #[test]
-fn enter_on_branch_base_and_preset_moves_to_the_next_field() {
+fn enter_on_branch_base_agent_and_preset_moves_to_the_next_field() {
     let mut tui = form(config());
     tui.keys("Fix");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Enter);
     tui.keys("main");
+    tui.press(KeyCode::Enter);
     tui.press(KeyCode::Enter);
     tui.press(KeyCode::Right);
     tui.press(KeyCode::Enter);

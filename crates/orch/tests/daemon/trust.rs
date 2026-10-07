@@ -5,7 +5,7 @@ use orch_protocol::{CreateSession, Landing, PhaseView, Reply, Request, RequestEr
 
 use crate::common::*;
 
-const AGENT: &str = "[agent]\nargs = [\"fake-agent\", \"--\"]\n";
+const AGENT: &str = "[agents.claude]\nargs = [\"fake-agent\", \"--\"]\n";
 
 async fn untrusted(
     client: &mut TestClient,
@@ -136,7 +136,7 @@ async fn a_changed_agent_config_refuses_preset_changes_and_resume_until_approved
     let (id, mut pane) = idle_session(&env, &mut client, "Agent").await;
     change_repo_file(
         &repo,
-        "[agent]\nargs = [\"fake-agent\", \"--\", \"--changed\"]\n",
+        "[agents.claude]\nargs = [\"fake-agent\", \"--\", \"--changed\"]\n",
     );
 
     let preset = Request::SetPreset {

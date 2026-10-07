@@ -9,8 +9,8 @@ pub use client::{
     restart_daemon, restart_running_daemon, spawn_detached, stop_daemon,
 };
 pub use message::{
-    CommitView, CreateSession, DisplayVars, FromDaemon, GuardChoice, Landing, LandingMode,
-    OpenPane, PROTOCOL_VERSION, Reply, RepoSettings, RepoUsage, Request, RequestError,
+    AgentChoice, CommitView, CreateSession, DisplayVars, FromDaemon, GuardChoice, Landing,
+    LandingMode, OpenPane, PROTOCOL_VERSION, Reply, RepoSettings, RepoUsage, Request, RequestError,
     StaleOverrides, SubagentTranscript, ToDaemon, TrustNeeded, UsageReport, UsageTotalsView,
 };
 pub use orch_core::TranscriptEntry;

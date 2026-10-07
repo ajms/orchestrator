@@ -88,6 +88,9 @@ ALTER TABLE sessions ADD COLUMN queued_prompt TEXT;
     "
 ALTER TABLE sessions ADD COLUMN title TEXT;
 ",
+    "
+ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude';
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
