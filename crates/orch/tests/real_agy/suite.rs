@@ -9,7 +9,7 @@ use orch_protocol::{
 
 use crate::agy::*;
 use crate::common::*;
-use crate::fixtures::{Recording, fully_idle_stop};
+use crate::fixtures::Recording;
 use crate::osc;
 
 const READY: &str = "Reply with the single word ready and nothing else.";
@@ -59,9 +59,11 @@ async fn the_initial_prompt_reaches_orch_through_the_hookup_until_a_fully_idle_s
     let _daemon = agy.start_daemon().await;
     let mut client = agy.env.client().await;
     let repo = agy.env.repo("app");
-    let outside = agy.env.path("outside");
-    std::fs::create_dir_all(&outside).unwrap();
-    let target = outside.join("guard-check");
+    let outside = tempfile::Builder::new()
+        .prefix("real-agy-outside")
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .unwrap();
+    let target = outside.path().join("guard-check");
     let prompt = format!(
         "Run exactly this shell command with your run_command tool: touch {}. If it is denied, do not retry and do nothing else.",
         target.display()
@@ -81,7 +83,7 @@ async fn the_initial_prompt_reaches_orch_through_the_hookup_until_a_fully_idle_s
     assert!(!target.exists());
     let root = agy.conversations(&client, &id).root;
     assert!(
-        fully_idle_stop(&agy.captures(&id), &root),
+        agy.saw_fully_idle_stop(&id, &root).await,
         "no Stop with fullyIdle: true from {root}"
     );
     agy.record(&client, &id, Recording::Hookup);
@@ -206,7 +208,11 @@ async fn a_subagent_becomes_a_subagent_row_with_its_transcript() {
             && view.subagents.iter().any(|row| !row.done)
     });
     assert!(!idle_while_running, "Idle while a Subagent row ran");
-    assert!(fully_idle_stop(&agy.captures(&id), &conversations.root));
+    assert!(
+        agy.saw_fully_idle_stop(&id, &conversations.root).await,
+        "no Stop with fullyIdle: true from {}",
+        conversations.root
+    );
     agy.record(&client, &id, Recording::Subagent);
 }
 
