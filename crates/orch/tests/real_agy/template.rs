@@ -78,7 +78,7 @@ fn manual(dir: &Path, isolation: &Isolation, agy: &Path, screen: &str) -> String
         "agy's onboarding needs a hand. Screen:\n{screen}\n\
          Delete {dir} if it holds a bad onboarding, then from {work} run\n  {line}\n\
          pick any theme, turn data sharing OFF, quit agy at the trust screen with ctrl+c, then\n  \
-         touch {marker}\nand run the suite again. If agy's data-sharing setting is not one of {SHARING_KEYS:?}, add its key to SHARING_KEYS in {file}.",
+         touch {marker}\nand run the suite again. agy 1.3.0 keeps the data-sharing choice off the machine; if a later agy stores it under a key other than {SHARING_KEYS:?}, add that key to SHARING_KEYS in {file}.",
         dir = dir.display(),
         work = dir.join("work").display(),
         line = isolation.shell_line(agy),
@@ -137,20 +137,23 @@ async fn drive_onboarding(held: &mut Held, manual: &dyn Fn(&str) -> String) {
         }
         let lower = text.to_lowercase();
         let settled = changed_at.elapsed() > Duration::from_secs(3);
-        if text != acted_on {
+        if text != acted_on || settled {
             if is_trust_screen(&lower) {
                 if consented {
                     return;
                 }
                 press(&mut held.client, TRUST_ANSWER).await;
                 acted_on = text;
+                changed_at = Instant::now();
             } else if is_consent_screen(&lower) {
                 choose_off(&mut held.client, manual).await;
                 consented = true;
                 acted_on = text;
+                changed_at = Instant::now();
             } else if lower.contains("theme") {
                 press(&mut held.client, ENTER).await;
                 acted_on = text;
+                changed_at = Instant::now();
             } else if consented && settled {
                 return;
             }
@@ -231,17 +234,11 @@ pub fn sharing_verdict(settings: Option<&str>) -> Result<Vec<String>, String> {
     if !sharing_on.is_empty() {
         return Err(format!("data sharing is on: {sharing_on:?}"));
     }
-    let off: Vec<String> = entries
+    Ok(entries
         .iter()
         .filter(|(path, value)| **value == false && SHARING_KEYS.contains(&key(path).as_str()))
         .map(|(path, _)| path.clone())
-        .collect();
-    match off.is_empty() {
-        true => Err(format!(
-            "none of {SHARING_KEYS:?} is set to false, so data sharing is not known to be off"
-        )),
-        false => Ok(off),
-    }
+        .collect())
 }
 
 fn set_statusline(settings: &Path) {
@@ -283,14 +280,17 @@ mod tests {
     }
 
     #[test]
-    fn data_sharing_counts_as_off_only_when_a_known_key_says_so() {
+    fn data_sharing_is_refused_when_any_sharing_key_is_on() {
         assert_eq!(
             sharing_verdict(Some(r#"{"telemetryEnabled":false,"theme":"dark"}"#)),
             Ok(vec![".telemetryEnabled".to_string()])
         );
+        assert_eq!(
+            sharing_verdict(Some(r#"{"trustedWorkspaces":[]}"#)),
+            Ok(vec![])
+        );
         assert!(sharing_verdict(None).is_err());
         assert!(sharing_verdict(Some("not json")).is_err());
-        assert!(sharing_verdict(Some(r#"{"theme":"dark"}"#)).is_err());
         assert!(
             sharing_verdict(Some(
                 r#"{"telemetryEnabled":false,"ux":{"shareCrashes":true}}"#
