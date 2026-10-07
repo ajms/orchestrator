@@ -63,8 +63,9 @@ impl<'a> DraftRequest<'a> {
             .skip_while(|arg| Some(arg.as_str()) != self.conversation_flag)
             .nth(1)
             .map_or("nothing", String::as_str);
+        let session = std::env::var(SESSION_ENV).unwrap_or_else(|_| "<unset>".into());
         print!(
-            "Drafted from {conversation}\n\nargs: {}\n{}\n",
+            "Drafted from {conversation}\n\nargs: {}\n{SESSION_ENV}={session}\n{}\n",
             agent_args.join(" "),
             instruction.trim()
         );

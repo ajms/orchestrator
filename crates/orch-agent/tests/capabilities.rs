@@ -76,7 +76,7 @@ fn guards_need_both_the_guards_capability_and_hooks() {
 fn an_agent_without_resume_restarts_in_a_fresh_conversation() {
     let restart = Bare.restart(&spec(Preset::inherit()), Some(&conversation()), None);
     assert_eq!(restart, Bare.launch(&spec(Preset::inherit())));
-    assert_eq!(Bare.draft(&conversation()), None);
+    assert_eq!(Bare.draft(Some(&conversation())), None);
 }
 
 #[test]

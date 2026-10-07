@@ -48,6 +48,18 @@ pub struct Argv {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftInput {
+    Instruction,
+    InstructionAndBaseDiff,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Draft {
+    pub argv: Argv,
+    pub input: DraftInput,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchSpec {
     pub session: SessionId,
@@ -131,7 +143,7 @@ pub trait AgentAdapter {
             .unwrap_or_else(|| self.launch(spec))
     }
 
-    fn draft(&self, _conversation: &ConversationId) -> Option<Argv> {
+    fn draft(&self, _conversation: Option<&ConversationId>) -> Option<Draft> {
         None
     }
 

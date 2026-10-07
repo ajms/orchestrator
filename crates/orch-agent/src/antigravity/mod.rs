@@ -9,7 +9,9 @@ use orch_core::{AgentEvent, ConversationId, PermissionMode};
 use serde_json::json;
 
 use crate::hookup::AgentHookup;
-use crate::{AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError};
+use crate::{
+    AgentAdapter, Argv, Capabilities, Draft, DraftInput, GuardAnswer, LaunchSpec, PayloadError,
+};
 use hookup::AntigravityHookup;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +100,13 @@ impl AgentAdapter for Antigravity {
         let mut args = vec!["--conversation".into(), conversation.as_str().into()];
         args.extend(mode_args(spec.resume_mode(observed_mode)));
         Some(self.argv(args))
+    }
+
+    fn draft(&self, _conversation: Option<&ConversationId>) -> Option<Draft> {
+        Some(Draft {
+            argv: self.argv(vec!["-p".into()]),
+            input: DraftInput::InstructionAndBaseDiff,
+        })
     }
 
     fn map_hook(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
