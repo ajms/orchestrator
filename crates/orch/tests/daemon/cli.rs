@@ -4,7 +4,7 @@ use orch_protocol::{PhaseView, Reply, Request};
 
 use crate::common::*;
 
-async fn run(mut command: Command) -> Output {
+pub(crate) async fn run(mut command: Command) -> Output {
     let running = tokio::task::spawn_blocking(move || command.output().unwrap());
     tokio::time::timeout(WAIT, running)
         .await
@@ -12,7 +12,7 @@ async fn run(mut command: Command) -> Output {
         .unwrap()
 }
 
-async fn orch_with_input(env: &Env, args: &[&str], input: &str) -> Output {
+pub(crate) async fn orch_with_input(env: &Env, args: &[&str], input: &str) -> Output {
     use std::io::Write;
     let mut command = env.orch();
     command
@@ -37,17 +37,17 @@ async fn orch_with_input(env: &Env, args: &[&str], input: &str) -> Output {
         .unwrap()
 }
 
-async fn orch(env: &Env, args: &[&str]) -> Output {
+pub(crate) async fn orch(env: &Env, args: &[&str]) -> Output {
     let mut command = env.orch();
     command.args(args);
     run(command).await
 }
 
-fn stdout(output: &Output) -> String {
+pub(crate) fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-fn stderr(output: &Output) -> String {
+pub(crate) fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 

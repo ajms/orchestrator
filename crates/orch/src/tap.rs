@@ -11,12 +11,12 @@ use crate::subprocess::run_with_input;
 
 const STATUSLINE_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub fn run(agent: &str, session: &str) -> ExitCode {
+pub fn run(agent: &str, session: Option<&str>) -> ExitCode {
     let mut payload = String::new();
     if std::io::stdin().read_to_string(&mut payload).is_err() {
         return ExitCode::SUCCESS;
     }
-    if let Ok(session) = SessionId::parse(session) {
+    if let Some(Ok(session)) = session.map(SessionId::parse) {
         let tap = ToHolder::Tap {
             agent: agent.into(),
             payload: payload.clone(),
@@ -36,7 +36,10 @@ pub fn run(agent: &str, session: &str) -> ExitCode {
                 Some(STATUSLINE_TIMEOUT),
             )
         })
-        .unwrap_or_else(|| minimal_line(adapter.as_ref(), &payload).into_bytes());
+        .unwrap_or_else(|| match adapter.hookup() {
+            Some(_) => Vec::new(),
+            None => minimal_line(adapter.as_ref(), &payload).into_bytes(),
+        });
     let mut stdout = std::io::stdout();
     let _ = stdout.write_all(&line);
     let _ = stdout.flush();

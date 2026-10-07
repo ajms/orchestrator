@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use orch_agent::{Adapter, built_in_names, by_name, with_binary};
-use orch_config::AgentConfig;
+use orch_agent::{Adapter, HookupState, built_in_names, by_name, with_binary};
+use orch_config::{AgentConfig, xdg};
 use orch_core::PermissionMode;
 
 fn unknown(name: &str) -> String {
@@ -20,6 +20,20 @@ pub(crate) fn known_adapter(agent: &AgentConfig) -> Result<Adapter, String> {
 
 pub(crate) fn modes(name: &str) -> &'static [PermissionMode] {
     by_name(name).map_or(&[], |adapter| adapter.modes())
+}
+
+pub(crate) fn hooked_up(adapter: &Adapter, name: &str, orch_program: &Path) -> Result<(), String> {
+    let Some(hookup) = adapter.hookup() else {
+        return Ok(());
+    };
+    let problem = match hookup.state(&orch_program.to_string_lossy(), &xdg::process_env) {
+        HookupState::Installed => return Ok(()),
+        HookupState::Missing => "is not installed".to_string(),
+        HookupState::Broken(problem) => format!("is no longer in place ({problem})"),
+    };
+    Err(format!(
+        "the {name} Agent hookup {problem}; run `orch agent install {name}` first"
+    ))
 }
 
 pub(crate) fn default_program(name: &str) -> String {

@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
-use crate::{AgentAdapter, ClaudeCode};
+use crate::{AgentAdapter, Antigravity, ClaudeCode};
 
 pub type Adapter = Arc<dyn AgentAdapter + Send + Sync>;
 
 type Build = fn(Option<String>) -> (Adapter, String);
 
-const BUILT_IN: [(&str, Build); 1] = [(ClaudeCode::NAME, claude)];
-
-const PLANNED: [&str; 1] = ["antigravity"];
+const BUILT_IN: [(&str, Build); 2] = [(ClaudeCode::NAME, claude), (Antigravity::NAME, antigravity)];
 
 fn claude(binary: Option<String>) -> (Adapter, String) {
     let mut claude = ClaudeCode::default();
@@ -19,12 +17,17 @@ fn claude(binary: Option<String>) -> (Adapter, String) {
     (Arc::new(claude), program)
 }
 
-pub fn built_in_names() -> impl Iterator<Item = &'static str> {
-    BUILT_IN.iter().map(|(name, _)| *name)
+fn antigravity(binary: Option<String>) -> (Adapter, String) {
+    let mut antigravity = Antigravity::default();
+    if let Some(binary) = binary {
+        antigravity.program = binary;
+    }
+    let program = antigravity.program.clone();
+    (Arc::new(antigravity), program)
 }
 
-pub fn known_agents() -> impl Iterator<Item = &'static str> {
-    built_in_names().chain(PLANNED)
+pub fn built_in_names() -> impl Iterator<Item = &'static str> {
+    BUILT_IN.iter().map(|(name, _)| *name)
 }
 
 pub fn by_name(name: &str) -> Option<Adapter> {

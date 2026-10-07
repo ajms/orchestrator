@@ -5,6 +5,7 @@ use orch_core::{
     TranscriptEntry,
 };
 
+use crate::hookup::AgentHookup;
 use crate::{GuardAnswer, Preset};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -171,6 +172,10 @@ pub trait AgentAdapter {
     }
 
     fn worktree_request(&self, _payload: &str) -> Option<WorktreeRequest> {
+        None
+    }
+
+    fn hookup(&self) -> Option<Box<dyn AgentHookup>> {
         None
     }
 

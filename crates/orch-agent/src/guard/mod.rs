@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use shell::{SimpleCommand, Word};
 
+pub const GUARD_WAIT_SECS: u64 = 7 * 24 * 60 * 60;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GuardKind {
     BaseBranch,

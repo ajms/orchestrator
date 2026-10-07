@@ -141,16 +141,16 @@ async fn repo_settings_offer_the_built_in_agents_and_say_why_one_is_unavailable(
     let resolved = settings(&mut client, &repo).await;
     assert_eq!(resolved.default_agent, "claude");
     let names = resolved.agents.iter().map(|agent| agent.name.as_str());
-    assert_eq!(names.collect::<Vec<_>>(), ["claude"]);
+    assert_eq!(names.collect::<Vec<_>>(), ["claude", "antigravity"]);
     assert_eq!(claude(&resolved).unavailable, None);
 
     env.write_config_with_agent(
-        &format!("[repos.{repo:?}]\nagent = \"antigravity\"\n"),
+        &format!("[repos.{repo:?}]\nagent = \"nonesuch\"\n"),
         "/nonexistent/agent",
     );
     let resolved = settings(&mut client, &repo).await;
-    assert_eq!(resolved.default_agent, "antigravity");
-    let [claude, antigravity] = &resolved.agents[..] else {
+    assert_eq!(resolved.default_agent, "nonesuch");
+    let [claude, _, nonesuch] = &resolved.agents[..] else {
         panic!("{:?}", resolved.agents);
     };
     assert_eq!(claude.name, "claude");
@@ -161,12 +161,12 @@ async fn repo_settings_offer_the_built_in_agents_and_say_why_one_is_unavailable(
             .is_some_and(|why| why.contains("/nonexistent/agent")),
         "{claude:?}"
     );
-    assert_eq!(antigravity.name, "antigravity");
+    assert_eq!(nonesuch.name, "nonesuch");
     assert!(
-        antigravity
+        nonesuch
             .unavailable
             .as_deref()
             .is_some_and(|why| why.contains("unknown")),
-        "{antigravity:?}"
+        "{nonesuch:?}"
     );
 }
