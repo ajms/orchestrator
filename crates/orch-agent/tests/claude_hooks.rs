@@ -140,6 +140,23 @@ fn a_subagents_tool_is_attributed_to_it() {
 }
 
 #[test]
+fn a_write_without_a_path_starts_but_is_not_guard_checked() {
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&fixture("pre_tool_use_write")).unwrap();
+    payload["tool_input"]
+        .as_object_mut()
+        .unwrap()
+        .remove("file_path");
+    let events = ClaudeCode::default()
+        .map_hook(&payload.to_string())
+        .unwrap();
+    assert_eq!(
+        events,
+        vec![mode(PermissionMode::Default), main_tool(started, "Write")]
+    );
+}
+
+#[test]
 fn tools_that_stay_inside_the_session_are_not_guard_checked() {
     let events = events("pre_tool_use_in_subagent");
     assert!(
