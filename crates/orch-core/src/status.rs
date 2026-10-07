@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::flags::{Attention, ChecksState, Effect, Flags, PrState, PrStatus, ReviewDecision};
 use crate::gate::{DiscardPlan, GateRefusal, agent_settled};
+use crate::turn_gate::TurnGate;
 use crate::{
     AgentEvent, AgentState, ConversationId, InvalidTransition, Observation, PermissionMode, Phase,
     PhaseEvent, Subagent, SubagentId, UsageSample,
@@ -14,8 +15,7 @@ pub struct SessionStatus {
     phase: Phase,
     agent_state: Option<AgentState>,
     agent_process_alive: bool,
-    turn_reported: bool,
-    permission_pending: bool,
+    turn_gate: TurnGate,
     observed: bool,
     flags: Flags,
     watched: bool,
@@ -39,8 +39,7 @@ impl SessionStatus {
             phase: Phase::SettingUp,
             agent_state: None,
             agent_process_alive: false,
-            turn_reported: false,
-            permission_pending: false,
+            turn_gate: TurnGate::default(),
             observed: true,
             flags: Flags::default(),
             watched: false,
@@ -154,12 +153,13 @@ impl SessionStatus {
 
         let before = self.agent_state;
         let current = before.unwrap_or(AgentState::Starting);
-        let after = match self.ignores(&observation) {
-            true => current,
-            false => current.after(&observation, self.observed),
+        let after = if self.turn_gate.ignores(&observation) {
+            current
+        } else {
+            current.after(&observation, self.observed)
         };
         self.agent_state = Some(after);
-        self.track_side_channel(&observation, after);
+        self.turn_gate.note(&observation, after);
 
         let turn_ended = observation == Observation::Agent(AgentEvent::TurnEnded);
         let attention = match after {
@@ -284,35 +284,6 @@ impl SessionStatus {
             return Ok(());
         }
         agent_settled(self.agent_state)
-    }
-
-    fn ignores(&self, observation: &Observation) -> bool {
-        match observation {
-            Observation::Agent(AgentEvent::Ready) => self.turn_reported,
-            Observation::Agent(AgentEvent::PermissionCleared) => !self.permission_pending,
-            _ => false,
-        }
-    }
-
-    fn track_side_channel(&mut self, observation: &Observation, after: AgentState) {
-        use AgentEvent as E;
-        match observation {
-            Observation::Spawned => self.turn_reported = false,
-            Observation::Agent(
-                E::PromptSubmitted
-                | E::ToolStarted { .. }
-                | E::ToolFinished { .. }
-                | E::QuestionAsked
-                | E::TurnEnded
-                | E::Failed { .. },
-            ) => self.turn_reported = true,
-            _ => {}
-        }
-        self.permission_pending = match observation {
-            Observation::Agent(E::PermissionRequested) => true,
-            Observation::Agent(E::QuestionAsked) | Observation::GuardPrompted => false,
-            _ => self.permission_pending && after == AgentState::NeedsInput,
-        };
     }
 
     fn record(&mut self, event: &AgentEvent) {

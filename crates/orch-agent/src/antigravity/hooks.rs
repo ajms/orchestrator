@@ -1,15 +1,18 @@
 use orch_core::{AgentEvent, FailureKind};
 use serde::Deserialize;
+use serde_json::Value;
 
+use super::GUARD_EVENT;
 use crate::PayloadError;
+use crate::hook_event::HOOK_EVENT_FIELD;
 
 const QUESTION_TOOL: &str = "ask_question";
-const GUARD_EVENT: &str = "PreToolUse";
+const FAILED_REASONS: [&str; 2] = ["error", "max_steps_exceeded"];
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct HookPayload {
-    #[serde(rename = "orch_hook_event")]
+    #[serde(skip)]
     event: Option<String>,
     tool_call: Option<ToolCall>,
     termination_reason: Option<String>,
@@ -24,7 +27,11 @@ struct ToolCall {
 }
 
 fn parse(payload: &str) -> Result<HookPayload, PayloadError> {
-    serde_json::from_str(payload).map_err(|err| PayloadError(err.to_string()))
+    let error = |err: serde_json::Error| PayloadError(err.to_string());
+    let value: Value = serde_json::from_str(payload).map_err(error)?;
+    let event = value[HOOK_EVENT_FIELD].as_str().map(String::from);
+    let hook: HookPayload = serde_json::from_value(value).map_err(error)?;
+    Ok(HookPayload { event, ..hook })
 }
 
 pub(super) fn is_guard_payload(payload: &str) -> bool {
@@ -43,9 +50,9 @@ pub(super) fn map_hook(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
             .unwrap_or_default()
     };
     let events = match hook.event.as_deref() {
-        Some("PreInvocation" | "PostInvocation") => vec![AgentEvent::PromptSubmitted],
-        Some("PreToolUse") if tool() == QUESTION_TOOL => vec![AgentEvent::QuestionAsked],
-        Some("PreToolUse") => vec![AgentEvent::ToolStarted {
+        Some("PreInvocation") => vec![AgentEvent::PromptSubmitted],
+        Some(GUARD_EVENT) if tool() == QUESTION_TOOL => vec![AgentEvent::QuestionAsked],
+        Some(GUARD_EVENT) => vec![AgentEvent::ToolStarted {
             tool: tool(),
             subagent: None,
         }],
@@ -65,14 +72,13 @@ fn stop(hook: &HookPayload) -> Vec<AgentEvent> {
         .as_deref()
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let reason = reason.trim_start_matches("termination_reason_");
-    if reason == "error" || reason.starts_with("max_") {
+    if FAILED_REASONS.contains(&reason.as_str()) {
         let error = hook.error.as_deref().filter(|error| !error.is_empty());
-        let kind = FailureKind::Other(error.unwrap_or(reason).into());
-        return vec![AgentEvent::Failed { kind }];
-    }
-    match hook.fully_idle {
-        true => vec![AgentEvent::TurnEnded],
-        false => Vec::new(),
+        let kind = FailureKind::Other(error.unwrap_or(&reason).into());
+        vec![AgentEvent::Failed { kind }]
+    } else if hook.fully_idle {
+        vec![AgentEvent::TurnEnded]
+    } else {
+        Vec::new()
     }
 }

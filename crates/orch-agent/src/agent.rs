@@ -66,6 +66,10 @@ impl LaunchSpec {
         }
     }
 
+    pub fn resume_mode(&self, observed: Option<PermissionMode>) -> Option<PermissionMode> {
+        self.preset.mode.and(observed.or(self.preset.mode))
+    }
+
     pub fn with_prompt(self, prompt: impl Into<String>) -> Self {
         Self {
             prompt: Some(prompt.into()),

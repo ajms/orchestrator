@@ -19,8 +19,8 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Some(conversation_flag) = draft_request(&scripted, agent_args) {
-        return draft(agent_args, conversation_flag);
+    if let Some(request) = DraftRequest::find(&scripted, agent_args) {
+        return request.answer(agent_args);
     }
     disable_echo();
     announce(agent_args);
@@ -40,31 +40,36 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn draft_request<'a>(script: &'a str, agent_args: &[String]) -> Option<Option<&'a str>> {
-    script.lines().find_map(|line| {
-        let mut words = line.strip_prefix("draft ")?.split_whitespace();
-        let flag = words.next()?;
-        agent_args
-            .iter()
-            .any(|arg| arg == flag)
-            .then(|| words.next())
-    })
+struct DraftRequest<'a> {
+    conversation_flag: Option<&'a str>,
 }
 
-fn draft(agent_args: &[String], conversation_flag: Option<&str>) -> ExitCode {
-    let mut instruction = String::new();
-    let _ = std::io::stdin().read_to_string(&mut instruction);
-    let conversation = agent_args
-        .iter()
-        .skip_while(|arg| Some(arg.as_str()) != conversation_flag)
-        .nth(1)
-        .map_or("nothing", String::as_str);
-    print!(
-        "Drafted from {conversation}\n\nargs: {}\n{}\n",
-        agent_args.join(" "),
-        instruction.trim()
-    );
-    ExitCode::SUCCESS
+impl<'a> DraftRequest<'a> {
+    fn find(script: &'a str, agent_args: &[String]) -> Option<Self> {
+        script.lines().find_map(|line| {
+            let mut words = line.strip_prefix("draft ")?.split_whitespace();
+            let flag = words.next()?;
+            agent_args.iter().any(|arg| arg == flag).then(|| Self {
+                conversation_flag: words.next(),
+            })
+        })
+    }
+
+    fn answer(&self, agent_args: &[String]) -> ExitCode {
+        let mut instruction = String::new();
+        let _ = std::io::stdin().read_to_string(&mut instruction);
+        let conversation = agent_args
+            .iter()
+            .skip_while(|arg| Some(arg.as_str()) != self.conversation_flag)
+            .nth(1)
+            .map_or("nothing", String::as_str);
+        print!(
+            "Drafted from {conversation}\n\nargs: {}\n{}\n",
+            agent_args.join(" "),
+            instruction.trim()
+        );
+        ExitCode::SUCCESS
+    }
 }
 
 fn announce(agent_args: &[String]) {
@@ -76,16 +81,19 @@ fn announce(agent_args: &[String]) {
                 say(&format!("prompt> {}", prompt.join(" ")));
             }
             flag if flag.len() > 1 && flag.starts_with('-') => {
-                let value = args.next().map_or("", String::as_str);
-                let value = if value.starts_with('{') {
-                    "{…}"
-                } else {
-                    value
-                };
+                let value = elide_json(args.next().map_or("", String::as_str));
                 say(&format!("{}> {value}", flag.trim_start_matches('-')));
             }
             other => say(&format!("arg> {other}")),
         }
+    }
+}
+
+fn elide_json(value: &str) -> &str {
+    if value.starts_with('{') {
+        "{…}"
+    } else {
+        value
     }
 }
 

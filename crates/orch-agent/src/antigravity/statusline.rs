@@ -1,6 +1,7 @@
-use orch_core::{AgentEvent, ConversationId, PermissionMode};
+use orch_core::{AgentEvent, ConversationId};
 use serde::Deserialize;
 
+use super::mode_from_name;
 use crate::PayloadError;
 
 const STARTING_UP: [&str; 2] = ["authenticating", "initializing"];
@@ -14,15 +15,6 @@ struct StatusLine {
     cycle_mode: Option<String>,
 }
 
-fn mode(cycle_mode: Option<&str>) -> Option<PermissionMode> {
-    match cycle_mode {
-        None | Some("") => Some(PermissionMode::Default),
-        Some("accept-edits") => Some(PermissionMode::AcceptEdits),
-        Some("plan") => Some(PermissionMode::Plan),
-        Some(_) => None,
-    }
-}
-
 pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
     let line: StatusLine =
         serde_json::from_str(payload).map_err(|err| PayloadError(err.to_string()))?;
@@ -33,12 +25,12 @@ pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         }
     });
     let mode = (!STARTING_UP.contains(&state))
-        .then(|| mode(line.cycle_mode.as_deref()))
+        .then(|| mode_from_name(line.cycle_mode.as_deref()))
         .flatten()
         .map(|mode| AgentEvent::ModeChanged { mode });
     let prompt = match line.tool_confirmation_pending {
         Some(true) => vec![AgentEvent::PermissionRequested],
-        _ if state == "idle" => vec![AgentEvent::PermissionCleared, AgentEvent::Ready],
+        _ if state == "idle" => vec![AgentEvent::PermissionCleared, AgentEvent::AwaitingPrompt],
         _ => vec![AgentEvent::PermissionCleared],
     };
     Ok(conversation.into_iter().chain(mode).chain(prompt).collect())

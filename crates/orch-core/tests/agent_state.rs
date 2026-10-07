@@ -74,11 +74,43 @@ fn permission_requests_and_questions_need_input() {
 fn needs_input_clears_on_the_next_event() {
     let mut status = idle_session();
     status.feed_event(AgentEvent::PermissionRequested);
-    status.feed_event(AgentEvent::ToolStarted {
+    status.feed_event(AgentEvent::ToolFinished {
         tool: "Edit".into(),
         subagent: None,
     });
     assert_eq!(status.agent_state(), Some(AgentState::Working));
+}
+
+#[test]
+fn a_tool_starting_elsewhere_keeps_a_pending_permission_prompt() {
+    let mut status = working_session();
+    status.feed_event(AgentEvent::PermissionRequested);
+    status.feed_event(AgentEvent::ToolStarted {
+        tool: "run_command".into(),
+        subagent: None,
+    });
+    assert_eq!(status.agent_state(), Some(AgentState::NeedsInput));
+
+    status.feed_event(AgentEvent::PromptSubmitted);
+    assert_eq!(status.agent_state(), Some(AgentState::Working));
+}
+
+#[test]
+fn a_late_permission_request_does_not_reopen_a_finished_turn() {
+    let mut idle = working_session();
+    idle.feed_event(AgentEvent::TurnEnded);
+    let mut errored = working_session();
+    errored.feed_event(AgentEvent::Failed {
+        kind: FailureKind::Server,
+    });
+    for (mut status, settled) in [(idle, AgentState::Idle), (errored, AgentState::Errored)] {
+        status.feed_event(AgentEvent::PermissionRequested);
+        assert_eq!(status.agent_state(), Some(settled));
+
+        status.feed_event(AgentEvent::PromptSubmitted);
+        status.feed_event(AgentEvent::PermissionRequested);
+        assert_eq!(status.agent_state(), Some(AgentState::NeedsInput));
+    }
 }
 
 #[test]
@@ -215,38 +247,38 @@ fn an_adopted_agent_resumes_from_its_persisted_state() {
 }
 
 #[test]
-fn ready_before_the_first_turn_settles_the_agent_as_idle() {
+fn awaiting_a_prompt_before_the_first_turn_settles_the_agent_as_idle() {
     let mut status = starting_session();
-    status.feed_event(AgentEvent::Ready);
+    status.feed_event(AgentEvent::AwaitingPrompt);
     assert_eq!(status.agent_state(), Some(AgentState::Idle));
 
     let mut status = starting_session();
     status.feed_event(AgentEvent::PermissionRequested);
     status.feed(Observation::UserInput);
-    status.feed_event(AgentEvent::Ready);
+    status.feed_event(AgentEvent::AwaitingPrompt);
     assert_eq!(status.agent_state(), Some(AgentState::Idle));
 }
 
 #[test]
-fn ready_after_a_turn_began_keeps_the_agent_state() {
+fn awaiting_a_prompt_after_a_turn_began_keeps_the_agent_state() {
     let mut status = starting_session();
     status.feed_event(AgentEvent::PromptSubmitted);
-    status.feed_event(AgentEvent::Ready);
+    status.feed_event(AgentEvent::AwaitingPrompt);
     assert_eq!(status.agent_state(), Some(AgentState::Working));
 
     status.feed_event(AgentEvent::Failed {
         kind: FailureKind::Other("error".into()),
     });
-    status.feed_event(AgentEvent::Ready);
+    status.feed_event(AgentEvent::AwaitingPrompt);
     assert_eq!(status.agent_state(), Some(AgentState::Errored));
 }
 
 #[test]
-fn a_respawned_agent_can_be_ready_again() {
+fn a_respawned_agent_can_await_a_prompt_again() {
     let mut status = working_session();
     status.feed(Observation::Exited { code: Some(0) });
     status.feed(Observation::Spawned);
-    status.feed_event(AgentEvent::Ready);
+    status.feed_event(AgentEvent::AwaitingPrompt);
     assert_eq!(status.agent_state(), Some(AgentState::Idle));
 }
 

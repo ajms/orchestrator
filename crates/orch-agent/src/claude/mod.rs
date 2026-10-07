@@ -131,7 +131,7 @@ impl AgentAdapter for ClaudeCode {
         conversation: &ConversationId,
         observed_mode: Option<PermissionMode>,
     ) -> Option<Argv> {
-        let mode = spec.preset.mode.and(observed_mode.or(spec.preset.mode));
+        let mode = spec.resume_mode(observed_mode);
         Some(self.interactive(["--resume", conversation.as_str()], spec, mode))
     }
 

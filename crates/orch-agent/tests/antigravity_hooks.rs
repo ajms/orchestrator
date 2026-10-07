@@ -1,5 +1,7 @@
+use std::time::Instant;
+
 use orch_agent::{AgentAdapter, Antigravity, tag_hook_event};
-use orch_core::{AgentEvent, FailureKind};
+use orch_core::{AgentEvent, AgentState, FailureKind, Observation, PhaseEvent};
 
 fn fixture(name: &str) -> String {
     let path = format!(
@@ -31,10 +33,30 @@ fn a_model_invocation_means_the_agent_is_working() {
         events("PreInvocation", "pre_invocation"),
         [AgentEvent::PromptSubmitted]
     );
-    assert_eq!(
-        events("PostInvocation", "post_invocation"),
-        [AgentEvent::PromptSubmitted]
-    );
+}
+
+#[test]
+fn a_finished_invocation_leaves_errored_and_needs_input_alone() {
+    let settle = |event: AgentEvent| {
+        let mut status = Antigravity::default().capabilities().session_status();
+        status.transition(PhaseEvent::SetupSucceeded).unwrap();
+        status.observe(Observation::Spawned, Instant::now());
+        status.observe(Observation::Agent(event), Instant::now());
+        status
+    };
+    let errored = settle(AgentEvent::Failed {
+        kind: FailureKind::Server,
+    });
+    let asked = settle(AgentEvent::QuestionAsked);
+    for (mut status, held) in [
+        (errored, AgentState::Errored),
+        (asked, AgentState::NeedsInput),
+    ] {
+        for event in events("PostInvocation", "post_invocation") {
+            status.observe(Observation::Agent(event), Instant::now());
+        }
+        assert_eq!(status.agent_state(), Some(held));
+    }
 }
 
 #[test]

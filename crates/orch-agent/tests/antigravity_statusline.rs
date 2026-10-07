@@ -37,7 +37,7 @@ fn an_idle_line_reports_the_conversation_the_default_mode_and_readiness() {
             conversation(),
             mode(PermissionMode::Default),
             AgentEvent::PermissionCleared,
-            AgentEvent::Ready,
+            AgentEvent::AwaitingPrompt,
         ]
     );
 }
