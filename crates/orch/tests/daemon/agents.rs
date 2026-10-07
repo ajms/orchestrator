@@ -103,3 +103,34 @@ async fn creating_a_session_for_an_unknown_agent_is_refused() {
     );
     assert!(client.session_list().await.is_empty());
 }
+
+#[tokio::test]
+async fn a_relative_agent_binary_resolves_against_the_repo_root_for_the_form_and_the_launch() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    std::fs::create_dir_all(repo.join("bin")).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_orch"), repo.join("bin/agent")).unwrap();
+    env.write_config_with_agent("", "./bin/agent");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+
+    let Ok(Reply::RepoSettings(settings)) = client
+        .request(Request::RepoSettings { repo: repo.clone() })
+        .await
+    else {
+        panic!("expected RepoSettings");
+    };
+    assert_eq!(settings.agents[0].unavailable, None);
+
+    let id = client
+        .create(CreateSession::new(&repo, "Local agent"))
+        .await;
+    let running = client
+        .until(&id, "launched", |view| {
+            view.agent.is_some() || view.error.is_some()
+        })
+        .await;
+    assert_eq!(running.error, None);
+    let mut pane = env.pane(&id, PANE).await;
+    pane.wait_for_text("Local agent").await;
+}

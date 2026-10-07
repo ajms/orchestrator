@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use orch_agent::{INHERIT, Preset, Presets, mode_from_name};
 use serde::Deserialize;
@@ -43,19 +43,23 @@ pub(crate) struct RepoLayer {
     presets: BTreeMap<String, PresetLayer>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug)]
 enum AgentSetting {
     Name(String),
-    OldTable(OldAgentTable),
+    OldTable(toml::Table),
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct OldAgentTable {
-    name: Option<String>,
-    binary: Option<String>,
-    args: Option<Vec<String>>,
+impl<'de> Deserialize<'de> for AgentSetting {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match toml::Value::deserialize(deserializer)? {
+            toml::Value::String(name) => Ok(AgentSetting::Name(name)),
+            toml::Value::Table(table) => Ok(AgentSetting::OldTable(table)),
+            other => Err(serde::de::Error::custom(format!(
+                "agent must be an Agent name, not a {}",
+                other.type_str()
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -68,16 +72,25 @@ struct AgentLayer {
 impl RepoLayer {
     pub(crate) fn check(&self) -> Result<(), ConfigProblem> {
         match &self.agent {
-            Some(AgentSetting::OldTable(old)) => Err(ConfigProblem::OldAgentTable {
-                name: old.name.clone().unwrap_or_else(|| DEFAULT_AGENT.into()),
-                binary: old.binary.clone(),
-                args: old.args.clone(),
-            }),
+            Some(AgentSetting::OldTable(old)) => {
+                let text = |key| old.get(key).and_then(toml::Value::as_str).map(String::from);
+                let args = old.get("args").and_then(toml::Value::as_array).map(|args| {
+                    args.iter()
+                        .filter_map(toml::Value::as_str)
+                        .map(String::from)
+                        .collect()
+                });
+                Err(ConfigProblem::OldAgentTable {
+                    name: text("name").unwrap_or_else(|| DEFAULT_AGENT.into()),
+                    binary: text("binary"),
+                    args,
+                })
+            }
             _ => Ok(()),
         }
     }
 
-    fn agent_name(&self) -> Option<&String> {
+    fn agent_name(&self) -> Option<&str> {
         match &self.agent {
             Some(AgentSetting::Name(name)) => Some(name),
             _ => None,
@@ -176,7 +189,7 @@ impl RepoConfig {
         let names = layers
             .iter()
             .flat_map(|(_, layer)| layer.agents.keys())
-            .collect::<std::collections::BTreeSet<_>>();
+            .collect::<BTreeSet<_>>();
         let agents = names
             .into_iter()
             .map(|name| {
@@ -232,7 +245,8 @@ impl RepoConfig {
                 .iter()
                 .rev()
                 .find_map(|(_, layer)| layer.agent_name())
-                .map_or_else(|| DEFAULT_AGENT.into(), Clone::clone),
+                .unwrap_or(DEFAULT_AGENT)
+                .into(),
             agents,
             notifications: Notifications::layered(
                 std::iter::once(global_notifications)

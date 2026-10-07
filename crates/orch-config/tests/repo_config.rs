@@ -78,6 +78,19 @@ fn the_old_agent_table_is_an_error_that_shows_the_new_form() {
     assert!(err.contains("agent = \"claude\""), "{err}");
     assert!(err.contains("[agents.claude]"), "{err}");
 
+    for odd in [
+        "[agent]\nname = \"gemini\"\nmodel = \"pro\"\n",
+        "[agent]\nname = 5\n",
+    ] {
+        fx.repo_file(odd);
+        let err = fx
+            .loader
+            .repo(fx.repo_path(), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("the [agent] table was replaced"), "{err}");
+    }
+
     fx.repo_file("");
     fx.global("[defaults.agent]\nbinary = \"/opt/claude\"\n");
     let err = fx.loader.global().unwrap_err().to_string();

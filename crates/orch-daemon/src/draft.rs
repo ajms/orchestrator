@@ -4,7 +4,7 @@ use orch_agent::Argv;
 use orch_core::SessionId;
 use orch_protocol::{LandingMode, Reply, RequestError};
 
-use crate::agents::launchable;
+use crate::agents::installed_adapter;
 use crate::lifecycle::{PROMPT_FILE, refused, untrusted};
 use crate::state::Daemon;
 use crate::subprocess;
@@ -45,7 +45,7 @@ impl Daemon {
         let agent = config
             .agent(&record.agent)
             .map_err(|_| untrusted(&repo, &config))?;
-        let adapter = launchable(&agent, &record.worktree).map_err(refused)?;
+        let adapter = installed_adapter(&agent, &repo).map_err(refused)?;
         let Some(Argv { program, args }) = adapter.draft(&conversation) else {
             return Ok(self.default_draft(id, &record.slug).await);
         };

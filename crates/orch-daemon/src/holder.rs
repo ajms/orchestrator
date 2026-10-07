@@ -7,8 +7,7 @@ use std::time::{Duration, Instant};
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use orch_agent::{
-    AgentAdapter, Capabilities, GuardAnswer, GuardContext, GuardDecision, TitleWatch,
-    evaluate_guard,
+    Capabilities, GuardAnswer, GuardContext, GuardDecision, TitleWatch, evaluate_guard,
 };
 use orch_core::{
     AgentEvent, AgentState, ConversationId, Effect, GuardedAction, Observation, PhaseEvent,
@@ -143,9 +142,7 @@ impl Daemon {
             .lock()
             .sessions
             .get(id)
-            .and_then(|live| live.adapter.as_ref())
-            .filter(|adapter| adapter.capabilities().titles)
-            .and_then(|adapter| adapter.title_watch())?;
+            .and_then(|live| live.title_watch())?;
         let (payloads, followed) = mpsc::channel(HOLDER_QUEUE);
         tokio::spawn(self.clone().follow_titles(id.clone(), watch, followed));
         Some(payloads)
@@ -267,11 +264,7 @@ impl Daemon {
                 if let Some(transcripts) = &mut live.transcripts {
                     transcripts.follow(&payload);
                 }
-                let events = live
-                    .adapter
-                    .as_ref()
-                    .and_then(|adapter| adapter.map_hook(&payload).ok())
-                    .unwrap_or_default();
+                let events = live.hook_events(&payload);
                 let effects = observe(live, &events, now, &mut conversations, &mut usage);
                 describe_subagents(live, &events);
                 if let Some(guard) = guard {
@@ -280,11 +273,7 @@ impl Daemon {
                 effects
             }
             HolderEvent::Tap { payload } => {
-                let events = live
-                    .adapter
-                    .as_ref()
-                    .and_then(|adapter| adapter.map_tap(&payload).ok())
-                    .unwrap_or_default();
+                let events = live.tap_events(&payload);
                 observe(live, &events, now, &mut conversations, &mut usage)
             }
         };
@@ -386,16 +375,8 @@ fn retitle(live: &mut Live, title: &str) {
 }
 
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
-    let adapter = live.adapter.as_ref();
-    let check = guard_check(
-        adapter
-            .map(|adapter| adapter.capabilities())
-            .unwrap_or_default(),
-        events,
-    );
-    let agent_dirs = adapter
-        .map(|adapter| guard_dirs(adapter.as_ref(), &live.record.worktree))
-        .unwrap_or_default();
+    let check = guard_check(live.capabilities(), events);
+    let agent_dirs = guard_dirs(live.agent_dirs(), &live.record.worktree);
     let decision = check.map(|check| {
         let context = GuardContext {
             worktree: &live.record.worktree,
@@ -427,8 +408,7 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
     }
 }
 
-fn guard_dirs(adapter: &dyn AgentAdapter, worktree: &Path) -> Vec<PathBuf> {
-    let mut dirs = adapter.agent_dirs(&orch_config::xdg::process_env);
+fn guard_dirs(mut dirs: Vec<PathBuf>, worktree: &Path) -> Vec<PathBuf> {
     dirs.push(orch_git::subagent_worktrees_dir(worktree));
     dirs
 }
@@ -518,10 +498,7 @@ mod tests {
 
     #[test]
     fn the_guard_counts_the_sessions_subagent_worktrees_as_its_own() {
-        let dirs = guard_dirs(
-            &orch_agent::ClaudeCode::default(),
-            Path::new("/repo/.orchestrator/worktrees/work"),
-        );
+        let dirs = guard_dirs(Vec::new(), Path::new("/repo/.orchestrator/worktrees/work"));
         assert!(dirs.contains(&PathBuf::from("/repo/.orchestrator/subagents/work")));
         assert!(!dirs.contains(&PathBuf::from("/repo/.orchestrator/subagents")));
     }

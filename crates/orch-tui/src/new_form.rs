@@ -248,28 +248,23 @@ impl NewForm {
     }
 
     fn preset_key(&mut self, key: KeyEvent) -> Outcome {
-        let len = self.presets.len() + 1;
+        if key.code == KeyCode::Enter {
+            return self.move_field(1);
+        }
         let at = self.preset.map_or(0, |at| at + 1);
-        let next = match key.code {
-            KeyCode::Enter => return self.move_field(1),
-            KeyCode::Left | KeyCode::Up => (at + len - 1) % len,
-            KeyCode::Right | KeyCode::Down => (at + 1) % len,
-            _ => return Outcome::Stay,
-        };
-        self.preset = next.checked_sub(1);
+        if let Some(next) = cycle(key.code, at, self.presets.len() + 1) {
+            self.preset = next.checked_sub(1);
+        }
         Outcome::Stay
     }
 
     fn agent_key(&mut self, key: KeyEvent) -> Outcome {
-        let len = self.agents.len().max(1);
-        let at = self.agent.unwrap_or(0);
-        let next = match key.code {
-            KeyCode::Enter => return self.move_field(1),
-            KeyCode::Left | KeyCode::Up => (at + len - 1) % len,
-            KeyCode::Right | KeyCode::Down => (at + 1) % len,
-            _ => return Outcome::Stay,
-        };
-        self.agent = (!self.agents.is_empty()).then_some(next);
+        if key.code == KeyCode::Enter {
+            return self.move_field(1);
+        }
+        if let Some(next) = cycle(key.code, self.agent.unwrap_or(0), self.agents.len()) {
+            self.agent = Some(next);
+        }
         Outcome::Stay
     }
 
@@ -339,4 +334,13 @@ impl NewForm {
 fn plain(key: KeyEvent) -> bool {
     !key.modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+}
+
+fn cycle(code: KeyCode, at: usize, len: usize) -> Option<usize> {
+    match code {
+        _ if len == 0 => None,
+        KeyCode::Left | KeyCode::Up => Some((at + len - 1) % len),
+        KeyCode::Right | KeyCode::Down => Some((at + 1) % len),
+        _ => None,
+    }
 }

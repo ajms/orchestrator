@@ -3,8 +3,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use orch_agent::{GuardHit, GuardKind, SubagentTranscripts, mode_name};
-use orch_core::{AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus};
+use orch_agent::{Capabilities, GuardHit, GuardKind, SubagentTranscripts, TitleWatch, mode_name};
+use orch_core::{
+    AgentEvent, AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus,
+};
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
 use orch_notify::{AttentionEvent, ClientView};
@@ -183,12 +185,15 @@ impl PaneSizes {
     }
 }
 
+fn capabilities_of(adapter: Option<&Adapter>) -> Capabilities {
+    adapter
+        .map(|adapter| adapter.capabilities())
+        .unwrap_or_default()
+}
+
 impl Live {
     pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Option<Adapter>) -> Self {
-        let capabilities = adapter
-            .as_ref()
-            .map(|adapter| adapter.capabilities())
-            .unwrap_or_default();
+        let capabilities = capabilities_of(adapter.as_ref());
         let mut status = capabilities.session_status();
         status.restore(record.phase, record.flags.clone());
         let transcripts = capabilities
@@ -214,6 +219,38 @@ impl Live {
             holder: None,
             generation: 0,
         }
+    }
+
+    pub(crate) fn capabilities(&self) -> Capabilities {
+        capabilities_of(self.adapter.as_ref())
+    }
+
+    pub(crate) fn agent_dirs(&self) -> Vec<PathBuf> {
+        self.adapter
+            .as_ref()
+            .map(|adapter| adapter.agent_dirs(&orch_config::xdg::process_env))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn hook_events(&self, payload: &str) -> Vec<AgentEvent> {
+        self.adapter
+            .as_ref()
+            .and_then(|adapter| adapter.map_hook(payload).ok())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn tap_events(&self, payload: &str) -> Vec<AgentEvent> {
+        self.adapter
+            .as_ref()
+            .and_then(|adapter| adapter.map_tap(payload).ok())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn title_watch(&self) -> Option<Box<dyn TitleWatch>> {
+        self.adapter
+            .as_ref()
+            .filter(|adapter| adapter.capabilities().titles)?
+            .title_watch()
     }
 
     pub(crate) fn transition(&mut self, event: PhaseEvent) -> Result<(), String> {
