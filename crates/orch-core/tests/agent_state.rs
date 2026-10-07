@@ -2,8 +2,8 @@ mod common;
 
 use common::*;
 use orch_core::{
-    AgentEvent, AgentState, ConversationId, FailureKind, Observation, PermissionMode, Phase,
-    SessionStatus, SubagentId, UsageSample,
+    AgentEvent, AgentState, ConversationId, FailureKind, GuardedAction, Observation,
+    PermissionMode, Phase, SessionStatus, SubagentId, UsageSample,
 };
 
 #[test]
@@ -127,7 +127,9 @@ fn bookkeeping_events_keep_the_agent_state() {
         },
         AgentEvent::GuardCheck {
             tool: "Bash".into(),
-            input_json: "{}".into(),
+            action: GuardedAction::Shell {
+                command: "ls".into(),
+            },
             cwd: None,
         },
     ];

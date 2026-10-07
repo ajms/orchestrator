@@ -124,9 +124,16 @@ pub enum AgentEvent {
     },
     GuardCheck {
         tool: String,
-        input_json: String,
+        action: GuardedAction,
         cwd: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuardedAction {
+    WriteFile { path: String },
+    Shell { command: String },
+    ExternalTool { name: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]

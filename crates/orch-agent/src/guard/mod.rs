@@ -5,8 +5,8 @@ mod shell;
 
 use std::path::{Path, PathBuf};
 
+use orch_core::GuardedAction;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use shell::{SimpleCommand, Word};
 
@@ -16,6 +16,7 @@ pub enum GuardKind {
     OtherRef,
     WorktreeManagement,
     WriteOutsideWorktree,
+    ExternalTool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,36 +50,25 @@ pub struct GuardContext<'a> {
 }
 
 pub fn evaluate_guard(
-    tool: &str,
-    input_json: &str,
+    action: &GuardedAction,
     cwd: Option<&Path>,
     context: &GuardContext,
 ) -> GuardDecision {
     if !context.enabled {
         return GuardDecision::Allow;
     }
-    let Ok(input) = serde_json::from_str::<Value>(input_json) else {
-        return GuardDecision::Allow;
-    };
     let scope = GuardScope::new(context);
     let cwd = cwd.map_or_else(
         || scope.worktree.clone(),
         |cwd| paths::resolve(Path::new("/"), &cwd.to_string_lossy()),
     );
-    let field = |key: &str| input.get(key).and_then(Value::as_str);
-    let hits = match tool {
-        "Write" | "Edit" | "MultiEdit" => field("file_path")
-            .and_then(|path| scope.write(&cwd, path))
-            .into_iter()
-            .collect(),
-        "NotebookEdit" => field("notebook_path")
-            .and_then(|path| scope.write(&cwd, path))
-            .into_iter()
-            .collect(),
-        "Bash" => field("command")
-            .map(|command| scope.bash(&cwd, command))
-            .unwrap_or_default(),
-        _ => Vec::new(),
+    let hits = match action {
+        GuardedAction::WriteFile { path } => scope.write(&cwd, path).into_iter().collect(),
+        GuardedAction::Shell { command } => scope.bash(&cwd, command),
+        GuardedAction::ExternalTool { name } => vec![GuardHit {
+            kind: GuardKind::ExternalTool,
+            target: name.clone(),
+        }],
     };
     hits.into_iter()
         .find(|hit| !context.allowed.contains(hit))
