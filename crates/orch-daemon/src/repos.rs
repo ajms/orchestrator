@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use orch_agent::built_in_names;
 use orch_config::RepoConfig;
 use orch_core::SessionId;
 use orch_protocol::{AgentChoice, Reply, RepoSettings, RequestError, StaleOverrides};
 use orch_store::RepoRoot;
 
-use crate::agents::{built_in_names, installed_adapter};
+use crate::agents::installed_adapter;
 use crate::lifecycle::{Busy, refused, trust_needed, with_git};
 use crate::reconcile::Pass;
 use crate::state::Daemon;

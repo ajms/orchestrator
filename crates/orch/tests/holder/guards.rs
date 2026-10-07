@@ -1,4 +1,4 @@
-use orch_agent::GuardAnswer;
+use orch_agent::{ClaudeCode, GuardAnswer};
 use orch_holder::{HolderEvent, ToHolder};
 use serde_json::Value;
 
@@ -94,7 +94,7 @@ async fn guard_without_a_daemon_asks_the_user_and_is_still_recorded() {
     assert_eq!(
         next_hook_or_tap(&mut client).await,
         HolderEvent::Hook {
-            agent: Some("claude".into()),
+            agent: Some(ClaudeCode::NAME.into()),
             payload: PRE_TOOL_USE.into(),
             guard: None
         }
