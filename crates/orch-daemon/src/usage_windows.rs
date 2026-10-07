@@ -54,7 +54,7 @@ impl UsageWindows {
 
 #[cfg(test)]
 mod tests {
-    use orch_agent::ClaudeCode;
+    use orch_agent::{Antigravity, ClaudeCode};
     use orch_core::UsageWindow;
 
     use super::*;
@@ -86,7 +86,7 @@ mod tests {
         let mut windows = UsageWindows::default();
         windows.note(ClaudeCode::NAME, &sample(&[("five_hour", "5h", 42.0)]));
         windows.note(
-            "antigravity",
+            Antigravity::NAME,
             &sample(&[("gemini-weekly", "gemini-wk", 7.0)]),
         );
         windows.note(
@@ -102,7 +102,7 @@ mod tests {
                         ClaudeCode::NAME,
                         &[("five_hour", "5h", 44.0), ("seven_day", "7d", 18.0)]
                     ),
-                    agent("antigravity", &[("gemini-weekly", "gemini-wk", 7.0)]),
+                    agent(Antigravity::NAME, &[("gemini-weekly", "gemini-wk", 7.0)]),
                 ]
             }
         );
@@ -115,6 +115,6 @@ mod tests {
         assert!(!windows.note(claude, &sample(&[])));
         assert!(windows.note(claude, &sample(&[("five_hour", "5h", 42.0)])));
         assert!(!windows.note(claude, &sample(&[("five_hour", "5h", 42.0)])));
-        assert!(windows.note("antigravity", &sample(&[("five_hour", "5h", 42.0)])));
+        assert!(windows.note(Antigravity::NAME, &sample(&[("five_hour", "5h", 42.0)])));
     }
 }

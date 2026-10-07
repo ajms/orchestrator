@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use orch_agent::{AgentAdapter, Antigravity, ConversationTree, tag_hook_event};
+use orch_agent::hook_event::tag_hook_event;
+use orch_agent::{AgentAdapter, Antigravity, ConversationTree};
 use orch_core::{AgentEvent, ConversationId, GuardedAction, SubagentId};
 use serde_json::{Value, json};
 
