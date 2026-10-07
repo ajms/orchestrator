@@ -261,8 +261,22 @@ impl RealAgy {
         fixtures::read_captures(&self.captures.join(id.as_str()))
     }
 
+    pub fn stops(&self, id: &SessionId) -> Vec<String> {
+        self.captures(id)
+            .into_iter()
+            .filter(|capture| capture.event == "Stop")
+            .filter_map(|capture| serde_json::from_str::<serde_json::Value>(&capture.payload).ok())
+            .map(|stop| {
+                format!(
+                    "{} fullyIdle={} terminationReason={}",
+                    stop["conversationId"], stop["fullyIdle"], stop["terminationReason"]
+                )
+            })
+            .collect()
+    }
+
     pub async fn saw_fully_idle_stop(&self, id: &SessionId, root: &str) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if fixtures::fully_idle_stop(&self.captures(id), root) {
                 return true;

@@ -84,7 +84,8 @@ async fn the_initial_prompt_reaches_orch_through_the_hookup_until_a_fully_idle_s
     let root = agy.conversations(&client, &id).root;
     assert!(
         agy.saw_fully_idle_stop(&id, &root).await,
-        "no Stop with fullyIdle: true from {root}"
+        "no Stop with fullyIdle: true from {root}; Stops seen: {:?}",
+        agy.stops(&id)
     );
     agy.record(&client, &id, Recording::Hookup);
 }
@@ -210,8 +211,9 @@ async fn a_subagent_becomes_a_subagent_row_with_its_transcript() {
     assert!(!idle_while_running, "Idle while a Subagent row ran");
     assert!(
         agy.saw_fully_idle_stop(&id, &conversations.root).await,
-        "no Stop with fullyIdle: true from {}",
-        conversations.root
+        "no Stop with fullyIdle: true from {}; Stops seen: {:?}",
+        conversations.root,
+        agy.stops(&id)
     );
     agy.record(&client, &id, Recording::Subagent);
 }
