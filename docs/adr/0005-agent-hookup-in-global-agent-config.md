@@ -12,4 +12,4 @@ For Claude Code, the Orchestrator injects its hooks, statusline and Preset rules
 - Creating a Session for such an Agent is refused, with a hint, until its hookup is installed. `orch doctor` checks that it is still in place, and `orch agent uninstall <agent>` removes it and restores the previous statusline.
 - A Session leaves nothing behind in Worktrees or global config, so Teardown has nothing extra to clean up.
 - The hook fires for every run of the Agent on the machine. Payloads whose `--agent` doesn't match the Session's Agent are dropped. A nested run of the same Agent inside its own Session is an accepted edge case.
-- orch never pre-trusts Worktrees, so each new Antigravity Session opens on agy's trust screen until the user confirms it.
+- orch never answers agy's workspace-trust screen, so each new Antigravity Session opens on it until the user confirms it.

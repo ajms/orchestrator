@@ -37,7 +37,7 @@ What a live Session's Agent is doing right now: Starting, Working, Needs input, 
 _Avoid_: Activity, run state
 
 **Needs input**:
-The Agent state in which the Agent is blocked on the user: a permission prompt or a question it asked.
+The Agent state in which the Agent is blocked on the user: a permission prompt or a question it asked. An Agent that gives no signal for a blocking start-up screen (agy's workspace-trust screen) shows Starting there instead.
 _Avoid_: Waiting, blocked, paused
 
 **Unseen**:
@@ -63,7 +63,7 @@ _Avoid_: Project settings, repo file
 
 **Trust**:
 The user's approval to run the scripts a Repo config brings from the Repo itself; it lapses when those scripts change.
-_Avoid_: Allow-list, permission
+_Avoid_: Allow-list, permission, workspace trust (agy's screen asking whether to trust a folder)
 
 **Session**:
 One Agent working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent, or starting a new Conversation, keeps the same Session.
