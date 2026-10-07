@@ -14,7 +14,7 @@ pub struct UsageTotals {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct AgentUsage {
+pub struct RepoAgentUsage {
     pub repo: PathBuf,
     pub agent: String,
     pub totals: UsageTotals,
@@ -39,10 +39,10 @@ impl UsageTotals {
         Self {
             input_tokens: self.input_tokens + other.input_tokens,
             output_tokens: self.output_tokens + other.output_tokens,
-            cost_usd: match (self.cost_usd, other.cost_usd) {
-                (Some(cost), Some(other)) => Some(cost + other),
-                (cost, None) | (None, cost) => cost,
-            },
+            cost_usd: self
+                .cost_usd
+                .zip(other.cost_usd)
+                .map(|(cost, other)| cost + other),
         }
     }
 
@@ -68,7 +68,7 @@ impl UsageTotals {
 
 impl std::iter::Sum for UsageTotals {
     fn sum<I: Iterator<Item = Self>>(totals: I) -> Self {
-        totals.fold(Self::default(), Self::plus)
+        totals.reduce(Self::plus).unwrap_or_default()
     }
 }
 
@@ -160,11 +160,11 @@ impl Store {
             .sum())
     }
 
-    pub fn usage_per_repo(&self) -> Result<Vec<AgentUsage>, StoreError> {
+    pub fn usage_per_repo_and_agent(&self) -> Result<Vec<RepoAgentUsage>, StoreError> {
         self.daily_usage("1", params![])
     }
 
-    pub fn usage_per_repo_today(&self) -> Result<Vec<AgentUsage>, StoreError> {
+    pub fn usage_per_repo_and_agent_today(&self) -> Result<Vec<RepoAgentUsage>, StoreError> {
         self.daily_usage("day = date('now', 'localtime')", params![])
     }
 
@@ -172,15 +172,16 @@ impl Store {
         &self,
         filter: &str,
         args: &[&dyn rusqlite::ToSql],
-    ) -> Result<Vec<AgentUsage>, StoreError> {
+    ) -> Result<Vec<RepoAgentUsage>, StoreError> {
         let mut statement = self.conn.prepare(&format!(
-            "SELECT repo_path, agent, SUM(input_tokens), SUM(output_tokens), SUM(cost_usd)
+            "SELECT repo_path, agent, SUM(input_tokens), SUM(output_tokens),
+                CASE WHEN COUNT(cost_usd) = COUNT(*) THEN SUM(cost_usd) END
              FROM usage_daily WHERE {filter}
              GROUP BY repo_path, agent ORDER BY repo_path, agent"
         ))?;
         let totals = statement
             .query_map(args, |row| {
-                Ok(AgentUsage {
+                Ok(RepoAgentUsage {
                     repo: PathBuf::from(row.get::<_, String>(0)?),
                     agent: row.get(1)?,
                     totals: UsageTotals::from_columns(row, 2)?,
@@ -204,7 +205,7 @@ fn add_daily(
          ON CONFLICT (repo_path, agent, day) DO UPDATE SET
             input_tokens = input_tokens + ?4,
             output_tokens = output_tokens + ?5,
-            cost_usd = COALESCE(cost_usd + ?6, cost_usd, ?6)",
+            cost_usd = cost_usd + ?6",
         params![
             repo_path.to_string_lossy(),
             agent,
@@ -225,7 +226,7 @@ pub(crate) fn move_usage(tx: &Transaction, from: &str, to: &str) -> rusqlite::Re
          ON CONFLICT (repo_path, agent, day) DO UPDATE SET
             input_tokens = input_tokens + excluded.input_tokens,
             output_tokens = output_tokens + excluded.output_tokens,
-            cost_usd = COALESCE(cost_usd + excluded.cost_usd, cost_usd, excluded.cost_usd)",
+            cost_usd = cost_usd + excluded.cost_usd",
         params![from, to],
     )?;
     tx.execute(

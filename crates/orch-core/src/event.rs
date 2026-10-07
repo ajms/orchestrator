@@ -67,7 +67,7 @@ pub enum FailureKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RateLimit {
+pub struct UsageWindow {
     pub name: String,
     pub label: String,
     pub used_percent: f64,
@@ -83,7 +83,7 @@ pub struct UsageSample {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cost_usd: Option<f64>,
-    pub limits: Vec<RateLimit>,
+    pub windows: Vec<UsageWindow>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

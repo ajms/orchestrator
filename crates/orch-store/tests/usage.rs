@@ -4,7 +4,7 @@ use std::path::Path;
 
 use common::{Fixture, new_session};
 use orch_core::{ConversationId, SessionId, UsageSample};
-use orch_store::{AgentUsage, StoreError, UsageTotals};
+use orch_store::{RepoAgentUsage, StoreError, UsageTotals};
 
 fn sample(conversation: Option<&str>, input: u64, output: u64, cost: f64) -> UsageSample {
     UsageSample {
@@ -24,8 +24,8 @@ fn totals(input_tokens: u64, output_tokens: u64, cost_usd: f64) -> UsageTotals {
     }
 }
 
-fn claude(repo: &Path, totals: UsageTotals) -> AgentUsage {
-    AgentUsage {
+fn claude(repo: &Path, totals: UsageTotals) -> RepoAgentUsage {
+    RepoAgentUsage {
         repo: repo.into(),
         agent: "claude".into(),
         totals,
@@ -182,8 +182,8 @@ fn usage_is_totalled_per_repo_overall_and_for_today() {
         claude(&a.path, totals(310, 31, 1.75)),
         claude(&b.path, totals(7, 7, 2.0)),
     ];
-    assert_eq!(fx.store.usage_per_repo().unwrap(), expected);
-    assert_eq!(fx.store.usage_per_repo_today().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent_today().unwrap(), expected);
 }
 
 #[test]
@@ -199,8 +199,8 @@ fn a_forgotten_repo_keeps_counting_toward_usage() {
     fx.store.forget_repo(repo.id).unwrap();
 
     let expected = vec![claude(&repo.path, totals(100, 10, 0.5))];
-    assert_eq!(fx.store.usage_per_repo().unwrap(), expected);
-    assert_eq!(fx.store.usage_per_repo_today().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent_today().unwrap(), expected);
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn moving_a_repo_carries_its_usage_along() {
         .move_repo(repo.id, &orch_store::RepoRoot::resolve(&new_path).unwrap())
         .unwrap();
     assert_eq!(
-        fx.store.usage_per_repo().unwrap(),
+        fx.store.usage_per_repo_and_agent().unwrap(),
         vec![claude(&moved.path, totals(1, 1, 0.5))]
     );
 }
@@ -257,15 +257,49 @@ fn usage_is_split_per_agent_and_an_unreported_cost_stays_unknown() {
         unknown_cost
     );
     let expected = vec![
-        AgentUsage {
+        RepoAgentUsage {
             repo: repo.path.clone(),
             agent: "antigravity".into(),
             totals: unknown_cost,
         },
         claude(&repo.path, totals(100, 10, 0.5)),
     ];
-    assert_eq!(fx.store.usage_per_repo().unwrap(), expected);
-    assert_eq!(fx.store.usage_per_repo_today().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent_today().unwrap(), expected);
+}
+
+#[test]
+fn a_total_that_mixes_known_and_unknown_cost_has_an_unknown_cost() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let first = fx.session(&repo, "first");
+    let second = fx.session(&repo, "second");
+    fx.store
+        .record_usage(&first.id, &sample(Some("c1"), 100, 10, 0.5))
+        .unwrap();
+    let without_cost = UsageSample {
+        conversation: Some(ConversationId("c2".into())),
+        input_tokens: Some(40),
+        output_tokens: Some(4),
+        ..UsageSample::default()
+    };
+    fx.store.record_usage(&second.id, &without_cost).unwrap();
+    fx.store
+        .record_usage(&second.id, &sample(Some("c3"), 1, 1, 0.25))
+        .unwrap();
+
+    let unknown_cost = |input_tokens, output_tokens| UsageTotals {
+        input_tokens,
+        output_tokens,
+        cost_usd: None,
+    };
+    assert_eq!(
+        fx.store.session_usage(&second.id).unwrap(),
+        unknown_cost(41, 5)
+    );
+    let expected = vec![claude(&repo.path, unknown_cost(141, 15))];
+    assert_eq!(fx.store.usage_per_repo_and_agent().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent_today().unwrap(), expected);
 }
 
 #[test]
@@ -301,7 +335,7 @@ fn usage_counted_before_agents_were_recorded_belongs_to_claude() {
 
     fx.reopen();
     assert_eq!(
-        fx.store.usage_per_repo().unwrap(),
+        fx.store.usage_per_repo_and_agent().unwrap(),
         vec![claude(&repo.path, totals(100, 10, 0.5))]
     );
 }

@@ -11,7 +11,7 @@ mod transcript;
 pub use agent_state::AgentState;
 pub use event::{
     AgentEvent, ConversationId, FailureKind, GuardedAction, InvalidSessionId, Observation,
-    PermissionMode, RateLimit, SessionId, SubagentId, UsageSample,
+    PermissionMode, SessionId, SubagentId, UsageSample, UsageWindow,
 };
 pub use flags::{
     Attention, ChecksState, DEFAULT_STALLED_AFTER, Effect, Flags, PrState, PrStatus, ReviewDecision,

@@ -121,7 +121,13 @@ fn usage(frame: &mut Frame, report: &UsageReport) {
     );
     lines.push(Line::default());
     lines.push(Line::from(" Esc close").dark_gray());
-    show(frame, " :usage (estimates) ", Color::Cyan, lines, 92);
+    show(
+        frame,
+        " :usage (approximate, as each Agent reports it) ",
+        Color::Cyan,
+        lines,
+        92,
+    );
 }
 
 fn repo_usage(usage: &RepoUsage) -> Line<'static> {

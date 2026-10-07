@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use orch_protocol::{AgentTotals, Reply, RepoUsage, RequestError, UsageReport, UsageTotalsView};
-use orch_store::{AgentUsage, UsageTotals};
+use orch_store::{RepoAgentUsage, UsageTotals};
 
 use crate::state::Daemon;
 
@@ -11,8 +11,8 @@ impl Daemon {
             .store
             .call(|store| {
                 Ok::<_, orch_store::StoreError>((
-                    store.usage_per_repo()?,
-                    store.usage_per_repo_today()?,
+                    store.usage_per_repo_and_agent()?,
+                    store.usage_per_repo_and_agent_today()?,
                 ))
             })
             .await?
@@ -28,11 +28,13 @@ impl Daemon {
     }
 }
 
-fn per_agent(per_repo: &[AgentUsage]) -> Vec<AgentTotals> {
+fn per_agent(per_repo: &[RepoAgentUsage]) -> Vec<AgentTotals> {
     let mut totals = BTreeMap::<&str, UsageTotals>::new();
     for usage in per_repo {
-        let total = totals.entry(&usage.agent).or_default();
-        *total = total.plus(usage.totals);
+        totals
+            .entry(&usage.agent)
+            .and_modify(|total| *total = total.plus(usage.totals))
+            .or_insert(usage.totals);
     }
     totals
         .into_iter()
@@ -43,7 +45,7 @@ fn per_agent(per_repo: &[AgentUsage]) -> Vec<AgentTotals> {
         .collect()
 }
 
-fn repo_usage(totals: Vec<AgentUsage>) -> Vec<RepoUsage> {
+fn repo_usage(totals: Vec<RepoAgentUsage>) -> Vec<RepoUsage> {
     totals
         .into_iter()
         .map(|usage| RepoUsage {

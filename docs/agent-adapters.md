@@ -62,7 +62,7 @@ The events come from `orch_core::AgentEvent`:
 - `Failed { kind }`
 - `ModeChanged { mode }`, `ConversationChanged { id }`
 - `TitleChanged { title }`, the Session title the user gave through the Agent; an empty title clears it and brings the slug back
-- `UsageSample { … }`. Its `limits` are named usage windows (`RateLimit { name, label, used_percent, resets_at_unix }`); the adapter picks the short `label` the statusline shows, and Claude reports `5h` and `7d`. The Daemon keeps the latest value per (Agent, window). `cost_usd` stays `None` when the Agent doesn't report cost, and orch never estimates it.
+- `UsageSample { … }`. Its `windows` are named usage windows (`UsageWindow { name, label, used_percent, resets_at_unix }`); the adapter picks the short `label` the statusline shows, and Claude reports `5h` and `7d`. The Daemon keeps the latest value per (Agent, window), and the statusline leaves out a window once its `resets_at_unix` has passed. `cost_usd` stays `None` when the Agent doesn't report cost, and orch never estimates it; a total that includes any unknown cost is unknown too.
 - `SubagentStarted { id, agent_type, description }`, `SubagentFinished { id }`
 - `GuardCheck { tool, action, cwd }`, which the Daemon answers with allow, deny or ask. `action` is an Agent-neutral `GuardedAction`, and `tool` is only shown in the Guard prompt:
   - `WriteFile { path }`, a tool that writes or deletes a file; the path may be relative to `cwd`

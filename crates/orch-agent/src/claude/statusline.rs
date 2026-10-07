@@ -1,4 +1,4 @@
-use orch_core::{AgentEvent, ConversationId, RateLimit, UsageSample};
+use orch_core::{AgentEvent, ConversationId, UsageSample, UsageWindow};
 use serde::Deserialize;
 
 use crate::PayloadError;
@@ -49,14 +49,14 @@ struct Window {
 }
 
 impl RateLimits {
-    fn named(self) -> Vec<RateLimit> {
+    fn named(self) -> Vec<UsageWindow> {
         [
             ("five_hour", "5h", self.five_hour),
             ("seven_day", "7d", self.seven_day),
         ]
         .into_iter()
         .filter_map(|(name, label, window)| {
-            window.map(|window| RateLimit {
+            window.map(|window| UsageWindow {
                 name: name.into(),
                 label: label.into(),
                 used_percent: window.used_percentage,
@@ -78,6 +78,6 @@ pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         input_tokens: line.context_window.total_input_tokens,
         output_tokens: line.context_window.total_output_tokens,
         cost_usd: line.cost.total_cost_usd,
-        limits: line.rate_limits.named(),
+        windows: line.rate_limits.named(),
     })])
 }

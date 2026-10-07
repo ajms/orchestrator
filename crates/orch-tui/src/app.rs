@@ -5,7 +5,7 @@ use std::time::Instant;
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentRateLimits, AgentStateView, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt,
+    AgentStateView, AgentUsageWindows, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt,
     LandingMode, LeftoverView, PhaseView, ReconcileReport, Reply, Request, RequestError,
     SessionView, Size, SubagentView, UsageReport,
 };
@@ -186,7 +186,7 @@ pub(crate) struct App {
     pub mode: Mode,
     pub prefix: Option<Prefix>,
     pub message: Option<String>,
-    pub rate_limits: Vec<AgentRateLimits>,
+    pub usage_windows: Vec<AgentUsageWindows>,
     pub popup: Option<Popup>,
     pub review: Option<ReviewView>,
     pub reconcile: Option<ReconcileView>,
@@ -224,7 +224,7 @@ impl App {
             mode: Mode::Normal,
             prefix: None,
             message: None,
-            rate_limits: Vec::new(),
+            usage_windows: Vec::new(),
             popup: None,
             review: None,
             reconcile: None,
@@ -293,7 +293,7 @@ impl App {
                 title,
                 body,
             } => self.ring(&session, &title, &body),
-            FromDaemon::RateLimits { agents } => self.rate_limits = agents,
+            FromDaemon::UsageWindows { agents } => self.usage_windows = agents,
             FromDaemon::Focus { session } => self.focus_session(session),
             FromDaemon::Clipboard { session, text } => {
                 if self.selected.as_ref() == Some(&session) {

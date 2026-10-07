@@ -85,6 +85,10 @@ _Avoid_: Driver, plugin, integration
 The Orchestrator's hooks and statusline installed into an Agent's own global configuration, for Agents that cannot take them per Session; that Agent's Sessions cannot start without it.
 _Avoid_: Integration, setup, plugin
 
+**Usage window**:
+A named limit on how much of an Agent's quota is used in a period (Claude's `5h` and `7d`), as a percentage that resets at a set time; the latest value per Agent and window is shown until it resets.
+_Avoid_: Rate limit, quota, usage limit
+
 **Conversation**:
 The Agent's own chat history within a Session; a Session can move through several (e.g. after the Agent's history is cleared), and only the latest is resumed.
 _Avoid_: Chat, thread, transcript

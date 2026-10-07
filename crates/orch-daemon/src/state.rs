@@ -23,10 +23,10 @@ use tokio::sync::{Notify, watch};
 use crate::DaemonConfig;
 use crate::notify::Notifier;
 use crate::outbox::Outbox;
-use crate::rate_limits::RateLimits;
 use crate::recency::{LastUsed, UseClock};
 use crate::store::StoreHandle;
 use crate::transcript::Following;
+use crate::usage_windows::UsageWindows;
 
 const IDLE_CHECK: Duration = Duration::from_millis(100);
 const STALL_CHECK: Duration = Duration::from_secs(1);
@@ -53,7 +53,7 @@ pub(crate) struct State {
     pub(crate) passes: Passes,
     pub(crate) display: DisplayVars,
     notifier: Notifier,
-    rate_limits: RateLimits,
+    usage_windows: UsageWindows,
     use_clock: UseClock,
 }
 
@@ -508,7 +508,7 @@ impl Daemon {
                 passes: Passes::default(),
                 display: DisplayVars::default(),
                 notifier,
-                rate_limits: RateLimits::default(),
+                usage_windows: UsageWindows::default(),
                 use_clock: UseClock::default(),
             }),
             store,
@@ -636,8 +636,8 @@ impl State {
         let id = self.next_id();
         let sessions = self.sessions.values().map(Live::view).collect();
         outbox.send(FromDaemon::Sessions { sessions });
-        if self.rate_limits.is_known() {
-            outbox.send(self.rate_limits.message());
+        if self.usage_windows.is_known() {
+            outbox.send(self.usage_windows.message());
         }
         if let Some(report) = &self.report {
             outbox.send(FromDaemon::Reconciled {
@@ -721,12 +721,12 @@ impl State {
         }
     }
 
-    pub(crate) fn note_rate_limits(&mut self, agent: &str, sample: &orch_core::UsageSample) {
-        if !self.rate_limits.note(agent, sample) {
+    pub(crate) fn note_usage_windows(&mut self, agent: &str, sample: &orch_core::UsageSample) {
+        if !self.usage_windows.note(agent, sample) {
             return;
         }
         for client in self.clients.values() {
-            client.outbox.send(self.rate_limits.message());
+            client.outbox.send(self.usage_windows.message());
         }
     }
 

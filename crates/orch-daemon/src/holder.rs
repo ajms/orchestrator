@@ -293,7 +293,7 @@ impl Daemon {
         let agent = live.record.agent.clone();
         state.changed(id);
         for sample in &usage {
-            state.note_rate_limits(&agent, sample);
+            state.note_usage_windows(&agent, sample);
         }
         let session = id.clone();
         let prompt = self.session_dir(id).join(PROMPT_FILE);

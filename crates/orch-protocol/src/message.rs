@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use orch_core::{SessionId, TranscriptEntry};
+use orch_core::{SessionId, TranscriptEntry, UsageWindow};
 use orch_holder::{ScreenSnapshot, Size};
 use serde::{Deserialize, Serialize};
 
@@ -259,8 +259,8 @@ pub enum FromDaemon {
     Focus {
         session: SessionId,
     },
-    RateLimits {
-        agents: Vec<AgentRateLimits>,
+    UsageWindows {
+        agents: Vec<AgentUsageWindows>,
     },
     Clipboard {
         session: SessionId,
@@ -270,16 +270,28 @@ pub enum FromDaemon {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentRateLimits {
+pub struct AgentUsageWindows {
     pub agent: String,
-    pub limits: Vec<RateLimitView>,
+    pub windows: Vec<UsageWindowView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RateLimitView {
+pub struct UsageWindowView {
     pub name: String,
     pub label: String,
     pub used_percent: f64,
+    pub resets_at_unix: Option<i64>,
+}
+
+impl From<&UsageWindow> for UsageWindowView {
+    fn from(window: &UsageWindow) -> Self {
+        Self {
+            name: window.name.clone(),
+            label: window.label.clone(),
+            used_percent: window.used_percent,
+            resets_at_unix: window.resets_at_unix,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
