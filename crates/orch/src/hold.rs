@@ -19,8 +19,8 @@ pub struct HoldArgs {
     env: Vec<(String, String)>,
     #[arg(long)]
     base: Option<String>,
-    #[arg(long = "agent")]
-    agent_name: Option<String>,
+    #[arg(long)]
+    agent: Option<String>,
     #[arg(long, requires = "port_size")]
     port_base: Option<u16>,
     #[arg(long, requires = "port_base")]
@@ -62,7 +62,7 @@ pub fn run(args: HoldArgs) -> ExitCode {
     let mut config = HoldConfig::new(args.session, socket, cwd, args.argv);
     config.env = args.env;
     config.base = args.base;
-    config.agent_name = args.agent_name;
+    config.agent = args.agent;
     config.port_block = args
         .port_base
         .zip(args.port_size)

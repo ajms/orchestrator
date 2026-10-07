@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use orch_agent::ClaudeCode;
 use orch_holder::HolderEvent;
 
 use crate::common::*;
@@ -76,6 +77,22 @@ fn tap_output_is_identical_to_the_users_own_statusline() {
 }
 
 #[test]
+fn tap_for_another_agent_prints_nothing() {
+    let sandbox = Sandbox::new();
+    sandbox.write_claude_settings(r#"{"statusLine":{"type":"command","command":"echo mine"}}"#);
+
+    let output = run_with_stdin(
+        sandbox
+            .orch()
+            .args(["tap", "--agent", "antigravity", "--session", "gone"]),
+        STATUS,
+    );
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty(), "{output:?}");
+}
+
+#[test]
 fn tap_rereads_the_users_statusline_on_every_call() {
     let sandbox = Sandbox::new();
     let tap = || {
@@ -103,7 +120,7 @@ async fn tap_forwards_the_statusline_payload_to_the_holder() {
     assert_eq!(
         next_hook_or_tap(&mut client).await,
         HolderEvent::Tap {
-            agent: Some("claude".into()),
+            agent: Some(ClaudeCode::NAME.into()),
             payload: STATUS.into()
         }
     );

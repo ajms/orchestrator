@@ -153,4 +153,12 @@ pub trait AgentAdapter {
     fn agent_dirs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
         Vec::new()
     }
+
+    fn user_statusline_command(
+        &self,
+        _cwd: &Path,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        None
+    }
 }

@@ -5,7 +5,7 @@ mod statusline;
 mod subagents;
 mod transcript;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use hooks::HookEvent;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
@@ -167,6 +167,14 @@ impl AgentAdapter for ClaudeCode {
         settings::config_dir(lookup)
             .map(|dir| vec![dir.join("projects"), dir.join("plans")])
             .unwrap_or_default()
+    }
+
+    fn user_statusline_command(
+        &self,
+        cwd: &Path,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        settings::user_statusline_command(cwd, lookup)
     }
 
     fn draft(&self, conversation: &ConversationId) -> Option<Argv> {

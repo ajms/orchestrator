@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset};
+use orch_agent::{Adapter, AgentAdapter, Argv, LaunchSpec, Preset, by_name};
 use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
@@ -13,7 +13,7 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{Adapter, adapter_by_name, default_program, installed_adapter, known_adapter};
+use crate::agents::{default_program, installed_adapter, known_adapter};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
 
@@ -638,7 +638,7 @@ impl Daemon {
             let Some(repo) = repos.iter().find(|repo| repo.id == record.repo) else {
                 continue;
             };
-            let adapter = adapter_by_name(&record.agent);
+            let adapter = by_name(&record.agent);
             let id = record.id.clone();
             let mut live = Live::new(record, repo.path.clone(), adapter);
             live.setup_output = self.read_setup_log(&id).await;

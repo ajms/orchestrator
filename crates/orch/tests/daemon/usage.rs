@@ -1,3 +1,4 @@
+use orch_agent::ClaudeCode;
 use orch_core::SessionId;
 use orch_protocol::{
     AgentRateLimits, CreateSession, RateLimitView, Reply, Request, UsageReport, UsageTotalsView,
@@ -71,7 +72,10 @@ async fn usage_is_totalled_per_repo_and_for_today_across_conversations_and_agent
             .collect();
         assert_eq!(
             repos,
-            [(app_repo.clone(), "claude"), (lib_repo.clone(), "claude")]
+            [
+                (app_repo.clone(), ClaudeCode::NAME),
+                (lib_repo.clone(), ClaudeCode::NAME)
+            ]
         );
         assert_totals(per_repo[0].totals, 370, 37, 1.875);
         assert_totals(per_repo[1].totals, 1000, 100, 2.0);
@@ -81,7 +85,7 @@ async fn usage_is_totalled_per_repo_and_for_today_across_conversations_and_agent
         .iter()
         .map(|total| total.agent.as_str())
         .collect();
-    assert_eq!(agents, ["claude"]);
+    assert_eq!(agents, [ClaudeCode::NAME]);
     assert_totals(report.per_agent[0].totals, 1370, 137, 3.875);
 }
 
@@ -94,7 +98,7 @@ fn limits(five_hour: f64, seven_day: Option<f64>) -> Vec<AgentRateLimits> {
     let mut limits = vec![window("five_hour", "5h", five_hour)];
     limits.extend(seven_day.map(|used| window("seven_day", "7d", used)));
     vec![AgentRateLimits {
-        agent: "claude".into(),
+        agent: ClaudeCode::NAME.into(),
         limits,
     }]
 }

@@ -1,7 +1,7 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use orch_agent::{AgentAdapter, ClaudeCode, GuardAnswer};
+use orch_agent::{GuardAnswer, by_name};
 use orch_core::SessionId;
 use orch_holder::{ToHolder, locate_socket, report, request_guard};
 
@@ -13,7 +13,7 @@ pub fn run(agent: &str, session: &str) -> ExitCode {
     let socket = SessionId::parse(session)
         .ok()
         .map(|session| locate_socket(&session));
-    match adapter(agent).filter(|adapter| adapter.is_guard_payload(&payload)) {
+    match by_name(agent).filter(|adapter| adapter.is_guard_payload(&payload)) {
         Some(adapter) => {
             let answer = socket.map_or(GuardAnswer::Ask, |socket| {
                 request_guard(&socket, agent, &payload)
@@ -30,8 +30,4 @@ pub fn run(agent: &str, session: &str) -> ExitCode {
         }
     }
     ExitCode::SUCCESS
-}
-
-fn adapter(agent: &str) -> Option<ClaudeCode> {
-    (agent == ClaudeCode::NAME).then(ClaudeCode::default)
 }

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use orch_agent::{ClaudeCode, by_name};
 use orch_config::{GlobalConfig, RepoConfig};
 use orch_core::{Phase, PhaseEvent, SessionId};
 use orch_git::{InUse, Leftover, Script, SessionName, slugify};
@@ -12,7 +13,6 @@ use orch_protocol::{
 };
 use orch_store::{NewSession, PortBlock, RepoRoot, SessionRecord};
 
-use crate::agents::adapter_by_name;
 use crate::cleanup::{CleanupMarker, remove_session_dir};
 use crate::lifecycle::{
     Busy, HOLDER_EXIT_WAIT, new_session_id, refused, select_preset, session_env, with_git,
@@ -264,7 +264,7 @@ impl Daemon {
             })
             .await?
             .map_err(refused)?;
-        let adapter = adapter_by_name(&record.agent);
+        let adapter = by_name(&record.agent);
         self.lock().insert(Live::new(record.clone(), repo, adapter));
         Ok(record)
     }
@@ -345,7 +345,7 @@ impl Daemon {
                 agent: hello
                     .agent_name
                     .clone()
-                    .unwrap_or_else(|| config.default_agent().into()),
+                    .unwrap_or_else(|| ClaudeCode::NAME.into()),
                 port_block: hello.port_block,
             })
             .await

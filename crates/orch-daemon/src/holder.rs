@@ -118,7 +118,7 @@ impl Daemon {
                 FromHolder::Event { seq, event } if seq > last_seq => {
                     last_seq = seq;
                     if event.agent().is_some_and(|from| from != agent) {
-                        self.skip_holder_event(&id, generation, seq);
+                        self.skip_holder_event(&id, generation, &event, seq);
                         continue;
                     }
                     if let (
@@ -289,7 +289,7 @@ impl Daemon {
                 live.record.conversations.push(conversation.clone());
             }
         }
-        let ack = live.holder_outbox();
+        let outbox = live.holder_outbox();
         let agent = live.record.agent.clone();
         state.changed(id);
         for sample in &usage {
@@ -309,25 +309,32 @@ impl Daemon {
             if first_conversation {
                 let _ = std::fs::remove_file(prompt);
             }
-            if let Some(ack) = ack {
-                let _ = ack.try_send(ToHolder::Ack { through: seq });
-            }
+            ack(outbox, seq);
         });
         effects
     }
 
-    fn skip_holder_event(&self, id: &SessionId, generation: u64, seq: u64) {
-        let ack = self
-            .lock()
+    fn skip_holder_event(&self, id: &SessionId, generation: u64, event: &HolderEvent, seq: u64) {
+        let state = self.lock();
+        let Some(live) = state
             .sessions
             .get(id)
             .filter(|live| live.is_current(generation))
-            .and_then(Live::holder_outbox);
-        if let Some(ack) = ack {
-            self.store.write(move |_| {
-                let _ = ack.try_send(ToHolder::Ack { through: seq });
+        else {
+            return;
+        };
+        if let HolderEvent::Hook {
+            guard: Some(guard), ..
+        } = event
+        {
+            live.send_to_holder(ToHolder::GuardAnswer {
+                id: *guard,
+                answer: GuardAnswer::Ask,
             });
         }
+        let outbox = live.holder_outbox();
+        drop(state);
+        self.store.write(move |_| ack(outbox, seq));
     }
 
     pub(crate) fn answer_guard(
@@ -365,6 +372,12 @@ impl Daemon {
             Ok(())
         })?;
         Ok(Reply::Done)
+    }
+}
+
+fn ack(outbox: Option<Sender<ToHolder>>, through: u64) {
+    if let Some(outbox) = outbox {
+        let _ = outbox.try_send(ToHolder::Ack { through });
     }
 }
 

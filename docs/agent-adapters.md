@@ -19,6 +19,7 @@ pub trait AgentAdapter {
     fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>>;
     fn is_guard_payload(&self, payload: &str) -> bool;
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String>;
+    fn user_statusline_command(&self, cwd: &Path, lookup: &dyn Fn(&str) -> Option<String>) -> Option<String>;
 }
 ```
 
@@ -29,11 +30,12 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | `launch` | The argv that starts a fresh Agent in the Worktree. `LaunchSpec` carries the Session id, the absolute `orch` binary (for hook and tap commands), the effective Preset and an optional initial prompt. Claude gets `--session-id`, `--settings` JSON (hooks → `orch hook --agent claude --session <id>`, `statusLine` → `orch tap --agent claude --session <id>`, the Preset's allow/deny), and `--permission-mode` unless the Preset is `inherit`. |
 | `resume` | The argv that continues the latest Conversation in the last observed mode. `None` means the Agent can't resume, so `restart` falls back to `launch`. |
 | `draft` | A side-channel one-shot that drafts a commit message or PR title/body without adding turns to the live Conversation. Claude uses `-p --resume <conv> --fork-session`. |
-| `map_hook` | Parses one hook payload, which `orch hook` forwards through the Holder, into normalized events. Every hook and statusline command an adapter injects carries `--agent <name>`: `orch hook` and `orch tap` pick the adapter from that flag with no lookup, and the Daemon drops payloads whose Agent isn't the Session's (ADR 0006). |
+| `map_hook` | Parses one hook payload, which `orch hook` forwards through the Holder, into normalized events. Every hook and statusline command an adapter injects carries `--agent <name>`: `orch hook` and `orch tap` pick the adapter from that flag (`orch_agent::by_name`) without asking the Daemon, and the Daemon drops payloads whose Agent isn't the Session's (ADR 0006). `--agent` defaults to `claude`, because Sessions started before the flag existed run hook and statusline commands without it. |
 | `map_tap` | Parses one statusline payload, which `orch tap` forwards, into `UsageSample`s. |
 | `title_watch` | A stateful `TitleWatch` that reports the Session title. The Daemon keeps one per Holder connection in its own task: it hands the watch every hook and statusline payload (`follow`, which only notes where to look) and calls `poll` right after each payload and about once a second, off the Daemon's state lock, so a title shows without waiting for the next hook. `poll` returns `TitleChanged` only when the title differs from the last one it reported. Claude follows `transcript_path`, reads the transcript incrementally and reports the last `custom-title` entry (`/rename`); the `session_title` field of SessionStart/UserPromptSubmit hooks only fills in while the transcript has no `custom-title` entry, and is forgotten when the transcript changes (a new Conversation). |
 | `subagent_transcripts` | A stateful `SubagentTranscripts` per Session that finds each Subagent's transcript file. The Daemon hands it every hook payload (`follow`) and asks it for a Subagent's file (`locate`) and for a `TranscriptReader` per subscribing Client. `read` returns the entries added since the last read, and `reset` when it started over because the file changed or shrank. Claude derives `<transcript dir>/<conversation>/subagents/agent-<id>.jsonl` from the `transcript_path` of the Subagent's first hook (so it survives a new Conversation) and switches to `agent_transcript_path` once `SubagentStop` names it. It drops thinking, and a tool call's key argument is the first of `command`, `file_path`, `notebook_path`, `pattern`, `url`, `query`, `skill`, `description`, `prompt` in its input. |
 | `is_guard_payload` / `guard_answer` | Marks the hook payloads that block until the Daemon answers a Guard, and renders the answer in the Agent's hook-output format. |
+| `user_statusline_command` | The user's own statusline command, which `orch tap` runs and prints in place of a minimal line. Claude reads it from managed, project-local, project and user settings in that order. |
 
 ## Capabilities and graceful degrade
 
@@ -91,6 +93,6 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
    - for Guards, map each file-write, shell and external tool to a `GuardedAction` in `map_hook`, and implement `is_guard_payload` and `guard_answer` for the Agent's blocking-hook protocol.
 4. **Never write to the user's own Agent config.** Inject everything per launch through flags or env, as the Claude adapter does with `--settings`.
 5. **Test the mapping as pure functions** (Seam 3): fixture → events, and launch/resume argv for each Preset and capability combination. Test a `TitleWatch` through `follow` / `poll` and `SubagentTranscripts` through `follow` / `locate` / `read` against temporary transcript files. See `crates/orch-agent/tests/claude_*.rs`.
-6. **Register the adapter** in `crates/orch-daemon/src/agents.rs` (`BUILT_IN` and `build`) under its config name, so that `agent = "<agent>"` or the `:new` form selects it and `[agents.<agent>]` configures its `binary` and `args`.
+6. **Register the adapter** in `crates/orch-agent/src/built_in.rs` (`BUILT_IN`) under its config name, so that `agent = "<agent>"` or the `:new` form selects it, `[agents.<agent>]` configures its `binary` and `args`, and `orch hook` / `orch tap --agent <agent>` reach it.
 7. **Run it end to end** with the scriptable fake Agent (`orch fake-agent`) through the Daemon tests, if the new adapter changes launch or event routing.
 8. **Update this document** and `CONTEXT.md` if the Agent brings a concept the glossary lacks.

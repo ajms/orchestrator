@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use orch_agent::{Capabilities, GuardHit, GuardKind, SubagentTranscripts, TitleWatch, mode_name};
+use orch_agent::{
+    Adapter, Capabilities, GuardHit, GuardKind, SubagentTranscripts, TitleWatch, mode_name,
+};
 use orch_core::{
     AgentEvent, AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus,
 };
@@ -19,7 +21,6 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{Notify, watch};
 
 use crate::DaemonConfig;
-use crate::agents::Adapter;
 use crate::notify::Notifier;
 use crate::outbox::Outbox;
 use crate::rate_limits::RateLimits;

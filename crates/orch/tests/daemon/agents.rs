@@ -1,3 +1,4 @@
+use orch_core::SessionId;
 use orch_protocol::{AgentStateView as State, CreateSession, Reply, Request, RequestError};
 
 use crate::common::*;
@@ -174,30 +175,95 @@ async fn hook_and_tap_payloads_from_another_agent_change_nothing_and_its_own_are
     let mut pane = env.pane(&id, PANE).await;
     let started = hook("SessionStart", r#""source":"startup""#);
     let context = |percent: u32| format!(r#"{{"context_window":{{"used_percentage":{percent}}}}}"#);
-    client.history.clear();
 
     pane.type_line(&format!("hook --agent antigravity {started}"))
         .await;
-    pane.type_line(&format!("tap --agent antigravity {}", context(42)))
-        .await;
     pane.type_line(&format!("tap --agent claude {}", context(17)))
         .await;
-    client
+    let tapped = client
         .until(&id, "Claude's statusline", |view| {
             view.context_used_percent == Some(17.0)
         })
         .await;
-    assert!(
-        client.history.iter().all(|view| {
-            view.agent != Some(State::Idle) && view.context_used_percent != Some(42.0)
-        }),
-        "{:#?}",
-        client.history
-    );
+    assert_ne!(tapped.agent, Some(State::Idle));
 
+    pane.type_line(&format!("tap --agent antigravity {}", context(42)))
+        .await;
     pane.type_line(&format!("hook --agent claude {started}"))
         .await;
+    let idle = client
+        .until(&id, "Idle", |view| view.agent == Some(State::Idle))
+        .await;
+    assert_eq!(idle.context_used_percent, Some(17.0));
+}
+
+fn hand_held(env: &Env, name: &str, args: &[&str]) -> SessionId {
+    let repo = env.path("repos/app");
+    let worktree = format!(".orchestrator/worktrees/{name}");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            &format!("orch/{name}"),
+            &worktree,
+        ],
+    );
+    let id = SessionId::parse(name).unwrap();
+    env.hold_with(id.as_str(), &repo.join(worktree), args);
+    id
+}
+
+async fn adopted(client: &mut TestClient, id: &SessionId) {
+    client.reconcile().await;
+    client
+        .until(id, "adopted", |view| view.holder_pid.is_some())
+        .await;
+}
+
+#[tokio::test]
+async fn a_holder_that_reports_no_agent_is_recovered_as_claude() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    env.write_config(&format!("[repos.{repo:?}]\nagent = \"antigravity\"\n"));
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = hand_held(&env, "older-holder", &[]);
+
+    adopted(&mut client, &id).await;
+    let mut pane = env.pane(&id, PANE).await;
+    pane.hook(&hook("SessionStart", r#""source":"startup""#))
+        .await;
+
     client
         .until(&id, "Idle", |view| view.agent == Some(State::Idle))
         .await;
+}
+
+#[tokio::test]
+async fn a_guard_from_another_agent_is_answered_with_ask_at_once() {
+    let env = Env::new();
+    env.repo("app");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = hand_held(
+        &env,
+        "agy-holder",
+        &["--agent", "antigravity", "--guard-timeout-ms", "600000"],
+    );
+    adopted(&mut client, &id).await;
+    let mut pane = env.pane(&id, PANE).await;
+
+    pane.type_line(&format!(
+        "hook --agent claude {}",
+        hook(
+            "PreToolUse",
+            r#""tool_name":"Write","tool_input":{"file_path":"/etc/hosts","content":"x"}"#
+        )
+    ))
+    .await;
+
+    pane.wait_for_text(r#""permissionDecision":"ask""#).await;
 }
