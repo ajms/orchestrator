@@ -1,7 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use orch_agent::{Argv, Draft, DraftInput};
+use orch_agent::{Adapter, Argv, Draft, DraftInput};
+use orch_config::AgentConfig;
 use orch_core::SessionId;
 use orch_holder::SESSION_ENV;
 use orch_protocol::{LandingMode, Reply, RequestError};
@@ -13,6 +14,7 @@ use crate::state::{Daemon, session_worktree};
 use crate::subprocess;
 
 const DRAFT_TIMEOUT: Duration = Duration::from_secs(180);
+const DIFF_LIMIT: usize = 100 * 1024;
 
 fn instruction(mode: LandingMode, base: &str) -> String {
     match mode {
@@ -25,22 +27,38 @@ fn instruction(mode: LandingMode, base: &str) -> String {
     }
 }
 
-async fn append_base_diff(
-    prompt: String,
-    repo: PathBuf,
-    record: &SessionRecord,
-) -> Result<String, RequestError> {
+fn with_diff(instruction: String, base: &str, diff: &str) -> String {
+    format!(
+        "{instruction}\n\nThe changes are this diff against {base}, so you need no tools:\n\n{diff}"
+    )
+}
+
+fn truncated(patch: &str) -> String {
+    if patch.len() <= DIFF_LIMIT {
+        return patch.into();
+    }
+    let cut = patch.as_bytes()[..DIFF_LIMIT]
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .unwrap_or(0);
+    format!(
+        "{}\n[diff truncated: {} more bytes left out; the stat above lists every changed file]",
+        &patch[..cut],
+        patch.len() - cut
+    )
+}
+
+async fn base_diff(repo: PathBuf, record: &SessionRecord) -> Result<String, RequestError> {
     let worktree = session_worktree(record);
-    let diff = with_git(repo, move |git| {
+    let (stat, patch) = with_git(repo, move |git| {
         let snapshot = git.review_snapshot(&worktree)?;
-        git.diff(&snapshot.merge_base, &snapshot.tree)
+        let stat = git.diff_stat(&snapshot.merge_base, &snapshot.tree)?;
+        let patch = git.diff(&snapshot.merge_base, &snapshot.tree)?;
+        Ok::<_, orch_git::Error>((stat, patch))
     })
     .await?
     .map_err(refused)?;
-    Ok(format!(
-        "{prompt}\n\nThe changes are this diff against {}, so you need no tools:\n\n{diff}",
-        record.base
-    ))
+    Ok(format!("{stat}\n\n{}", truncated(&patch)))
 }
 
 fn split_draft(text: &str) -> Reply {
@@ -59,11 +77,13 @@ impl Daemon {
         mode: LandingMode,
     ) -> Result<Reply, RequestError> {
         let (record, repo) = self.snapshot(id).ok_or(RequestError::UnknownSession)?;
-        let config = self.repo_config(&repo).await?;
-        let agent = config
-            .agent(&record.agent)
-            .map_err(|_| untrusted(&repo, &config))?;
-        let adapter = installed_adapter(&agent, &repo).map_err(refused)?;
+        let (agent, adapter) = match self.draft_agent(&record, &repo).await {
+            Ok(found) => found,
+            Err(_) if record.latest_conversation().is_none() => {
+                return Ok(self.default_draft(id, &record.slug).await);
+            }
+            Err(err) => return Err(err),
+        };
         let Some(Draft {
             argv: Argv { program, args },
             input,
@@ -71,11 +91,15 @@ impl Daemon {
         else {
             return Ok(self.default_draft(id, &record.slug).await);
         };
-        let mut prompt = instruction(mode, &record.base);
-        if input == DraftInput::InstructionAndBaseDiff {
-            prompt = append_base_diff(prompt, repo, &record).await?;
-        }
-        let mut command = crate::subprocess::command(program);
+        let instruction = instruction(mode, &record.base);
+        let prompt = match input {
+            DraftInput::Instruction => instruction,
+            DraftInput::InstructionAndBaseDiff => {
+                let diff = base_diff(repo, &record).await?;
+                with_diff(instruction, &record.base, &diff)
+            }
+        };
+        let mut command = subprocess::command(program);
         command
             .args(&agent.args)
             .args(args)
@@ -85,6 +109,19 @@ impl Daemon {
             .await
             .map_err(refused)?;
         Ok(split_draft(&drafted))
+    }
+
+    async fn draft_agent(
+        &self,
+        record: &SessionRecord,
+        repo: &Path,
+    ) -> Result<(AgentConfig, Adapter), RequestError> {
+        let config = self.repo_config(repo).await?;
+        let agent = config
+            .agent(&record.agent)
+            .map_err(|_| untrusted(repo, &config))?;
+        let adapter = installed_adapter(&agent, repo).map_err(refused)?;
+        Ok((agent, adapter))
     }
 
     async fn default_draft(&self, id: &SessionId, slug: &str) -> Reply {
