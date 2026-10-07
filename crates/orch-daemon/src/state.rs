@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use orch_agent::{
-    Adapter, Capabilities, ConversationTree, GuardAnswer, GuardHit, GuardKind, Preset, RuleVerdict,
-    SubagentTranscripts, TitleWatch, mode_name,
+    Adapter, Capabilities, ConversationTree, GuardAnswer, GuardHit, GuardKind, PayloadError,
+    Preset, RuleVerdict, SubagentTranscripts, TitleWatch, mode_name,
 };
 use orch_core::{
     AgentEvent, AgentState, Effect, GateRefusal, GuardedAction, Observation, Phase, PhaseEvent,
@@ -260,18 +260,24 @@ impl Live {
     }
 
     pub(crate) fn hook_events(&mut self, payload: &str) -> Vec<AgentEvent> {
-        let mapped = match (&mut self.tree, &self.adapter) {
-            (Some(tree), _) => tree.hook(payload),
-            (None, Some(adapter)) => adapter.map_hook(payload),
-            (None, None) => return Vec::new(),
-        };
-        mapped.unwrap_or_default()
+        self.mapped(
+            |tree| tree.hook(payload),
+            |adapter| adapter.map_hook(payload),
+        )
     }
 
     pub(crate) fn tap_events(&mut self, payload: &str) -> Vec<AgentEvent> {
+        self.mapped(|tree| tree.tap(payload), |adapter| adapter.map_tap(payload))
+    }
+
+    fn mapped(
+        &mut self,
+        by_tree: impl FnOnce(&mut dyn ConversationTree) -> Result<Vec<AgentEvent>, PayloadError>,
+        by_adapter: impl FnOnce(&Adapter) -> Result<Vec<AgentEvent>, PayloadError>,
+    ) -> Vec<AgentEvent> {
         let mapped = match (&mut self.tree, &self.adapter) {
-            (Some(tree), _) => tree.tap(payload),
-            (None, Some(adapter)) => adapter.map_tap(payload),
+            (Some(tree), _) => by_tree(tree.as_mut()),
+            (None, Some(adapter)) => by_adapter(adapter),
             (None, None) => return Vec::new(),
         };
         mapped.unwrap_or_default()

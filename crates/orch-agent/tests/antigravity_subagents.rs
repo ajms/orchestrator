@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use orch_agent::{AgentAdapter, Antigravity, ConversationTree, tag_hook_event};
 use orch_core::{AgentEvent, ConversationId, GuardedAction, SubagentId};
 use serde_json::{Value, json};
@@ -80,10 +82,7 @@ fn another_conversation_is_a_subagent_labelled_by_the_matching_invoke_subagent_s
             "PreInvocation",
             &child("subagent_pre_invocation")
         ),
-        [
-            started("general", "Test Runner"),
-            AgentEvent::PromptSubmitted
-        ]
+        [started("general", "Test Runner")]
     );
 }
 
@@ -164,10 +163,7 @@ fn a_subagents_stop_finishes_it_and_a_later_hook_reopens_the_same_row() {
             "PreInvocation",
             &child("subagent_pre_invocation")
         ),
-        [
-            started("general", "Test Runner"),
-            AgentEvent::PromptSubmitted
-        ]
+        [started("general", "Test Runner")]
     );
 }
 
@@ -258,5 +254,99 @@ fn a_nested_subagent_is_flattened_under_the_session() {
             agent_type: "general".into(),
             description: "Test Runner".into(),
         }
+    );
+}
+
+#[test]
+fn after_a_restart_a_known_subagent_is_not_taken_for_the_sessions_conversation() {
+    let mut tree = tree();
+    tap(&mut tree, ROOT);
+    hook(
+        &mut tree,
+        "PreInvocation",
+        &child("subagent_pre_invocation"),
+    );
+    tree.restart(None);
+    assert_eq!(
+        hook(
+            &mut tree,
+            "PreInvocation",
+            &child("subagent_pre_invocation")
+        ),
+        [started(
+            "subagent",
+            "Run the login tests and report the failures."
+        )]
+    );
+}
+
+fn child_at(name: &str, transcript: &Path) -> Value {
+    let mut payload = fixture(name);
+    payload["transcriptPath"] = transcript.to_str().unwrap().into();
+    payload
+}
+
+#[test]
+fn a_subagent_whose_transcript_appears_after_its_first_hook_is_relabelled_by_its_spec() {
+    let dir = tempfile::tempdir().unwrap();
+    let transcript = dir.path().join("transcript_full.jsonl");
+    let mut tree = tree();
+    tap(&mut tree, ROOT);
+    hook(
+        &mut tree,
+        "PreToolUse",
+        &fixture("pre_tool_use_invoke_subagent"),
+    );
+    assert_eq!(
+        hook(
+            &mut tree,
+            "PreInvocation",
+            &child_at("subagent_pre_invocation", &transcript)
+        ),
+        [started("subagent", "")]
+    );
+
+    std::fs::copy(fixture_path("transcripts/subagent_full.jsonl"), &transcript).unwrap();
+    assert_eq!(
+        hook(
+            &mut tree,
+            "PostToolUse",
+            &child_at("subagent_post_tool_use", &transcript)
+        ),
+        [
+            started("general", "Test Runner"),
+            AgentEvent::ToolFinished {
+                tool: String::new(),
+                subagent: subagent(),
+            }
+        ]
+    );
+}
+
+#[test]
+fn a_subagent_hook_naming_the_plain_transcript_is_labelled_from_the_full_one() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        fixture_path("transcripts/subagent_full.jsonl"),
+        dir.path().join("transcript_full.jsonl"),
+    )
+    .unwrap();
+    let mut tree = tree();
+    tap(&mut tree, ROOT);
+    hook(
+        &mut tree,
+        "PreToolUse",
+        &fixture("pre_tool_use_invoke_subagent"),
+    );
+    assert_eq!(
+        hook(
+            &mut tree,
+            "PreInvocation",
+            &child_at(
+                "subagent_pre_invocation",
+                &dir.path().join("transcript.jsonl")
+            )
+        ),
+        [started("general", "Test Runner")]
     );
 }

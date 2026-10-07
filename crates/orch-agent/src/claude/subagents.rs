@@ -5,7 +5,7 @@ use orch_core::{SubagentId, TranscriptEntry};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::lines::FollowedLines;
+use crate::lines::{FollowedLines, first_str};
 use crate::{SubagentTranscripts, TranscriptRead, TranscriptReader};
 
 const HAND_BACK: &str = "SubagentHandback";
@@ -177,7 +177,7 @@ fn entries(line: &[u8], hand_backs: &mut HashSet<String>) -> Vec<TranscriptEntry
             Block::ToolResult { tool_use_id, .. } if hand_backs.contains(&tool_use_id) => None,
             Block::ToolUse { id, name, input } => Some(TranscriptEntry::ToolCall {
                 id,
-                argument: key_argument(&input),
+                argument: first_str(&input, &KEY_ARGUMENTS),
                 tool: name,
             }),
             Block::ToolResult {
@@ -208,11 +208,4 @@ impl Content {
                 .join("\n"),
         }
     }
-}
-
-fn key_argument(input: &Value) -> Option<String> {
-    KEY_ARGUMENTS
-        .iter()
-        .find_map(|key| input.get(key)?.as_str())
-        .map(String::from)
 }

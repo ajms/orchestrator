@@ -27,23 +27,35 @@ struct ToolCall {
     args: Value,
 }
 
-fn parse(payload: &str) -> Result<HookPayload, PayloadError> {
-    let error = |err: serde_json::Error| PayloadError(err.to_string());
-    let value: Value = serde_json::from_str(payload).map_err(error)?;
+fn error(err: serde_json::Error) -> PayloadError {
+    PayloadError(err.to_string())
+}
+
+fn parse(value: &Value) -> Result<HookPayload, PayloadError> {
     let event = value[HOOK_EVENT_FIELD].as_str().map(String::from);
-    let hook: HookPayload = serde_json::from_value(value).map_err(error)?;
+    let hook = HookPayload::deserialize(value).map_err(error)?;
     Ok(HookPayload { event, ..hook })
 }
 
+pub(super) fn json(payload: &str) -> Result<Value, PayloadError> {
+    serde_json::from_str(payload).map_err(error)
+}
+
 pub(super) fn is_guard_payload(payload: &str) -> bool {
-    parse(payload).is_ok_and(|hook| match hook.event.as_deref() {
-        Some(event) => event == GUARD_EVENT,
-        None => hook.tool_call.is_some(),
-    })
+    json(payload)
+        .and_then(|value| parse(&value))
+        .is_ok_and(|hook| match hook.event.as_deref() {
+            Some(event) => event == GUARD_EVENT,
+            None => hook.tool_call.is_some(),
+        })
 }
 
 pub(super) fn map_hook(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
-    let hook = parse(payload)?;
+    map_value(&json(payload)?)
+}
+
+pub(super) fn map_value(value: &Value) -> Result<Vec<AgentEvent>, PayloadError> {
+    let hook = parse(value)?;
     let tool = || {
         hook.tool_call
             .as_ref()

@@ -67,7 +67,10 @@ impl Daemon {
                         (Attach::Adopt, Some(persisted)) => {
                             live.status.restore_agent(persisted, running)
                         }
-                        _ => {
+                        (Attach::Adopt, None) => {
+                            live.status.observe(Observation::Spawned, now);
+                        }
+                        (Attach::Fresh, _) => {
                             live.agent_spawned(now);
                         }
                     }

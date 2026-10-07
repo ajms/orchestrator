@@ -3,17 +3,16 @@ use std::path::PathBuf;
 
 use orch_core::{AgentEvent, ConversationId, SubagentId};
 use serde::Deserialize;
-use serde_json::Value;
 
-use super::{Antigravity, GUARD_EVENT, transcript};
+use super::{GUARD_EVENT, hooks, transcript};
 use crate::hook_event::HOOK_EVENT_FIELD;
-use crate::{AgentAdapter, ConversationTree, PayloadError};
+use crate::{ConversationTree, PayloadError};
 
 const INVOKE_TOOL: &str = "invoke_subagent";
 const FALLBACK_TYPE: &str = "subagent";
 
+#[derive(Default)]
 pub(super) struct AntigravityTree {
-    agy: Antigravity,
     root: Option<String>,
     pending: Vec<Spec>,
     children: HashMap<String, Child>,
@@ -22,6 +21,7 @@ pub(super) struct AntigravityTree {
 struct Child {
     agent_type: String,
     description: String,
+    matched: bool,
     open: bool,
 }
 
@@ -60,15 +60,6 @@ struct Spec {
 }
 
 impl AntigravityTree {
-    pub(super) fn new(agy: Antigravity) -> Self {
-        Self {
-            agy,
-            root: None,
-            pending: Vec::new(),
-            children: HashMap::new(),
-        }
-    }
-
     fn child_events(
         &mut self,
         id: String,
@@ -78,24 +69,33 @@ impl AntigravityTree {
     ) -> Vec<AgentEvent> {
         let subagent = SubagentId(id.clone());
         let mut out = Vec::new();
-        if !self.children.get(&id).is_some_and(|child| child.open) {
-            let child = match self.children.remove(&id) {
-                Some(known) => known,
-                None => self.label(hook),
-            };
+        let (child, relabelled) = match self.children.remove(&id) {
+            Some(known) if self.settled(&known) => (known, false),
+            Some(known) => {
+                let child = Child {
+                    open: known.open,
+                    ..self.label(hook)
+                };
+                let relabelled =
+                    child.agent_type != known.agent_type || child.description != known.description;
+                (child, relabelled)
+            }
+            None => (self.label(hook), false),
+        };
+        if !child.open || relabelled {
             out.push(AgentEvent::SubagentStarted {
                 id: subagent.clone(),
                 agent_type: child.agent_type.clone(),
                 description: child.description.clone(),
             });
-            self.children.insert(
-                id.clone(),
-                Child {
-                    open: true,
-                    ..child
-                },
-            );
         }
+        self.children.insert(
+            id.clone(),
+            Child {
+                open: true,
+                ..child
+            },
+        );
         if event == Some("Stop") {
             if hook.fully_idle {
                 out.push(AgentEvent::TurnEnded);
@@ -106,44 +106,52 @@ impl AntigravityTree {
             }
             return out;
         }
-        out.extend(events.into_iter().map(|event| match event {
-            AgentEvent::ToolStarted { tool, .. } => AgentEvent::ToolStarted {
+        out.extend(events.into_iter().filter_map(|event| match event {
+            AgentEvent::PromptSubmitted => None,
+            AgentEvent::ToolStarted { tool, .. } => Some(AgentEvent::ToolStarted {
                 tool,
                 subagent: Some(subagent.clone()),
-            },
-            AgentEvent::ToolFinished { tool, .. } => AgentEvent::ToolFinished {
+            }),
+            AgentEvent::ToolFinished { tool, .. } => Some(AgentEvent::ToolFinished {
                 tool,
                 subagent: Some(subagent.clone()),
-            },
-            other => other,
+            }),
+            other => Some(other),
         }));
         out
+    }
+
+    fn settled(&self, child: &Child) -> bool {
+        child.matched || (self.pending.is_empty() && !child.description.is_empty())
     }
 
     fn label(&mut self, hook: &Hook) -> Child {
         let prompt = hook
             .transcript_path
             .as_deref()
-            .and_then(transcript::first_prompt)
+            .map(transcript::full_transcript)
+            .and_then(|path| transcript::first_prompt(&path))
             .unwrap_or_default();
         let matched = self
             .pending
             .iter()
             .position(|spec| spec.prompt.trim() == prompt);
-        let (agent_type, description) = match matched {
+        match matched {
             Some(at) => {
                 let spec = self.pending.remove(at);
-                (spec.type_name, spec.role)
+                Child {
+                    agent_type: spec.type_name,
+                    description: spec.role,
+                    matched: true,
+                    open: false,
+                }
             }
-            None => (
-                FALLBACK_TYPE.into(),
-                prompt.lines().next().unwrap_or_default().into(),
-            ),
-        };
-        Child {
-            agent_type,
-            description,
-            open: false,
+            None => Child {
+                agent_type: FALLBACK_TYPE.into(),
+                description: prompt.lines().next().unwrap_or_default().into(),
+                matched: false,
+                open: false,
+            },
         }
     }
 }
@@ -158,37 +166,35 @@ impl ConversationTree for AntigravityTree {
     }
 
     fn hook(&mut self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
-        let events = self.agy.map_hook(payload)?;
-        let Ok(value) = serde_json::from_str::<Value>(payload) else {
-            return Ok(events);
-        };
-        let event = value[HOOK_EVENT_FIELD].as_str().map(String::from);
-        let mut hook: Hook = serde_json::from_value(value).unwrap_or_default();
+        let value = hooks::json(payload)?;
+        let events = hooks::map_value(&value)?;
+        let event = value[HOOK_EVENT_FIELD].as_str();
+        let mut hook = Hook::deserialize(&value).unwrap_or_default();
         let id = std::mem::take(&mut hook.conversation_id);
         if id.is_empty() {
             return Ok(events);
         }
-        if event.as_deref() == Some(GUARD_EVENT)
+        if event == Some(GUARD_EVENT)
             && let Some(call) = hook.tool_call.take()
             && call.name == INVOKE_TOOL
         {
             self.pending.extend(call.args.subagents);
         }
         match &self.root {
-            None => {
+            Some(root) if *root == id => Ok(events),
+            None if !self.children.contains_key(&id) => {
                 self.root = Some(id.clone());
                 let changed = AgentEvent::ConversationChanged {
                     id: ConversationId(id),
                 };
                 Ok(std::iter::once(changed).chain(events).collect())
             }
-            Some(root) if *root == id => Ok(events),
-            Some(_) => Ok(self.child_events(id, &hook, event.as_deref(), events)),
+            _ => Ok(self.child_events(id, &hook, event, events)),
         }
     }
 
     fn tap(&mut self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
-        let events = self.agy.map_tap(payload)?;
+        let events = super::statusline::map_tap(payload)?;
         for event in &events {
             if let AgentEvent::ConversationChanged { id } = event {
                 self.root = Some(id.as_str().into());

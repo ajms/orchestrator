@@ -133,7 +133,7 @@ impl AgentAdapter for Antigravity {
     }
 
     fn conversation_tree(&self) -> Option<Box<dyn ConversationTree>> {
-        Some(Box::new(AntigravityTree::new(self.clone())))
+        Some(Box::new(AntigravityTree::default()))
     }
 
     fn is_guard_payload(&self, payload: &str) -> bool {

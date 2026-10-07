@@ -16,7 +16,9 @@ impl TurnGate {
             AgentEvent::AwaitingPrompt => self.turn_reported,
             AgentEvent::PermissionRequested => self.turn_closed,
             AgentEvent::PermissionCleared => !self.permission_pending,
-            AgentEvent::ToolStarted { .. } => self.permission_pending,
+            AgentEvent::ToolStarted { .. } | AgentEvent::SubagentStarted { .. } => {
+                self.permission_pending
+            }
             _ => false,
         }
     }

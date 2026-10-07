@@ -14,6 +14,7 @@ use crate::cli::orch;
 use crate::common::*;
 
 const CONVERSATION: &str = "3c1e9a40-7d52-4b8e-a6f1-2d9b0c4e7a13";
+const CHILD: &str = "8d2f61b7-4a09-4c3e-9b15-e07a3c5d9f28";
 
 async fn antigravity_session(
     env: &Env,
@@ -29,8 +30,18 @@ async fn antigravity_session_with(
     preset: &str,
     config: &str,
 ) -> (SessionId, PaneView) {
+    scripted_antigravity_session(env, client, preset, config, &[]).await
+}
+
+async fn scripted_antigravity_session(
+    env: &Env,
+    client: &mut TestClient,
+    preset: &str,
+    config: &str,
+    lines: &[String],
+) -> (SessionId, PaneView) {
     let script = env.path("agy.script");
-    std::fs::write(&script, "draft -p\n").unwrap();
+    std::fs::write(&script, format!("draft -p\n{}", lines.join("\n"))).unwrap();
     env.write_config(&format!(
         "[defaults.agents.antigravity]\nbinary = {:?}\nargs = [\"fake-agent\", \"--script\", {script:?}, \"--\"]\n{config}",
         env!("CARGO_BIN_EXE_orch")
@@ -57,21 +68,25 @@ fn line(fields: Value) -> String {
     line.to_string()
 }
 
-async fn hook(pane: &mut PaneView, event: &str, fields: Value) {
+fn hook_line(event: &str, fields: Value) -> String {
     let mut payload = json!({ "conversationId": CONVERSATION });
     payload
         .as_object_mut()
         .unwrap()
         .extend(fields.as_object().unwrap().clone());
-    pane.type_line(&format!(
-        "hook --agent antigravity --event {event} {payload}"
-    ))
-    .await;
+    format!("hook --agent antigravity --event {event} {payload}")
+}
+
+fn tap_line(fields: Value) -> String {
+    format!("tap --agent antigravity {}", line(fields))
+}
+
+async fn hook(pane: &mut PaneView, event: &str, fields: Value) {
+    pane.type_line(&hook_line(event, fields)).await;
 }
 
 async fn tap(pane: &mut PaneView, fields: Value) {
-    pane.type_line(&format!("tap --agent antigravity {}", line(fields)))
-        .await;
+    pane.type_line(&tap_line(fields)).await;
 }
 
 async fn until_state(client: &mut TestClient, id: &SessionId, state: State) {
@@ -162,7 +177,6 @@ async fn only_a_fully_idle_stop_makes_the_session_idle() {
 
 #[tokio::test]
 async fn another_conversation_under_the_session_is_a_subagent_whose_row_reopens() {
-    const CHILD: &str = "8d2f61b7-4a09-4c3e-9b15-e07a3c5d9f28";
     const PROMPT: &str = "Run the login tests and report the failures.";
     let env = Env::new();
     let _daemon = env.start_daemon().await;
@@ -512,4 +526,67 @@ async fn preset_rules_still_apply_to_a_running_agy_after_a_daemon_restart() {
     let rm = json!({ "CommandLine": "rm -rf build" });
     tool_call(&mut pane, "run_command", rm).await;
     pane.wait_for_text(r#"hook> {"decision":"deny""#).await;
+}
+
+#[tokio::test]
+async fn a_subagent_starting_while_agy_waits_on_a_permission_keeps_the_session_needing_input() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let script = [
+        hook_line("PreInvocation", json!({})),
+        tap_line(json!({ "agent_state": "tool_use", "tool_confirmation_pending": true })),
+        hook_line("PreInvocation", json!({ "conversationId": CHILD })),
+    ];
+    let (id, _) = scripted_antigravity_session(&env, &mut client, "edits", "", &script).await;
+
+    let started = client
+        .until(&id, "the Subagent", |view| !view.subagents.is_empty())
+        .await;
+    assert_eq!(started.agent, Some(State::NeedsInput));
+}
+
+#[tokio::test]
+async fn an_adopted_agy_keeps_its_conversation_when_a_subagent_hooks_first() {
+    let env = Env::new();
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = antigravity_session(&env, &mut client, "edits").await;
+    working(&mut client, &id, &mut pane).await;
+    tap(
+        &mut pane,
+        json!({ "conversation_id": "", "agent_state": "working", "cycle_mode": "plan" }),
+    )
+    .await;
+    let known = client
+        .until(&id, "the tap after the hook", |view| {
+            view.mode.as_deref() == Some("plan")
+        })
+        .await;
+    assert_eq!(known.conversation.as_deref(), Some(CONVERSATION));
+    daemon.kill();
+    let db = rusqlite::Connection::open(env.path("state/orchestrator/state.db")).unwrap();
+    db.execute("UPDATE sessions SET agent_state = NULL", [])
+        .unwrap();
+    drop(db);
+
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    client
+        .until(&id, "the Agent again", |view| view.agent.is_some())
+        .await;
+    let mut pane = env.pane(&id, PANE).await;
+    hook(
+        &mut pane,
+        "PreInvocation",
+        json!({ "conversationId": CHILD }),
+    )
+    .await;
+    let adopted = client
+        .until(&id, "the Subagent's hook", |view| {
+            !view.subagents.is_empty() || view.conversation.as_deref() != Some(CONVERSATION)
+        })
+        .await;
+    assert_eq!(adopted.conversation.as_deref(), Some(CONVERSATION));
+    assert_eq!(adopted.subagents[0].id, CHILD);
 }
