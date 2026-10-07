@@ -42,12 +42,13 @@ pub(super) fn json(payload: &str) -> Result<Value, PayloadError> {
 }
 
 pub(super) fn is_guard_payload(payload: &str) -> bool {
-    json(payload)
-        .and_then(|value| parse(&value))
-        .is_ok_and(|hook| match hook.event.as_deref() {
-            Some(event) => event == GUARD_EVENT,
-            None => hook.tool_call.is_some(),
-        })
+    let Ok(value) = json(payload) else {
+        return false;
+    };
+    parse(&value).is_ok_and(|hook| match hook.event.as_deref() {
+        Some(event) => event == GUARD_EVENT,
+        None => hook.tool_call.is_some() && value.get("error").is_none(),
+    })
 }
 
 pub(super) fn map_hook(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
