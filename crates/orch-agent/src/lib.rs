@@ -10,7 +10,7 @@ mod preset;
 mod shell;
 
 pub use agent::{
-    AgentAdapter, Argv, Capabilities, ConversationTree, Draft, DraftInput, LaunchSpec,
+    AgentAdapter, Argv, Capabilities, ConversationTree, Draft, DraftInput, DraftIo, LaunchSpec,
     PayloadError, RuleScope, SubagentTranscripts, TitleWatch, TranscriptRead, TranscriptReader,
 };
 pub use antigravity::Antigravity;

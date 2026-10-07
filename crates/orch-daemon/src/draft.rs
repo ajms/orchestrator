@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::process::Output;
 use std::time::Duration;
 
-use orch_agent::{Adapter, Argv, Draft, DraftInput};
+use orch_agent::{Adapter, Argv, Draft, DraftInput, DraftIo};
 use orch_config::AgentConfig;
 use orch_core::SessionId;
 use orch_holder::SESSION_ENV;
@@ -15,6 +16,7 @@ use crate::subprocess;
 
 const DRAFT_TIMEOUT: Duration = Duration::from_secs(180);
 const DIFF_LIMIT: usize = 100 * 1024;
+const WHAT: &str = "the Agent's draft";
 
 fn instruction(mode: LandingMode, base: &str) -> String {
     match mode {
@@ -61,6 +63,18 @@ async fn base_diff(repo: PathBuf, record: &SessionRecord) -> Result<String, Requ
     Ok(format!("{stat}\n\n{}", truncated(&patch)))
 }
 
+fn drafted(io: DraftIo, output: &Output) -> Result<String, String> {
+    match (
+        io.decode(&String::from_utf8_lossy(&output.stdout)),
+        output.status.success(),
+    ) {
+        (Err(error), _) => Err(format!("{WHAT} failed: {error}")),
+        (Ok(Some(text)), true) => Ok(text),
+        (Ok(None), true) => Err(format!("{WHAT} ended without a result")),
+        (Ok(_), false) => Err(subprocess::failed(WHAT, output)),
+    }
+}
+
 fn split_draft(text: &str) -> Reply {
     let text = text.trim();
     let (title, body) = text.split_once('\n').unwrap_or((text, ""));
@@ -87,6 +101,7 @@ impl Daemon {
         let Some(Draft {
             argv: Argv { program, args },
             input,
+            io,
         }) = adapter.draft(record.latest_conversation())
         else {
             return Ok(self.default_draft(id, &record.slug).await);
@@ -105,10 +120,10 @@ impl Daemon {
             .args(args)
             .current_dir(&record.worktree)
             .env_remove(SESSION_ENV);
-        let drafted = subprocess::run(command, Some(prompt), DRAFT_TIMEOUT, "the Agent's draft")
+        let output = subprocess::output(command, Some(io.encode(&prompt)), DRAFT_TIMEOUT, WHAT)
             .await
             .map_err(refused)?;
-        Ok(split_draft(&drafted))
+        Ok(split_draft(&drafted(io, &output).map_err(refused)?))
     }
 
     async fn draft_agent(
