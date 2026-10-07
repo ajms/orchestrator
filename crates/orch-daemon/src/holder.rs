@@ -48,7 +48,7 @@ impl Daemon {
         let (reader, mut writer) = client.into_split();
         let (outbox, inbox) = mpsc::channel(HOLDER_QUEUE);
         let (closed, closed_watch) = watch::channel(false);
-        let generation = {
+        let attached = {
             let mut state = self.lock();
             match state.sessions.get_mut(id) {
                 Some(live) if !live.status.phase().is_terminal() => {
@@ -80,13 +80,14 @@ impl Daemon {
                     }
                     live.apply_pane_size();
                     live.deliver_prompt();
+                    let agent = live.record.agent.clone();
                     state.changed(id);
-                    Some(generation)
+                    Some((generation, agent))
                 }
                 _ => None,
             }
         };
-        let Some(generation) = generation else {
+        let Some((generation, agent)) = attached else {
             let _ = write_frame_async(&mut writer, &ToHolder::Shutdown).await;
             return Err(io::Error::other("the Session has ended"));
         };
@@ -97,7 +98,7 @@ impl Daemon {
         tokio::spawn(write_loop(writer, inbox));
         tokio::spawn(
             self.clone()
-                .consume(id.clone(), reader, generation, last_seq, closed),
+                .consume(id.clone(), agent, reader, generation, last_seq, closed),
         );
         Ok(())
     }
@@ -105,6 +106,7 @@ impl Daemon {
     async fn consume(
         self: Arc<Self>,
         id: SessionId,
+        agent: String,
         mut reader: HolderReader,
         generation: u64,
         mut last_seq: u64,
@@ -115,9 +117,13 @@ impl Daemon {
             match message {
                 FromHolder::Event { seq, event } if seq > last_seq => {
                     last_seq = seq;
+                    if event.agent().is_some_and(|from| from != agent) {
+                        self.skip_holder_event(&id, generation, seq);
+                        continue;
+                    }
                     if let (
                         Some(titles),
-                        HolderEvent::Hook { payload, .. } | HolderEvent::Tap { payload },
+                        HolderEvent::Hook { payload, .. } | HolderEvent::Tap { payload, .. },
                     ) = (&titles, &event)
                     {
                         let _ = titles.try_send(payload.clone());
@@ -260,7 +266,7 @@ impl Daemon {
                 live.prompts.clear();
                 live.status.observe(exit_observation(&exit), now)
             }
-            HolderEvent::Hook { payload, guard } => {
+            HolderEvent::Hook { payload, guard, .. } => {
                 if let Some(transcripts) = &mut live.transcripts {
                     transcripts.follow(&payload);
                 }
@@ -271,7 +277,7 @@ impl Daemon {
                 }
                 effects
             }
-            HolderEvent::Tap { payload } => {
+            HolderEvent::Tap { payload, .. } => {
                 let events = live.tap_events(&payload);
                 observe(live, &events, now, &mut conversations, &mut usage)
             }
@@ -308,6 +314,20 @@ impl Daemon {
             }
         });
         effects
+    }
+
+    fn skip_holder_event(&self, id: &SessionId, generation: u64, seq: u64) {
+        let ack = self
+            .lock()
+            .sessions
+            .get(id)
+            .filter(|live| live.is_current(generation))
+            .and_then(Live::holder_outbox);
+        if let Some(ack) = ack {
+            self.store.write(move |_| {
+                let _ = ack.try_send(ToHolder::Ack { through: seq });
+            });
+        }
     }
 
     pub(crate) fn answer_guard(

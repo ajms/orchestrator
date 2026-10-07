@@ -12,6 +12,7 @@ async fn guard_request(client: &mut orch_holder::HolderClient) -> u64 {
         HolderEvent::Hook {
             payload,
             guard: Some(id),
+            ..
         } => {
             assert_eq!(payload, PRE_TOOL_USE);
             id
@@ -93,6 +94,7 @@ async fn guard_without_a_daemon_asks_the_user_and_is_still_recorded() {
     assert_eq!(
         next_hook_or_tap(&mut client).await,
         HolderEvent::Hook {
+            agent: Some("claude".into()),
             payload: PRE_TOOL_USE.into(),
             guard: None
         }

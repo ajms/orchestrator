@@ -103,6 +103,7 @@ async fn tap_forwards_the_statusline_payload_to_the_holder() {
     assert_eq!(
         next_hook_or_tap(&mut client).await,
         HolderEvent::Tap {
+            agent: Some("claude".into()),
             payload: STATUS.into()
         }
     );

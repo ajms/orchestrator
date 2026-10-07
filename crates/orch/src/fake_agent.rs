@@ -189,11 +189,19 @@ fn unescape(text: &str) -> String {
     text.replace("\\e", "\x1b")
 }
 
-fn run_orch_subcommand(subcommand: &str, payload: &str) -> String {
+fn run_orch_subcommand(subcommand: &str, rest: &str) -> String {
     let session = std::env::var(SESSION_ENV).unwrap_or_default();
     let orch = std::env::current_exe().unwrap_or_else(|_| "orch".into());
     let mut command = Command::new(orch);
     command.args([subcommand, "--session", &session]);
+    let payload = match rest.strip_prefix("--agent ") {
+        Some(rest) => {
+            let (agent, payload) = rest.split_once(' ').unwrap_or((rest, ""));
+            command.args(["--agent", agent]);
+            payload
+        }
+        None => rest,
+    };
     run_with_input(&mut command, payload.as_bytes(), None)
         .map(|output| String::from_utf8_lossy(&output).into_owned())
         .unwrap_or_else(|| "<failed>".into())

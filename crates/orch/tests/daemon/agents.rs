@@ -134,3 +134,70 @@ async fn a_relative_agent_binary_resolves_against_the_repo_root_for_the_form_and
     let mut pane = env.pane(&id, PANE).await;
     pane.wait_for_text("Local agent").await;
 }
+
+#[tokio::test]
+async fn a_session_recovered_from_its_live_holder_keeps_the_agent_it_runs() {
+    let env = Env::new();
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = running_session(&env, &mut client, "Survivor").await;
+    daemon.kill();
+    env.lose_state_db();
+    let repo = env.path("repos/app");
+    env.write_config(&format!("[repos.{repo:?}]\nagent = \"antigravity\"\n"));
+
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    client
+        .until(&id, "adopted", |view| {
+            view.flags.recovered && view.holder_pid.is_some()
+        })
+        .await;
+    let mut pane = env.pane(&id, PANE).await;
+    pane.type_line(&format!(
+        "hook --agent claude {}",
+        hook("SessionStart", r#""source":"startup""#)
+    ))
+    .await;
+
+    client
+        .until(&id, "Idle", |view| view.agent == Some(State::Idle))
+        .await;
+}
+
+#[tokio::test]
+async fn hook_and_tap_payloads_from_another_agent_change_nothing_and_its_own_are_applied() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = running_session(&env, &mut client, "Nested").await;
+    let mut pane = env.pane(&id, PANE).await;
+    let started = hook("SessionStart", r#""source":"startup""#);
+    let context = |percent: u32| format!(r#"{{"context_window":{{"used_percentage":{percent}}}}}"#);
+    client.history.clear();
+
+    pane.type_line(&format!("hook --agent antigravity {started}"))
+        .await;
+    pane.type_line(&format!("tap --agent antigravity {}", context(42)))
+        .await;
+    pane.type_line(&format!("tap --agent claude {}", context(17)))
+        .await;
+    client
+        .until(&id, "Claude's statusline", |view| {
+            view.context_used_percent == Some(17.0)
+        })
+        .await;
+    assert!(
+        client.history.iter().all(|view| {
+            view.agent != Some(State::Idle) && view.context_used_percent != Some(42.0)
+        }),
+        "{:#?}",
+        client.history
+    );
+
+    pane.type_line(&format!("hook --agent claude {started}"))
+        .await;
+    client
+        .until(&id, "Idle", |view| view.agent == Some(State::Idle))
+        .await;
+}

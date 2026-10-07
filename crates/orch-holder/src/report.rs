@@ -16,13 +16,14 @@ pub fn report(socket: &Path, message: &ToHolder) -> io::Result<()> {
     write_frame(&mut stream, message)
 }
 
-pub fn request_guard(socket: &Path, payload: &str) -> GuardAnswer {
+pub fn request_guard(socket: &Path, agent: &str, payload: &str) -> GuardAnswer {
     let exchange = || -> io::Result<GuardAnswer> {
         let mut stream = UnixStream::connect(socket)?;
         stream.set_write_timeout(Some(SEND_TIMEOUT))?;
         write_frame(
             &mut stream,
             &ToHolder::Guard {
+                agent: agent.into(),
                 payload: payload.into(),
             },
         )?;

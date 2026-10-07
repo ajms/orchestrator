@@ -8,7 +8,7 @@ pub(crate) type Adapter = Arc<dyn AgentAdapter + Send + Sync>;
 
 type Build = fn(Option<String>) -> (Adapter, String);
 
-const BUILT_IN: [(&str, Build); 1] = [("claude", claude)];
+const BUILT_IN: [(&str, Build); 1] = [(ClaudeCode::NAME, claude)];
 
 fn claude(binary: Option<String>) -> (Adapter, String) {
     let mut claude = ClaudeCode::default();

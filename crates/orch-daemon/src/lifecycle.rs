@@ -536,7 +536,9 @@ impl Daemon {
             .arg("--cwd")
             .arg(&record.worktree)
             .arg("--base")
-            .arg(&record.base);
+            .arg(&record.base)
+            .arg("--agent")
+            .arg(&record.agent);
         if let Some(block) = record.port_block {
             command
                 .arg("--port-base")

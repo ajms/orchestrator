@@ -37,6 +37,7 @@ pub struct HoldConfig {
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
     pub base: Option<String>,
+    pub agent_name: Option<String>,
     pub port_block: Option<PortBlock>,
     pub size: Size,
     pub guard_timeout: Duration,
@@ -57,6 +58,7 @@ impl HoldConfig {
             argv,
             env: Vec::new(),
             base: None,
+            agent_name: None,
             port_block: None,
             size: Size::DEFAULT,
             guard_timeout: Self::DEFAULT_GUARD_TIMEOUT,
@@ -139,6 +141,7 @@ struct State {
     session: SessionId,
     cwd: PathBuf,
     base: Option<String>,
+    agent_name: Option<String>,
     port_block: Option<PortBlock>,
     agent_pid: Option<u32>,
     emulator: Emulator,
@@ -182,6 +185,7 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
             session: config.session.clone(),
             cwd: config.cwd.clone(),
             base: config.base.clone(),
+            agent_name: config.agent_name.clone(),
             port_block: config.port_block,
             agent_pid,
             emulator: Emulator::new(config.size, config.scrollback),
@@ -264,11 +268,16 @@ impl Shared {
         state.emulator.copy()
     }
 
-    fn open_guard(self: &Arc<Self>, payload: String) -> oneshot::Receiver<GuardAnswer> {
+    fn open_guard(
+        self: &Arc<Self>,
+        agent: String,
+        payload: String,
+    ) -> oneshot::Receiver<GuardAnswer> {
         let (reply, answer) = oneshot::channel();
         let mut state = self.lock();
         if state.upstream.is_none() {
             state.record(HolderEvent::Hook {
+                agent: Some(agent),
                 payload,
                 guard: None,
             });
@@ -277,6 +286,7 @@ impl Shared {
         }
         let id = state.guards.open(reply);
         state.record(HolderEvent::Hook {
+            agent: Some(agent),
             payload,
             guard: Some(id),
         });
@@ -368,6 +378,7 @@ impl State {
             session: self.session.clone(),
             cwd: Some(self.cwd.clone()),
             base: self.base.clone(),
+            agent_name: self.agent_name.clone(),
             port_block: self.port_block,
             holder_pid: std::process::id(),
             agent_pid: self.agent_pid,
@@ -449,13 +460,20 @@ pub(crate) async fn handle(
             shared.shutdown.notify_one();
             return false;
         }
-        ToHolder::Hook { payload } => shared.lock().record(HolderEvent::Hook {
+        ToHolder::Hook { agent, payload } => shared.lock().record(HolderEvent::Hook {
+            agent: Some(agent),
             payload,
             guard: None,
         }),
-        ToHolder::Tap { payload } => shared.lock().record(HolderEvent::Tap { payload }),
-        ToHolder::Guard { payload } => {
-            let answer = shared.open_guard(payload).await.unwrap_or(GuardAnswer::Ask);
+        ToHolder::Tap { agent, payload } => shared.lock().record(HolderEvent::Tap {
+            agent: Some(agent),
+            payload,
+        }),
+        ToHolder::Guard { agent, payload } => {
+            let answer = shared
+                .open_guard(agent, payload)
+                .await
+                .unwrap_or(GuardAnswer::Ask);
             outbox.send(FromHolder::GuardAnswer { answer });
         }
     }
