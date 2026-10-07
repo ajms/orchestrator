@@ -254,6 +254,19 @@ async fn without_a_conversation_the_draft_comes_from_the_sessions_prompt() {
 }
 
 #[tokio::test]
+async fn without_a_conversation_the_draft_needs_no_installed_agent() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = running_session(&env, &mut client, "Fix the login bug").await;
+    env.write_config_with_agent("", "/nonexistent/claude");
+
+    let (title, _) = draft(&mut client, &id, LandingMode::Squash).await;
+
+    assert_eq!(title, "Fix the login bug");
+}
+
+#[tokio::test]
 async fn a_failing_teardown_after_landing_is_a_warning_next_to_the_landed_commit() {
     let env = Env::new();
     let repo = env.repo("app");

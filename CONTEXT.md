@@ -113,6 +113,10 @@ _Avoid_: Parent, target, trunk
 Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch or pushing the Branch and opening a pull request.
 _Avoid_: Shipping, completing, finishing
 
+**Draft**:
+The commit message or pull request text that Landing proposes, written by a headless one-shot of the Session's Agent without adding turns to the live Conversation.
+_Avoid_: Suggestion, autocomplete
+
 **Setup script**:
 A per-Repo command run in a new Worktree before its Agent starts.
 _Avoid_: Init hook, bootstrap

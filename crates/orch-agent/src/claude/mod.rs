@@ -187,12 +187,13 @@ impl AgentAdapter for ClaudeCode {
     }
 
     fn draft(&self, conversation: Option<&ConversationId>) -> Option<Draft> {
+        let conversation = conversation?;
         let argv = Argv {
             program: self.program.clone(),
             args: vec![
                 "-p".into(),
                 "--resume".into(),
-                conversation?.as_str().into(),
+                conversation.as_str().into(),
                 "--fork-session".into(),
             ],
         };

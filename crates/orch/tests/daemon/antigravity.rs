@@ -1,5 +1,9 @@
+use std::path::PathBuf;
+use std::time::Duration;
+
 use orch_agent::Antigravity;
 use orch_core::SessionId;
+use orch_holder::SESSION_ENV;
 use orch_protocol::{
     AgentStateView as State, AgentUsageWindows, CreateSession, LandingMode, PhaseView, Reply,
     Request, UsageWindowView,
@@ -318,21 +322,16 @@ async fn each_agy_quota_pool_shows_as_a_usage_window_of_the_agent() {
     );
 }
 
-#[tokio::test]
-async fn agy_drafts_in_a_fresh_headless_run_fed_the_whole_diff_against_the_base() {
-    let env = Env::new();
-    let mut daemon = env.daemon_command(std::time::Duration::from_secs(600));
-    daemon.env("ORCH_SESSION", "outer-session");
-    let _daemon = env.spawn_daemon(&mut daemon).await;
+async fn idle_antigravity_session(env: &Env) -> (TestClient, SessionId, PaneView, PathBuf) {
     let mut client = env.client().await;
-    let (id, mut pane) = antigravity_session(&env, &mut client, "edits").await;
+    let (id, mut pane) = antigravity_session(env, &mut client, "edits").await;
     tap(&mut pane, json!({ "agent_state": "idle" })).await;
     until_state(&mut client, &id, State::Idle).await;
     let worktree = client.sessions[&id].worktree.clone();
-    commit(&worktree, "committed.txt", "committed line\n");
-    std::fs::write(worktree.join("README.md"), "uncommitted line\n").unwrap();
-    std::fs::write(worktree.join("untracked.txt"), "untracked line\n").unwrap();
+    (client, id, pane, worktree)
+}
 
+async fn drafted(client: &mut TestClient, id: &SessionId) -> (String, String) {
     let drafted = client
         .request(Request::Draft {
             session: id.clone(),
@@ -342,10 +341,49 @@ async fn agy_drafts_in_a_fresh_headless_run_fed_the_whole_diff_against_the_base(
     let Ok(Reply::Drafted { title, body }) = drafted else {
         panic!("no draft: {drafted:?}");
     };
+    (title, body)
+}
+
+#[tokio::test]
+async fn a_huge_diff_reaches_agy_truncated_after_a_stat_of_every_changed_file() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let (mut client, id, _pane, worktree) = idle_antigravity_session(&env).await;
+    let huge: String = (0..4000)
+        .map(|i| format!("generated line {i:>40}\n"))
+        .collect();
+    std::fs::write(worktree.join("generated.txt"), huge).unwrap();
+    std::fs::write(worktree.join("small.txt"), "small line\n").unwrap();
+
+    let (_, body) = drafted(&mut client, &id).await;
+
+    let stat = |file: &str, lines: &str| {
+        body.lines()
+            .any(|line| line.contains(file) && line.contains(&format!("| {lines} +")))
+    };
+    assert!(stat("generated.txt", "4000"), "{body}");
+    assert!(stat("small.txt", "   1"), "{body}");
+    assert!(body.contains("diff truncated"), "{body}");
+    assert!(!body.contains("generated line 3999"));
+    assert!(body.len() < 110 * 1024, "{}", body.len());
+}
+
+#[tokio::test]
+async fn agy_drafts_in_a_fresh_headless_run_fed_the_whole_diff_against_the_base() {
+    let env = Env::new();
+    let mut daemon = env.daemon_command(Duration::from_secs(600));
+    daemon.env(SESSION_ENV, "outer-session");
+    let _daemon = env.spawn_daemon(&mut daemon).await;
+    let (mut client, id, pane, worktree) = idle_antigravity_session(&env).await;
+    commit(&worktree, "committed.txt", "committed line\n");
+    std::fs::write(worktree.join("README.md"), "uncommitted line\n").unwrap();
+    std::fs::write(worktree.join("untracked.txt"), "untracked line\n").unwrap();
+
+    let (title, body) = drafted(&mut client, &id).await;
 
     assert_eq!(title, "Drafted from nothing");
     assert!(
-        body.starts_with("args: -p\nORCH_SESSION=<unset>\n"),
+        body.starts_with(&format!("args: -p\n{SESSION_ENV}=<unset>\n")),
         "{body}"
     );
     assert!(body.contains("commit message"), "{body}");
