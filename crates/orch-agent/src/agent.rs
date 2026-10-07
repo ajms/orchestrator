@@ -54,33 +54,17 @@ pub enum DraftInput {
     InstructionAndBaseDiff,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DraftIo {
-    Text,
-    AgyStreamJson,
-}
-
-impl DraftIo {
-    pub fn encode(self, prompt: &str) -> String {
-        match self {
-            DraftIo::Text => prompt.into(),
-            DraftIo::AgyStreamJson => crate::antigravity::draft::encode(prompt),
-        }
-    }
-
-    pub fn decode(self, stdout: &str) -> Result<Option<String>, String> {
-        match self {
-            DraftIo::Text => Ok(Some(stdout.into())),
-            DraftIo::AgyStreamJson => crate::antigravity::draft::decode(stdout),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DraftOutcome {
+    Drafted(String),
+    NoResult,
+    Failed(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Draft {
     pub argv: Argv,
     pub input: DraftInput,
-    pub io: DraftIo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +164,14 @@ pub trait AgentAdapter {
 
     fn draft(&self, _conversation: Option<&ConversationId>) -> Option<Draft> {
         None
+    }
+
+    fn encode_draft(&self, prompt: &str) -> String {
+        prompt.into()
+    }
+
+    fn decode_draft(&self, stdout: &str) -> DraftOutcome {
+        DraftOutcome::Drafted(stdout.into())
     }
 
     fn map_hook(&self, _payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {

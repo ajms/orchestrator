@@ -1,4 +1,6 @@
-use orch_agent::{AgentAdapter, Antigravity, DraftInput, DraftIo, LaunchSpec, Preset, Presets};
+use orch_agent::{
+    AgentAdapter, Antigravity, DraftInput, DraftOutcome, LaunchSpec, Preset, Presets,
+};
 use orch_core::{ConversationId, PermissionMode, SessionId};
 use serde_json::{Value, json};
 
@@ -111,14 +113,13 @@ fn draft_runs_a_fresh_headless_agy_in_stream_json_fed_the_base_diff_whatever_the
             ]
         );
         assert_eq!(draft.input, DraftInput::InstructionAndBaseDiff);
-        assert_eq!(draft.io, DraftIo::AgyStreamJson);
     }
 }
 
 #[test]
 fn agys_draft_prompt_is_one_user_event_line() {
     let prompt = "Write a commit message.\n\ndiff --git a/x b/x\n+\"quoted\"";
-    let encoded = DraftIo::AgyStreamJson.encode(prompt);
+    let encoded = Antigravity::default().encode_draft(prompt);
     assert!(
         encoded.ends_with('\n') && encoded.lines().count() == 1,
         "{encoded:?}"
@@ -147,10 +148,8 @@ fn agys_draft_is_the_response_of_its_successful_result_event() {
         "response": "Fix the login bug\n\nCheck the password hash.\n",
     }));
     assert_eq!(
-        DraftIo::AgyStreamJson.decode(&output),
-        Ok(Some(
-            "Fix the login bug\n\nCheck the password hash.\n".into()
-        ))
+        Antigravity::default().decode_draft(&output),
+        DraftOutcome::Drafted("Fix the login bug\n\nCheck the password hash.\n".into())
     );
 }
 
@@ -161,10 +160,10 @@ fn an_agy_error_result_fails_the_draft_with_agys_error() {
         "status": "ERROR",
         "error": "quota exhausted for gemini-weekly",
     }));
-    let failed = DraftIo::AgyStreamJson.decode(&output).unwrap_err();
+    let failed = Antigravity::default().decode_draft(&output);
     assert!(
-        failed.contains("quota exhausted for gemini-weekly"),
-        "{failed}"
+        matches!(&failed, DraftOutcome::Failed(error) if error.contains("quota exhausted for gemini-weekly")),
+        "{failed:?}"
     );
 }
 
@@ -174,5 +173,8 @@ fn agy_output_without_a_result_event_has_no_draft() {
         "{}\n",
         json!({ "event": "init", "conversation_id": CONVERSATION })
     );
-    assert_eq!(DraftIo::AgyStreamJson.decode(&output), Ok(None));
+    assert_eq!(
+        Antigravity::default().decode_draft(&output),
+        DraftOutcome::NoResult
+    );
 }

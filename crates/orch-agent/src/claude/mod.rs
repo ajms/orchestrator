@@ -14,8 +14,8 @@ use transcript::TranscriptTitles;
 
 use crate::shell::quote;
 use crate::{
-    AgentAdapter, Argv, Capabilities, Draft, DraftInput, DraftIo, GUARD_WAIT_SECS, GuardAnswer,
-    LaunchSpec, PayloadError, SubagentTranscripts, TitleWatch,
+    AgentAdapter, Argv, Capabilities, Draft, DraftInput, GUARD_WAIT_SECS, GuardAnswer, LaunchSpec,
+    PayloadError, SubagentTranscripts, TitleWatch,
 };
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
@@ -200,7 +200,6 @@ impl AgentAdapter for ClaudeCode {
         Some(Draft {
             argv,
             input: DraftInput::Instruction,
-            io: DraftIo::Text,
         })
     }
 }
