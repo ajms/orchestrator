@@ -51,16 +51,18 @@ impl Usage {
     }
 }
 
-fn window((name, pool): (String, Value)) -> Option<UsageWindow> {
-    let pool: Pool = serde_json::from_value(pool).ok()?;
-    let label = POOL_LABELS
+fn label(name: &str) -> &str {
+    POOL_LABELS
         .iter()
         .find(|(pool, _)| *pool == name)
-        .map_or(name.as_str(), |(_, label)| label)
-        .into();
+        .map_or(name, |(_, label)| label)
+}
+
+fn window((name, pool): (String, Value)) -> Option<UsageWindow> {
+    let pool: Pool = serde_json::from_value(pool).ok()?;
     Some(UsageWindow {
-        label,
-        used_percent: 100.0 - pool.remaining_fraction * 100.0,
+        label: label(&name).into(),
+        used_percent: (100.0 - pool.remaining_fraction * 100.0).clamp(0.0, 100.0),
         resets_at_unix: pool
             .reset_time
             .and_then(|at| OffsetDateTime::parse(&at, &Rfc3339).ok())

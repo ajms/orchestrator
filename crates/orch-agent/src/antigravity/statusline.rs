@@ -29,8 +29,9 @@ pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
     let conversation = conversation_id
         .clone()
         .map(|id| AgentEvent::ConversationChanged { id });
-    let usage = AgentEvent::UsageSample(line.usage.sample(conversation_id));
-    let mode = (!STARTING_UP.contains(&state))
+    let started = !STARTING_UP.contains(&state);
+    let usage = started.then(|| AgentEvent::UsageSample(line.usage.sample(conversation_id)));
+    let mode = started
         .then(|| mode_from_name(line.cycle_mode.as_deref()))
         .flatten()
         .map(|mode| AgentEvent::ModeChanged { mode });
@@ -41,7 +42,7 @@ pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
     };
     Ok(conversation
         .into_iter()
-        .chain([usage])
+        .chain(usage)
         .chain(mode)
         .chain(prompt)
         .collect())
