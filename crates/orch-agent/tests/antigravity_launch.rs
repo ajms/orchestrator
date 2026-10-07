@@ -178,3 +178,18 @@ fn agy_output_without_a_result_event_has_no_draft() {
         DraftOutcome::NoResult
     );
 }
+
+#[test]
+fn a_successful_agy_result_without_a_response_text_has_no_draft() {
+    for response in [None, Some(json!(42)), Some(json!(" \n"))] {
+        let mut result = json!({ "conversation_id": CONVERSATION, "status": "SUCCESS" });
+        if let Some(response) = &response {
+            result["response"] = response.clone();
+        }
+        assert_eq!(
+            Antigravity::default().decode_draft(&agy_output(result)),
+            DraftOutcome::NoResult,
+            "response {response:?}"
+        );
+    }
+}
