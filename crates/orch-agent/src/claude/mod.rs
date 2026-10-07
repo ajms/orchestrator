@@ -1,5 +1,4 @@
 mod hooks;
-mod lines;
 mod settings;
 mod statusline;
 mod subagents;

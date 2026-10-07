@@ -3,18 +3,18 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default)]
-pub(super) struct FollowedLines {
+pub(crate) struct FollowedLines {
     path: PathBuf,
     offset: u64,
 }
 
-pub(super) struct NewLines {
-    pub(super) reset: bool,
-    pub(super) lines: Vec<Vec<u8>>,
+pub(crate) struct NewLines {
+    pub(crate) reset: bool,
+    pub(crate) lines: Vec<Vec<u8>>,
 }
 
 impl FollowedLines {
-    pub(super) fn read(&mut self, path: &Path) -> Option<NewLines> {
+    pub(crate) fn read(&mut self, path: &Path) -> Option<NewLines> {
         let mut file = File::open(path).ok()?;
         let len = file.metadata().ok()?.len();
         let reset = self.path != path || len < self.offset;

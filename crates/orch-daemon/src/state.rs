@@ -4,10 +4,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use orch_agent::{
-    Adapter, Capabilities, GuardHit, GuardKind, SubagentTranscripts, TitleWatch, mode_name,
+    Adapter, Capabilities, ConversationTree, GuardHit, GuardKind, SubagentTranscripts, TitleWatch,
+    mode_name,
 };
 use orch_core::{
-    AgentEvent, AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus,
+    AgentEvent, AgentState, Effect, GateRefusal, Observation, Phase, PhaseEvent, PrStatus,
+    SessionId, SessionStatus,
 };
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
@@ -99,6 +101,7 @@ pub(crate) struct Live {
     pub(crate) launching: bool,
     pub(crate) repo_missing: bool,
     pub(crate) transcripts: Option<Box<dyn SubagentTranscripts>>,
+    tree: Option<Box<dyn ConversationTree>>,
     end_noticed: bool,
     holder: Option<HolderLink>,
     generation: u64,
@@ -201,6 +204,12 @@ impl Live {
             .transcripts
             .then(|| adapter.as_ref()?.subagent_transcripts())
             .flatten();
+        let mut tree = adapter
+            .as_ref()
+            .and_then(|adapter| adapter.conversation_tree());
+        if let Some(tree) = &mut tree {
+            tree.restart(record.latest_conversation());
+        }
         Self {
             record,
             repo,
@@ -216,6 +225,7 @@ impl Live {
             launching: false,
             repo_missing: false,
             transcripts,
+            tree,
             end_noticed: false,
             holder: None,
             generation: 0,
@@ -233,18 +243,29 @@ impl Live {
             .unwrap_or_default()
     }
 
-    pub(crate) fn hook_events(&self, payload: &str) -> Vec<AgentEvent> {
-        self.adapter
-            .as_ref()
-            .and_then(|adapter| adapter.map_hook(payload).ok())
-            .unwrap_or_default()
+    pub(crate) fn hook_events(&mut self, payload: &str) -> Vec<AgentEvent> {
+        let mapped = match (&mut self.tree, &self.adapter) {
+            (Some(tree), _) => tree.hook(payload),
+            (None, Some(adapter)) => adapter.map_hook(payload),
+            (None, None) => return Vec::new(),
+        };
+        mapped.unwrap_or_default()
     }
 
-    pub(crate) fn tap_events(&self, payload: &str) -> Vec<AgentEvent> {
-        self.adapter
-            .as_ref()
-            .and_then(|adapter| adapter.map_tap(payload).ok())
-            .unwrap_or_default()
+    pub(crate) fn tap_events(&mut self, payload: &str) -> Vec<AgentEvent> {
+        let mapped = match (&mut self.tree, &self.adapter) {
+            (Some(tree), _) => tree.tap(payload),
+            (None, Some(adapter)) => adapter.map_tap(payload),
+            (None, None) => return Vec::new(),
+        };
+        mapped.unwrap_or_default()
+    }
+
+    pub(crate) fn agent_spawned(&mut self, now: Instant) -> Vec<Effect> {
+        if let Some(tree) = &mut self.tree {
+            tree.restart(None);
+        }
+        self.status.observe(Observation::Spawned, now)
     }
 
     pub(crate) fn title_watch(&self) -> Option<Box<dyn TitleWatch>> {
