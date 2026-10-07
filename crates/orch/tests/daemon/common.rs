@@ -56,8 +56,13 @@ impl Env {
             std::fs::create_dir_all(dir.path().join(sub)).unwrap();
         }
         let env = Self { dir };
+        std::fs::write(env.claude_script(), "draft -p --resume\n").unwrap();
         env.write_config("");
         env
+    }
+
+    fn claude_script(&self) -> PathBuf {
+        self.path("claude.script")
     }
 
     pub fn path(&self, name: &str) -> PathBuf {
@@ -77,8 +82,9 @@ impl Env {
     }
 
     pub fn write_config_with_agent(&self, extra: &str, binary: &str) {
+        let script = self.claude_script();
         let config = format!(
-            "{extra}\n[defaults.agents.claude]\nbinary = {binary:?}\nargs = [\"fake-agent\", \"--\"]\n"
+            "{extra}\n[defaults.agents.claude]\nbinary = {binary:?}\nargs = [\"fake-agent\", \"--script\", {script:?}, \"--\"]\n"
         );
         std::fs::write(self.path("config/orchestrator/config.toml"), config).unwrap();
     }

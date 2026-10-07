@@ -1,11 +1,14 @@
+mod hooks;
 mod hookup;
+mod statusline;
 
 use std::path::Path;
 
-use serde_json::{Value, json};
+use orch_core::{AgentEvent, ConversationId, PermissionMode};
+use serde_json::json;
 
 use crate::hookup::AgentHookup;
-use crate::{AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec};
+use crate::{AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError};
 use hookup::AntigravityHookup;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,23 +26,72 @@ impl Default for Antigravity {
 
 impl Antigravity {
     pub const NAME: &str = "antigravity";
+
+    fn argv(&self, args: Vec<String>) -> Argv {
+        Argv {
+            program: self.program.clone(),
+            args,
+        }
+    }
+}
+
+fn mode_args(mode: Option<PermissionMode>) -> Vec<String> {
+    let mode = match mode {
+        Some(PermissionMode::AcceptEdits) => "accept-edits",
+        Some(PermissionMode::Plan) => "plan",
+        _ => return Vec::new(),
+    };
+    vec!["--mode".into(), mode.into()]
 }
 
 impl AgentAdapter for Antigravity {
     fn capabilities(&self) -> Capabilities {
-        Capabilities::default()
-    }
-
-    fn launch(&self, _spec: &LaunchSpec) -> Argv {
-        Argv {
-            program: self.program.clone(),
-            args: Vec::new(),
+        Capabilities {
+            hooks: true,
+            resume: true,
+            modes: true,
+            ..Capabilities::default()
         }
     }
 
+    fn modes(&self) -> &'static [PermissionMode] {
+        &[
+            PermissionMode::Default,
+            PermissionMode::AcceptEdits,
+            PermissionMode::Plan,
+        ]
+    }
+
+    fn launch(&self, spec: &LaunchSpec) -> Argv {
+        let mut args = mode_args(spec.preset.mode);
+        if let Some(prompt) = &spec.prompt {
+            args.extend(["-i".into(), prompt.clone()]);
+        }
+        self.argv(args)
+    }
+
+    fn resume(
+        &self,
+        spec: &LaunchSpec,
+        conversation: &ConversationId,
+        observed_mode: Option<PermissionMode>,
+    ) -> Option<Argv> {
+        let mode = spec.preset.mode.and(observed_mode.or(spec.preset.mode));
+        let mut args = vec!["--conversation".into(), conversation.as_str().into()];
+        args.extend(mode_args(mode));
+        Some(self.argv(args))
+    }
+
+    fn map_hook(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
+        hooks::map_hook(payload)
+    }
+
+    fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
+        statusline::map_tap(payload)
+    }
+
     fn is_guard_payload(&self, payload: &str) -> bool {
-        serde_json::from_str::<Value>(payload)
-            .is_ok_and(|payload| payload.get("toolCall").is_some())
+        hooks::is_guard_payload(payload)
     }
 
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String> {

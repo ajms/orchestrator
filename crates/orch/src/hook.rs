@@ -1,11 +1,11 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use orch_agent::{GuardAnswer, by_name};
+use orch_agent::{GuardAnswer, by_name, tag_hook_event};
 use orch_core::SessionId;
 use orch_holder::{ToHolder, locate_socket, report, request_guard};
 
-pub fn run(agent: &str, session: Option<&str>) -> ExitCode {
+pub fn run(agent: &str, session: Option<&str>, event: Option<&str>) -> ExitCode {
     let adapter = by_name(agent);
     let fallback = || {
         if let Some(reply) = adapter
@@ -19,6 +19,9 @@ pub fn run(agent: &str, session: Option<&str>) -> ExitCode {
     if std::io::stdin().read_to_string(&mut payload).is_err() {
         fallback();
         return ExitCode::SUCCESS;
+    }
+    if let Some(event) = event {
+        payload = tag_hook_event(&payload, event);
     }
     let socket = session
         .and_then(|session| SessionId::parse(session).ok())

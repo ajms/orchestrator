@@ -57,17 +57,20 @@ async fn install_then_uninstall_restores_the_users_own_hooks_and_statusline() {
     assert!(installed.status.success(), "{}", stderr(&installed));
     let hooks = read_json(&hooks_file(&env));
     assert_eq!(hooks["lint"], users_hooks()["lint"]);
-    let hook = json!({ "type": "command", "command": orch_command("hook") });
-    let mut guard_hook = hook.clone();
+    let hook = |event: &str| {
+        let command = format!("{} --event {event}", orch_command("hook"));
+        json!({ "type": "command", "command": command })
+    };
+    let mut guard_hook = hook("PreToolUse");
     guard_hook["timeout"] = json!(GUARD_WAIT_SECS);
     assert_eq!(
         hooks["orch"],
         json!({
             "PreToolUse": [{ "matcher": "*", "hooks": [guard_hook] }],
-            "PostToolUse": [{ "matcher": "*", "hooks": [hook] }],
-            "PreInvocation": [hook],
-            "PostInvocation": [hook],
-            "Stop": [hook],
+            "PostToolUse": [{ "matcher": "*", "hooks": [hook("PostToolUse")] }],
+            "PreInvocation": [hook("PreInvocation")],
+            "PostInvocation": [hook("PostInvocation")],
+            "Stop": [hook("Stop")],
         })
     );
     let settings = read_json(&settings_file(&env));

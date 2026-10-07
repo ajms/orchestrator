@@ -3,6 +3,7 @@ mod antigravity;
 mod built_in;
 mod claude;
 mod guard;
+mod hook_event;
 mod hookup;
 mod preset;
 mod shell;
@@ -17,6 +18,7 @@ pub use claude::{ClaudeCode, mode_from_name, mode_name};
 pub use guard::{
     GUARD_WAIT_SECS, GuardAnswer, GuardContext, GuardDecision, GuardHit, GuardKind, evaluate_guard,
 };
+pub use hook_event::tag_hook_event;
 pub use hookup::{AgentHookup, FileEdit, HookupError, HookupState, apply as apply_hookup};
 pub use preset::{
     EDITS, INHERIT, Preset, PresetSelection, Presets, ReservedPresetName, Rules, UnknownPreset,

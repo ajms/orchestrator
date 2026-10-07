@@ -52,21 +52,25 @@ fn orch_command(orch_program: &str, subcommand: &str) -> String {
 }
 
 fn is_orch_command(command: &str, subcommand: &str) -> bool {
-    command.ends_with(&format!(" {subcommand} --agent {}", Antigravity::NAME))
+    let orch = format!(" {subcommand} --agent {}", Antigravity::NAME);
+    command.ends_with(&orch) || command.contains(&format!("{orch} --event "))
 }
 
 fn hook_entry(orch_program: &str) -> Value {
-    let hook = json!({ "type": "command", "command": orch_command(orch_program, "hook") });
+    let hook = |event: &str| {
+        let command = format!("{} --event {event}", orch_command(orch_program, "hook"));
+        json!({ "type": "command", "command": command })
+    };
     let mut entry = Map::new();
     for event in TOOL_EVENTS {
-        let mut hook = hook.clone();
+        let mut hook = hook(event);
         if event == GUARD_EVENT {
             hook["timeout"] = json!(GUARD_WAIT_SECS);
         }
         entry.insert(event.into(), json!([{ "matcher": "*", "hooks": [hook] }]));
     }
     for event in LOOP_EVENTS {
-        entry.insert(event.into(), json!([hook]));
+        entry.insert(event.into(), json!([hook(event)]));
     }
     Value::Object(entry)
 }

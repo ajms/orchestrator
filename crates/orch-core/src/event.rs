@@ -89,6 +89,7 @@ pub struct UsageSample {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
     SessionStarted,
+    Ready,
     PromptSubmitted,
     ToolStarted {
         tool: String,
@@ -99,6 +100,7 @@ pub enum AgentEvent {
         subagent: Option<SubagentId>,
     },
     PermissionRequested,
+    PermissionCleared,
     PermissionDenied,
     QuestionAsked,
     TurnEnded,

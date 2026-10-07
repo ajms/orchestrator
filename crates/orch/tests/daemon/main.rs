@@ -1,4 +1,5 @@
 mod agents;
+mod antigravity;
 mod cli;
 mod clipboard;
 mod common;
