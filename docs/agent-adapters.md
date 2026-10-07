@@ -19,6 +19,8 @@ pub trait AgentAdapter {
     fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>>;
     fn is_guard_payload(&self, payload: &str) -> bool;
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String>;
+    fn worktree_request(&self, payload: &str) -> Option<WorktreeRequest>;
+    fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf>;
 }
 ```
 
@@ -26,7 +28,7 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 
 | Method | Supplies |
 |---|---|
-| `launch` | The argv that starts a fresh Agent in the Worktree. `LaunchSpec` carries the Session id, the absolute `orch` binary (for hook and tap commands), the effective Preset and an optional initial prompt. Claude gets `--session-id`, `--settings` JSON (hooks → `orch hook --session <id>`, `statusLine` → `orch tap --session <id>`, the Preset's allow/deny), and `--permission-mode` unless the Preset is `inherit`. |
+| `launch` | The argv that starts a fresh Agent in the Worktree. `LaunchSpec` carries the Session id, the absolute `orch` binary (for hook and tap commands), the effective Preset, an optional initial prompt and the Session's Worktree. Claude gets `--session-id`, `--settings` JSON (hooks → `orch hook --session <id>`, `WorktreeCreate`/`WorktreeRemove` → `orch worktree-hook --worktree <worktree>`, `statusLine` → `orch tap --session <id>`, the Preset's allow/deny), and `--permission-mode` unless the Preset is `inherit`. |
 | `resume` | The argv that continues the latest Conversation in the last observed mode. `None` means the Agent can't resume, so `restart` falls back to `launch`. |
 | `draft` | A side-channel one-shot that drafts a commit message or PR title/body without adding turns to the live Conversation. Claude uses `-p --resume <conv> --fork-session`. |
 | `map_hook` | Parses one hook payload, which `orch hook` forwards through the Holder, into normalized events. |
@@ -34,6 +36,8 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | `title_watch` | A stateful `TitleWatch` that reports the Session title. The Daemon keeps one per Holder connection in its own task: it hands the watch every hook and statusline payload (`follow`, which only notes where to look) and calls `poll` right after each payload and about once a second, off the Daemon's state lock, so a title shows without waiting for the next hook. `poll` returns `TitleChanged` only when the title differs from the last one it reported. Claude follows `transcript_path`, reads the transcript incrementally and reports the last `custom-title` entry (`/rename`); the `session_title` field of SessionStart/UserPromptSubmit hooks only fills in while the transcript has no `custom-title` entry, and is forgotten when the transcript changes (a new Conversation). |
 | `subagent_transcripts` | A stateful `SubagentTranscripts` per Session that finds each Subagent's transcript file. The Daemon hands it every hook payload (`follow`) and asks it for a Subagent's file (`locate`) and for a `TranscriptReader` per subscribing Client. `read` returns the entries added since the last read, and `reset` when it started over because the file changed or shrank. Claude derives `<transcript dir>/<conversation>/subagents/agent-<id>.jsonl` from the `transcript_path` of the Subagent's first hook (so it survives a new Conversation) and switches to `agent_transcript_path` once `SubagentStop` names it. It drops thinking, and a tool call's key argument is the first of `command`, `file_path`, `notebook_path`, `pattern`, `url`, `query`, `skill`, `description`, `prompt` in its input. |
 | `is_guard_payload` / `guard_answer` | Marks the hook payloads that block until the Daemon answers a Guard, and renders the answer in the Agent's hook-output format. |
+| `worktree_request` | Recognises the hook payloads in which the Agent asks for a Subagent worktree to be created (`Create { name }`) or removed (`Remove { path }`). `orch worktree-hook` answers them itself, outside the event vocabulary: it makes the worktree under `.orchestrator/subagents/<slug>/` and prints its path, so Guards count it as part of the Session. Claude sends `name` in `WorktreeCreate` and `worktree_path` in `WorktreeRemove`. |
+| `agent_dirs` | Directories the Agent keeps its own state in (Claude: `projects` and `plans` under its config dir). Guards let the Agent write there, as they do in the Session's Subagent worktrees. |
 
 ## Capabilities and graceful degrade
 
@@ -83,7 +87,8 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
    - write `map_hook` / `map_tap` into the vocabulary above, and map anything that doesn't fit to nothing rather than inventing events;
    - if the Agent lets the user name a Conversation, implement `title_watch`; keep file reads there, so `map_hook` / `map_tap` stay pure;
    - if the Agent writes its Subagents' transcripts to files, implement `subagent_transcripts` into the entries above;
-   - for Guards, implement `is_guard_payload` and `guard_answer` for the Agent's blocking-hook protocol.
+   - for Guards, implement `is_guard_payload` and `guard_answer` for the Agent's blocking-hook protocol, and `agent_dirs` for the Agent's own state;
+   - if the Agent can isolate Subagents in worktrees through a hook, route that hook to `orch worktree-hook` and implement `worktree_request`.
 4. **Never write to the user's own Agent config.** Inject everything per launch through flags or env, as the Claude adapter does with `--settings`.
 5. **Test the mapping as pure functions** (Seam 3): fixture → events, and launch/resume argv for each Preset and capability combination. Test a `TitleWatch` through `follow` / `poll` and `SubagentTranscripts` through `follow` / `locate` / `read` against temporary transcript files. See `crates/orch-agent/tests/claude_*.rs`.
 6. **Register the adapter** in `crates/orch-daemon/src/agents.rs` (`adapter_for`) under its config name, so that `[defaults.agent] name = "<agent>"` (or a Repo's `[agent]`) selects it.

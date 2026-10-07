@@ -53,6 +53,7 @@ impl Repo {
             outcome = teardown.map(|script| script.run(path));
             self.remove_worktree_dir(path, None)?;
         } else if !present {
+            self.remove_subagent_worktrees(path);
             self.git(["worktree", "prune"]).run()?;
         }
         let kept_worktree = present && !worktree_ours;
