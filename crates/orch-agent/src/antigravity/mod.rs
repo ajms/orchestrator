@@ -1,3 +1,4 @@
+pub(crate) mod draft;
 mod guards;
 mod hooks;
 mod hookup;
@@ -14,8 +15,8 @@ use serde_json::json;
 
 use crate::hookup::AgentHookup;
 use crate::{
-    AgentAdapter, Argv, Capabilities, ConversationTree, Draft, DraftInput, GuardAnswer, LaunchSpec,
-    PayloadError, Preset, RuleScope, RuleVerdict, SubagentTranscripts,
+    AgentAdapter, Argv, Capabilities, ConversationTree, Draft, DraftInput, DraftIo, GuardAnswer,
+    LaunchSpec, PayloadError, Preset, RuleScope, RuleVerdict, SubagentTranscripts,
 };
 use hookup::AntigravityHookup;
 use subagents::AntigravityTree;
@@ -114,9 +115,18 @@ impl AgentAdapter for Antigravity {
     }
 
     fn draft(&self, _conversation: Option<&ConversationId>) -> Option<Draft> {
+        let args = [
+            "-p",
+            "",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+        ];
         Some(Draft {
-            argv: self.argv(vec!["-p".into()]),
+            argv: self.argv(args.map(String::from).to_vec()),
             input: DraftInput::InstructionAndBaseDiff,
+            io: DraftIo::AgyStreamJson,
         })
     }
 

@@ -54,10 +54,33 @@ pub enum DraftInput {
     InstructionAndBaseDiff,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftIo {
+    Text,
+    AgyStreamJson,
+}
+
+impl DraftIo {
+    pub fn encode(self, prompt: &str) -> String {
+        match self {
+            DraftIo::Text => prompt.into(),
+            DraftIo::AgyStreamJson => crate::antigravity::draft::encode(prompt),
+        }
+    }
+
+    pub fn decode(self, stdout: &str) -> Result<Option<String>, String> {
+        match self {
+            DraftIo::Text => Ok(Some(stdout.into())),
+            DraftIo::AgyStreamJson => crate::antigravity::draft::decode(stdout),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Draft {
     pub argv: Argv,
     pub input: DraftInput,
+    pub io: DraftIo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

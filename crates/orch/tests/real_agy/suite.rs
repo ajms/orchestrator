@@ -200,7 +200,7 @@ async fn a_subagent_becomes_a_subagent_row_with_its_transcript() {
 
 #[tokio::test]
 #[ignore = "runs the real agy; set ORCH_REAL_AGY=1"]
-async fn agys_print_mode_reads_its_prompt_from_stdin() {
+async fn agys_stream_json_print_mode_answers_the_user_event_on_stdin() {
     let Some(agy) = RealAgy::new().await else {
         return;
     };
@@ -208,7 +208,7 @@ async fn agys_print_mode_reads_its_prompt_from_stdin() {
     let adapter = Antigravity {
         program: agy.agy.display().to_string(),
     };
-    let Some(Draft { argv, .. }) = adapter.draft(None) else {
+    let Some(Draft { argv, io, .. }) = adapter.draft(None) else {
         panic!("Antigravity drafts");
     };
     let mut command = agy.command(&argv.program);
@@ -216,14 +216,19 @@ async fn agys_print_mode_reads_its_prompt_from_stdin() {
 
     let output = run_with_stdin(
         command,
-        "Reply with the single word pineapple and nothing else.",
+        &io.encode("Reply with the single word pineapple and nothing else."),
         TURN,
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    let response = io.decode(&String::from_utf8_lossy(&output.stdout));
+    let answered = response
+        .as_ref()
+        .ok()
+        .and_then(Option::as_deref)
+        .is_some_and(|text| text.to_lowercase().contains("pineapple"));
     assert!(
-        output.status.success() && stdout.contains("pineapple"),
-        "agy {:?} did not answer the prompt on stdin: {output:?}",
+        output.status.success() && answered,
+        "agy {:?} did not answer the user event on stdin with a result: {response:?} from {output:?}",
         argv.args
     );
 }

@@ -6,7 +6,7 @@ use orch_core::SessionId;
 use orch_holder::SESSION_ENV;
 use orch_protocol::{
     AgentStateView as State, AgentUsageWindows, CreateSession, GuardChoice, LandingMode, PhaseView,
-    Reply, Request, UsageWindowView,
+    Reply, Request, RequestError, UsageWindowView,
 };
 use serde_json::{Value, json};
 
@@ -410,7 +410,9 @@ async fn agy_drafts_in_a_fresh_headless_run_fed_the_whole_diff_against_the_base(
 
     assert_eq!(title, "Drafted from nothing");
     assert!(
-        body.starts_with(&format!("args: -p\n{SESSION_ENV}=<unset>\n")),
+        body.starts_with(&format!(
+            "args: -p  --input-format stream-json --output-format stream-json\n{SESSION_ENV}=<unset>\n"
+        )),
         "{body}"
     );
     assert!(body.contains("commit message"), "{body}");
@@ -418,6 +420,30 @@ async fn agy_drafts_in_a_fresh_headless_run_fed_the_whole_diff_against_the_base(
         assert!(body.contains(change), "{change} missing from {body}");
     }
     assert!(!pane.text().contains("Drafted"));
+}
+
+#[tokio::test]
+async fn a_failed_agy_draft_is_refused_with_agys_error() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let script = ["draft-error quota exhausted for gemini-weekly".to_string()];
+    let (id, _) = scripted_antigravity_session(&env, &mut client, "edits", "", &script).await;
+
+    let drafted = client
+        .request(Request::Draft {
+            session: id.clone(),
+            mode: LandingMode::Squash,
+        })
+        .await;
+
+    let Err(RequestError::Refused { message }) = drafted else {
+        panic!("no refusal: {drafted:?}");
+    };
+    assert!(
+        message.contains("quota exhausted for gemini-weekly"),
+        "{message}"
+    );
 }
 
 async fn tool_call(pane: &mut PaneView, name: &str, args: Value) {

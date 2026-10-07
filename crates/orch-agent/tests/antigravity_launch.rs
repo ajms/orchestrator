@@ -1,5 +1,6 @@
-use orch_agent::{AgentAdapter, Antigravity, DraftInput, LaunchSpec, Preset, Presets};
+use orch_agent::{AgentAdapter, Antigravity, DraftInput, DraftIo, LaunchSpec, Preset, Presets};
 use orch_core::{ConversationId, PermissionMode, SessionId};
+use serde_json::{Value, json};
 
 const CONVERSATION: &str = "3c1e9a40-7d52-4b8e-a6f1-2d9b0c4e7a13";
 
@@ -93,12 +94,85 @@ fn antigravity_offers_only_the_modes_agy_can_launch() {
 }
 
 #[test]
-fn draft_runs_a_fresh_headless_agy_fed_the_base_diff_whatever_the_conversation() {
+fn draft_runs_a_fresh_headless_agy_in_stream_json_fed_the_base_diff_whatever_the_conversation() {
     let conversation = ConversationId(CONVERSATION.into());
     for latest in [Some(&conversation), None] {
         let draft = Antigravity::default().draft(latest).expect("agy drafts");
         assert_eq!(draft.argv.program, "agy");
-        assert_eq!(draft.argv.args, ["-p"]);
+        assert_eq!(
+            draft.argv.args,
+            [
+                "-p",
+                "",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json"
+            ]
+        );
         assert_eq!(draft.input, DraftInput::InstructionAndBaseDiff);
+        assert_eq!(draft.io, DraftIo::AgyStreamJson);
     }
+}
+
+#[test]
+fn agys_draft_prompt_is_one_user_event_line() {
+    let prompt = "Write a commit message.\n\ndiff --git a/x b/x\n+\"quoted\"";
+    let encoded = DraftIo::AgyStreamJson.encode(prompt);
+    assert!(
+        encoded.ends_with('\n') && encoded.lines().count() == 1,
+        "{encoded:?}"
+    );
+    let line: Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        line,
+        json!({ "event": "user", "message": { "content": [{ "type": "text", "text": prompt }] } })
+    );
+}
+
+fn agy_output(result: Value) -> String {
+    let events = [
+        json!({ "event": "init", "conversation_id": CONVERSATION }),
+        json!({ "event": "step_update", "step": { "type": "PLANNER_RESPONSE" } }),
+        json!({ "event": "result", "result": result }),
+    ];
+    events.map(|event| format!("{event}\n")).concat()
+}
+
+#[test]
+fn agys_draft_is_the_response_of_its_successful_result_event() {
+    let output = agy_output(json!({
+        "conversation_id": CONVERSATION,
+        "status": "SUCCESS",
+        "response": "Fix the login bug\n\nCheck the password hash.\n",
+    }));
+    assert_eq!(
+        DraftIo::AgyStreamJson.decode(&output),
+        Ok(Some(
+            "Fix the login bug\n\nCheck the password hash.\n".into()
+        ))
+    );
+}
+
+#[test]
+fn an_agy_error_result_fails_the_draft_with_agys_error() {
+    let output = agy_output(json!({
+        "conversation_id": CONVERSATION,
+        "status": "ERROR",
+        "error": "quota exhausted for gemini-weekly",
+    }));
+    let failed = DraftIo::AgyStreamJson.decode(&output).unwrap_err();
+    assert!(
+        failed.contains("quota exhausted for gemini-weekly"),
+        "{failed}"
+    );
+}
+
+#[test]
+fn agy_output_without_a_result_event_has_no_draft() {
+    let output = format!(
+        "{}\n",
+        json!({ "event": "init", "conversation_id": CONVERSATION })
+    );
+    assert_eq!(DraftIo::AgyStreamJson.decode(&output), Ok(None));
 }
