@@ -112,22 +112,30 @@ fn usage(frame: &mut Frame, report: &UsageReport) {
     lines.push(Line::from(" Today").bold());
     lines.extend(report.today.iter().map(repo_usage));
     lines.push(Line::default());
-    lines.push(usage_line("Total", &report.total).bold());
+    lines.push(Line::from(" Total").bold());
+    lines.extend(
+        report
+            .per_agent
+            .iter()
+            .map(|total| usage_line("", &total.agent, &total.totals).bold()),
+    );
     lines.push(Line::default());
     lines.push(Line::from(" Esc close").dark_gray());
-    show(frame, " :usage (estimates) ", Color::Cyan, lines, 80);
+    show(frame, " :usage (estimates) ", Color::Cyan, lines, 92);
 }
 
 fn repo_usage(usage: &RepoUsage) -> Line<'static> {
-    usage_line(&repo_name(&usage.repo), &usage.totals)
+    usage_line(&repo_name(&usage.repo), &usage.agent, &usage.totals)
 }
 
-fn usage_line(name: &str, totals: &UsageTotalsView) -> Line<'static> {
+fn usage_line(name: &str, agent: &str, totals: &UsageTotalsView) -> Line<'static> {
+    let cost = totals
+        .cost_usd
+        .map_or_else(|| "cost unknown".into(), |cost| format!("${cost:.2}"));
     Line::from(format!(
-        "   {name:<20}  {:>8} in  {:>8} out  ${:.2}",
+        "   {name:<20}  {agent:<12}  {:>8} in  {:>8} out  {cost}",
         tokens(totals.input_tokens),
         tokens(totals.output_tokens),
-        totals.cost_usd
     ))
 }
 

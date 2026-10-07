@@ -66,8 +66,10 @@ pub enum FailureKind {
     Other(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RateLimit {
+    pub name: String,
+    pub label: String,
     pub used_percent: f64,
     pub resets_at_unix: Option<i64>,
 }
@@ -81,8 +83,7 @@ pub struct UsageSample {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cost_usd: Option<f64>,
-    pub five_hour: Option<RateLimit>,
-    pub seven_day: Option<RateLimit>,
+    pub limits: Vec<RateLimit>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

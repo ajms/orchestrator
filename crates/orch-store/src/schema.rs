@@ -91,6 +91,36 @@ ALTER TABLE sessions ADD COLUMN title TEXT;
     "
 ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude';
 ",
+    "
+ALTER TABLE usage RENAME TO usage_before_agents;
+CREATE TABLE usage (
+    seq INTEGER PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL,
+    segment INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (session_id, conversation_id, segment)
+);
+INSERT INTO usage SELECT * FROM usage_before_agents;
+DROP TABLE usage_before_agents;
+ALTER TABLE usage_daily RENAME TO usage_daily_before_agents;
+CREATE TABLE usage_daily (
+    repo_path TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    day TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    PRIMARY KEY (repo_path, agent, day)
+);
+INSERT INTO usage_daily
+    SELECT repo_path, 'claude', day, input_tokens, output_tokens, cost_usd
+    FROM usage_daily_before_agents;
+DROP TABLE usage_daily_before_agents;
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {

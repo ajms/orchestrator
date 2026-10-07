@@ -1,5 +1,7 @@
 use orch_core::SessionId;
-use orch_protocol::{CreateSession, Reply, Request, UsageReport, UsageTotalsView};
+use orch_protocol::{
+    AgentRateLimits, CreateSession, RateLimitView, Reply, Request, UsageReport, UsageTotalsView,
+};
 
 use crate::common::*;
 
@@ -34,7 +36,8 @@ async fn usage(client: &mut TestClient) -> UsageReport {
 
 fn assert_totals(actual: UsageTotalsView, input: u64, output: u64, cost: f64) {
     assert_eq!((actual.input_tokens, actual.output_tokens), (input, output));
-    assert!((actual.cost_usd - cost).abs() < 1e-9, "{actual:?}");
+    let actual_cost = actual.cost_usd.expect("a known cost");
+    assert!((actual_cost - cost).abs() < 1e-9, "{actual:?}");
 }
 
 #[tokio::test]
@@ -62,19 +65,38 @@ async fn usage_is_totalled_per_repo_and_for_today_across_conversations_and_agent
     assert!(report.estimated);
     let app_repo = env.path("repos/app");
     for per_repo in [&report.per_repo, &report.today] {
-        let repos: Vec<_> = per_repo.iter().map(|entry| entry.repo.clone()).collect();
-        assert_eq!(repos, [app_repo.clone(), lib_repo.clone()]);
+        let repos: Vec<_> = per_repo
+            .iter()
+            .map(|entry| (entry.repo.clone(), entry.agent.as_str()))
+            .collect();
+        assert_eq!(
+            repos,
+            [(app_repo.clone(), "claude"), (lib_repo.clone(), "claude")]
+        );
         assert_totals(per_repo[0].totals, 370, 37, 1.875);
         assert_totals(per_repo[1].totals, 1000, 100, 2.0);
     }
-    assert_totals(report.total, 1370, 137, 3.875);
+    let agents: Vec<_> = report
+        .per_agent
+        .iter()
+        .map(|total| total.agent.as_str())
+        .collect();
+    assert_eq!(agents, ["claude"]);
+    assert_totals(report.per_agent[0].totals, 1370, 137, 3.875);
 }
 
-fn limits(five_hour: Option<f64>, seven_day: Option<f64>) -> RateLimits {
-    RateLimits {
-        five_hour,
-        seven_day,
-    }
+fn limits(five_hour: f64, seven_day: Option<f64>) -> Vec<AgentRateLimits> {
+    let window = |name: &str, label: &str, used_percent| RateLimitView {
+        name: name.into(),
+        label: label.into(),
+        used_percent,
+    };
+    let mut limits = vec![window("five_hour", "5h", five_hour)];
+    limits.extend(seven_day.map(|used| window("seven_day", "7d", used)));
+    vec![AgentRateLimits {
+        agent: "claude".into(),
+        limits,
+    }]
 }
 
 fn limited(five_hour: f64, seven_day: Option<f64>) -> String {
@@ -97,29 +119,29 @@ async fn rate_limits_are_broadcast_on_change_and_to_clients_as_they_connect() {
     client
         .until_received("rate limits", |client| !client.rate_limits.is_empty())
         .await;
-    assert_eq!(client.rate_limits, [limits(Some(83.0), None)]);
+    assert_eq!(client.rate_limits, [limits(83.0, None)]);
 
     let mut late = env.client().await;
     late.until_received("rate limits on connect", |client| {
         !client.rate_limits.is_empty()
     })
     .await;
-    assert_eq!(late.rate_limits, [limits(Some(83.0), None)]);
+    assert_eq!(late.rate_limits, [limits(83.0, None)]);
 
     pane.type_line(&limited(83.0, Some(40.0))).await;
     pane.type_line(&limited(83.0, Some(40.0))).await;
     pane.type_line(&limited(96.0, Some(40.0))).await;
     client
         .until_received("the latest rate limits", |client| {
-            client.rate_limits.last() == Some(&limits(Some(96.0), Some(40.0)))
+            client.rate_limits.last() == Some(&limits(96.0, Some(40.0)))
         })
         .await;
     assert_eq!(
         client.rate_limits,
         [
-            limits(Some(83.0), None),
-            limits(Some(83.0), Some(40.0)),
-            limits(Some(96.0), Some(40.0))
+            limits(83.0, None),
+            limits(83.0, Some(40.0)),
+            limits(96.0, Some(40.0))
         ]
     );
 }

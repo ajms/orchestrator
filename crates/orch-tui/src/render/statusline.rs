@@ -90,23 +90,29 @@ fn summary(app: &App) -> Line<'static> {
             Style::new().fg(Color::Yellow),
         ));
     }
-    let limits = [
-        ("5h", app.rate_limits.five_hour),
-        ("7d", app.rate_limits.seven_day),
-    ];
-    for (window, used) in limits {
-        let Some(used) = used.filter(|used| *used > BADGE_FROM) else {
-            continue;
-        };
-        let colour = match used >= BADGE_RED_FROM {
-            true => Color::Red,
-            false => Color::Yellow,
-        };
+    for (index, group) in app.rate_limits.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("│ "));
+        }
         spans.push(Span::styled(
-            format!("{window} {used:.0}%"),
-            Style::new().fg(colour).add_modifier(Modifier::BOLD),
+            format!("{} ", group.agent),
+            Style::new().fg(Color::DarkGray),
         ));
-        spans.push(Span::raw(" "));
+        for limit in &group.limits {
+            spans.push(Span::styled(
+                format!("{} {:.0}%", limit.label, limit.used_percent),
+                window_style(limit.used_percent),
+            ));
+            spans.push(Span::raw(" "));
+        }
     }
     Line::from(spans)
+}
+
+fn window_style(used: f64) -> Style {
+    match used {
+        used if used >= BADGE_RED_FROM => Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+        used if used > BADGE_FROM => Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        _ => Style::new(),
+    }
 }

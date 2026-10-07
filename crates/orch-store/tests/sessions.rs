@@ -334,7 +334,7 @@ fn sessions_stored_before_agents_were_recorded_belong_to_claude() {
         .unwrap();
     conn.execute_batch("ALTER TABLE sessions DROP COLUMN agent")
         .unwrap();
-    conn.pragma_update(None, "user_version", version - 1)
+    conn.pragma_update(None, "user_version", version - 2)
         .unwrap();
     drop(conn);
 

@@ -48,12 +48,22 @@ struct Window {
     resets_at: Option<i64>,
 }
 
-impl From<Window> for RateLimit {
-    fn from(window: Window) -> Self {
-        RateLimit {
-            used_percent: window.used_percentage,
-            resets_at_unix: window.resets_at,
-        }
+impl RateLimits {
+    fn named(self) -> Vec<RateLimit> {
+        [
+            ("five_hour", "5h", self.five_hour),
+            ("seven_day", "7d", self.seven_day),
+        ]
+        .into_iter()
+        .filter_map(|(name, label, window)| {
+            window.map(|window| RateLimit {
+                name: name.into(),
+                label: label.into(),
+                used_percent: window.used_percentage,
+                resets_at_unix: window.resets_at,
+            })
+        })
+        .collect()
     }
 }
 
@@ -68,7 +78,6 @@ pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         input_tokens: line.context_window.total_input_tokens,
         output_tokens: line.context_window.total_output_tokens,
         cost_usd: line.cost.total_cost_usd,
-        five_hour: line.rate_limits.five_hour.map(Into::into),
-        seven_day: line.rate_limits.seven_day.map(Into::into),
+        limits: line.rate_limits.named(),
     })])
 }
