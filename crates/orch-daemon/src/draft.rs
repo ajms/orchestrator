@@ -25,7 +25,7 @@ fn instruction(mode: LandingMode, base: &str) -> String {
     }
 }
 
-async fn with_base_diff(
+async fn append_base_diff(
     prompt: String,
     repo: PathBuf,
     record: &SessionRecord,
@@ -73,7 +73,7 @@ impl Daemon {
         };
         let mut prompt = instruction(mode, &record.base);
         if input == DraftInput::InstructionAndBaseDiff {
-            prompt = with_base_diff(prompt, repo, &record).await?;
+            prompt = append_base_diff(prompt, repo, &record).await?;
         }
         let mut command = crate::subprocess::command(program);
         command
