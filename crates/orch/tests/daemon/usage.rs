@@ -1,7 +1,7 @@
 use orch_agent::ClaudeCode;
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentRateLimits, CreateSession, RateLimitView, Reply, Request, UsageReport, UsageTotalsView,
+    AgentUsageWindows, CreateSession, Reply, Request, UsageReport, UsageTotalsView, UsageWindowView,
 };
 
 use crate::common::*;
@@ -89,17 +89,18 @@ async fn usage_is_totalled_per_repo_and_for_today_across_conversations_and_agent
     assert_totals(report.per_agent[0].totals, 1370, 137, 3.875);
 }
 
-fn limits(five_hour: f64, seven_day: Option<f64>) -> Vec<AgentRateLimits> {
-    let window = |name: &str, label: &str, used_percent| RateLimitView {
+fn windows(five_hour: f64, seven_day: Option<f64>) -> Vec<AgentUsageWindows> {
+    let window = |name: &str, label: &str, used_percent, resets_at| UsageWindowView {
         name: name.into(),
         label: label.into(),
         used_percent,
+        resets_at_unix: Some(resets_at),
     };
-    let mut limits = vec![window("five_hour", "5h", five_hour)];
-    limits.extend(seven_day.map(|used| window("seven_day", "7d", used)));
-    vec![AgentRateLimits {
+    let mut windows = vec![window("five_hour", "5h", five_hour, 1_750_000_000)];
+    windows.extend(seven_day.map(|used| window("seven_day", "7d", used, 1_760_000_000)));
+    vec![AgentUsageWindows {
         agent: ClaudeCode::NAME.into(),
-        limits,
+        windows,
     }]
 }
 
@@ -113,7 +114,7 @@ fn limited(five_hour: f64, seven_day: Option<f64>) -> String {
 }
 
 #[tokio::test]
-async fn rate_limits_are_broadcast_on_change_and_to_clients_as_they_connect() {
+async fn usage_windows_are_broadcast_on_change_and_to_clients_as_they_connect() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
@@ -121,31 +122,31 @@ async fn rate_limits_are_broadcast_on_change_and_to_clients_as_they_connect() {
 
     pane.type_line(&limited(83.0, None)).await;
     client
-        .until_received("rate limits", |client| !client.rate_limits.is_empty())
+        .until_received("usage windows", |client| !client.usage_windows.is_empty())
         .await;
-    assert_eq!(client.rate_limits, [limits(83.0, None)]);
+    assert_eq!(client.usage_windows, [windows(83.0, None)]);
 
     let mut late = env.client().await;
-    late.until_received("rate limits on connect", |client| {
-        !client.rate_limits.is_empty()
+    late.until_received("usage windows on connect", |client| {
+        !client.usage_windows.is_empty()
     })
     .await;
-    assert_eq!(late.rate_limits, [limits(83.0, None)]);
+    assert_eq!(late.usage_windows, [windows(83.0, None)]);
 
     pane.type_line(&limited(83.0, Some(40.0))).await;
     pane.type_line(&limited(83.0, Some(40.0))).await;
     pane.type_line(&limited(96.0, Some(40.0))).await;
     client
-        .until_received("the latest rate limits", |client| {
-            client.rate_limits.last() == Some(&limits(96.0, Some(40.0)))
+        .until_received("the latest usage windows", |client| {
+            client.usage_windows.last() == Some(&windows(96.0, Some(40.0)))
         })
         .await;
     assert_eq!(
-        client.rate_limits,
+        client.usage_windows,
         [
-            limits(83.0, None),
-            limits(83.0, Some(40.0)),
-            limits(96.0, Some(40.0))
+            windows(83.0, None),
+            windows(83.0, Some(40.0)),
+            windows(96.0, Some(40.0))
         ]
     );
 }

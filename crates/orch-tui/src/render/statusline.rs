@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use orch_protocol::AgentStateView;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -90,18 +92,27 @@ fn summary(app: &App) -> Line<'static> {
             Style::new().fg(Color::Yellow),
         ));
     }
-    for (index, group) in app.rate_limits.iter().enumerate() {
+    let now = unix_now();
+    let live = app.usage_windows.iter().filter_map(|group| {
+        let windows: Vec<_> = group
+            .windows
+            .iter()
+            .filter(|window| window.resets_at_unix.is_none_or(|at| at > now))
+            .collect();
+        (!windows.is_empty()).then_some((&group.agent, windows))
+    });
+    for (index, (agent, windows)) in live.enumerate() {
         if index > 0 {
             spans.push(Span::raw("│ "));
         }
         spans.push(Span::styled(
-            format!("{} ", group.agent),
+            format!("{agent} "),
             Style::new().fg(Color::DarkGray),
         ));
-        for limit in &group.limits {
+        for window in windows {
             spans.push(Span::styled(
-                format!("{} {:.0}%", limit.label, limit.used_percent),
-                window_style(limit.used_percent),
+                format!("{} {:.0}%", window.label, window.used_percent),
+                window_style(window.used_percent),
             ));
             spans.push(Span::raw(" "));
         }
@@ -115,4 +126,10 @@ fn window_style(used: f64) -> Style {
         used if used > BADGE_FROM => Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         _ => Style::new(),
     }
+}
+
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs() as i64)
 }

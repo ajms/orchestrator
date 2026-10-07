@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use orch_core::SessionId;
 use orch_git::ENV_REDIRECTING_GIT;
 use orch_protocol::{
-    AgentRateLimits, Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport,
+    AgentUsageWindows, Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport,
     Reply, Request, RequestError, SessionView, Size, SubagentTranscript, daemon_socket,
     open_control,
 };
@@ -436,7 +436,7 @@ pub struct TestClient {
     pub reports: Vec<ReconcileReport>,
     pub rings: Vec<Ring>,
     pub focused: Vec<SessionId>,
-    pub rate_limits: Vec<Vec<AgentRateLimits>>,
+    pub usage_windows: Vec<Vec<AgentUsageWindows>>,
     pub copies: Vec<(SessionId, String)>,
     pub transcripts: Vec<SubagentTranscript>,
     session_in_view: Option<SessionId>,
@@ -454,7 +454,7 @@ impl From<Client> for TestClient {
             reports: Vec::new(),
             rings: Vec::new(),
             focused: Vec::new(),
-            rate_limits: Vec::new(),
+            usage_windows: Vec::new(),
             copies: Vec::new(),
             transcripts: Vec::new(),
             session_in_view: None,
@@ -546,7 +546,7 @@ impl TestClient {
                 body: body.clone(),
             }),
             FromDaemon::Focus { session } => self.focused.push(session.clone()),
-            FromDaemon::RateLimits { agents } => self.rate_limits.push(agents.clone()),
+            FromDaemon::UsageWindows { agents } => self.usage_windows.push(agents.clone()),
             FromDaemon::Clipboard { session, text } => {
                 self.copies.push((session.clone(), text.clone()))
             }

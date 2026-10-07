@@ -1,5 +1,5 @@
 use orch_agent::{AgentAdapter, ClaudeCode};
-use orch_core::{AgentEvent, ConversationId, RateLimit, UsageSample};
+use orch_core::{AgentEvent, ConversationId, UsageSample, UsageWindow};
 
 fn usage(name: &str) -> Vec<AgentEvent> {
     let path = format!(
@@ -33,14 +33,14 @@ fn a_subscribers_statusline_yields_context_cost_and_rate_limits() {
             input_tokens: Some(84_211),
             output_tokens: Some(3_107),
             cost_usd: Some(1.8342),
-            limits: vec![
-                RateLimit {
+            windows: vec![
+                UsageWindow {
                     name: "five_hour".into(),
                     label: "5h".into(),
                     used_percent: 83.5,
                     resets_at_unix: Some(1_790_592_000),
                 },
-                RateLimit {
+                UsageWindow {
                     name: "seven_day".into(),
                     label: "7d".into(),
                     used_percent: 41.2,
@@ -57,7 +57,7 @@ fn fields_missing_before_the_first_response_stay_unknown() {
     assert_eq!(sample.context_used_percent, None);
     assert_eq!(sample.context_window_tokens, Some(200_000));
     assert_eq!(sample.cost_usd, Some(0.0));
-    assert_eq!(sample.limits, []);
+    assert_eq!(sample.windows, []);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn each_rate_limit_window_may_be_absent_on_its_own() {
     let sample = only_sample(usage("seven_day_only"));
     assert_eq!(sample.model.as_deref(), Some("claude-sonnet-5"));
     let windows: Vec<_> = sample
-        .limits
+        .windows
         .iter()
         .map(|limit| (limit.label.as_str(), limit.used_percent))
         .collect();

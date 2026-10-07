@@ -27,7 +27,7 @@ fn agent(agent: &str, totals: UsageTotalsView) -> AgentTotals {
 }
 
 #[test]
-fn usage_shows_estimated_tokens_and_cost_per_repo_and_for_today() {
+fn usage_shows_tokens_and_cost_per_repo_and_for_today() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "first")]);
     tui.daemon().script_reply(Ok(Reply::Usage(UsageReport {
@@ -55,7 +55,6 @@ fn usage_shows_estimated_tokens_and_cost_per_repo_and_for_today() {
 
     assert_eq!(tui.daemon().requests().pop(), Some(Request::Usage));
     let screen = tui.screen();
-    assert!(screen.contains("estimate"), "{screen}");
     let webshop = tui
         .lines()
         .into_iter()
@@ -118,7 +117,7 @@ fn usage_is_split_per_agent_and_an_unknown_cost_is_never_shown_as_zero() {
 }
 
 #[test]
-fn usage_is_always_labelled_as_an_estimate() {
+fn usage_is_always_labelled_as_approximate_agent_reported_totals() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "first")]);
     tui.daemon().script_reply(Ok(Reply::Usage(UsageReport {
@@ -126,5 +125,10 @@ fn usage_is_always_labelled_as_an_estimate() {
         ..UsageReport::default()
     })));
     tui.command("usage");
-    assert!(tui.screen().contains("(estimates)"));
+    let screen = tui.screen();
+    assert!(
+        screen.contains(":usage (approximate, as each Agent reports it)"),
+        "{screen}"
+    );
+    assert!(!screen.contains("estimate"), "{screen}");
 }
