@@ -1,5 +1,9 @@
+use orch_agent::Antigravity;
 use orch_core::SessionId;
-use orch_protocol::{AgentStateView as State, CreateSession, PhaseView, Reply, Request};
+use orch_protocol::{
+    AgentStateView as State, AgentUsageWindows, CreateSession, PhaseView, Reply, Request,
+    UsageWindowView,
+};
 use serde_json::{Value, json};
 
 use crate::cli::orch;
@@ -180,4 +184,41 @@ async fn a_mode_cycled_in_agy_is_kept_when_the_session_resumes() {
         .await;
     pane.wait_for_text("mode> plan").await;
     assert!(!pane.text().contains("i>"));
+}
+
+#[tokio::test]
+async fn each_agy_quota_pool_shows_as_a_usage_window_of_the_agent() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_id, mut pane) = antigravity_session(&env, &mut client, "edits").await;
+
+    tap(
+        &mut pane,
+        json!({ "agent_state": "idle", "quota": {
+            "gemini-weekly": { "remaining_fraction": 0.25, "reset_time": "2026-10-12T00:00:00Z" },
+            "3p-weekly": { "reset_time": "2026-10-12T00:00:00Z" },
+        } }),
+    )
+    .await;
+    client
+        .until_received("usage windows", |client| !client.usage_windows.is_empty())
+        .await;
+
+    let window = |name: &str, label: &str, used_percent| UsageWindowView {
+        name: name.into(),
+        label: label.into(),
+        used_percent,
+        resets_at_unix: Some(1_791_763_200),
+    };
+    assert_eq!(
+        client.usage_windows,
+        [vec![AgentUsageWindows {
+            agent: Antigravity::NAME.into(),
+            windows: vec![
+                window("gemini-weekly", "gemini-wk", 75.0),
+                window("3p-weekly", "3p-wk", 100.0),
+            ],
+        }]]
+    );
 }

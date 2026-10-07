@@ -1,6 +1,7 @@
 mod hooks;
 mod hookup;
 mod statusline;
+mod usage;
 
 use std::path::Path;
 
@@ -66,6 +67,7 @@ impl AgentAdapter for Antigravity {
         Capabilities {
             hooks: true,
             resume: true,
+            usage: true,
             modes: true,
             ..Capabilities::default()
         }

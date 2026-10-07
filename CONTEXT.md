@@ -86,7 +86,7 @@ The Orchestrator's hooks and statusline installed into an Agent's own global con
 _Avoid_: Integration, setup, plugin
 
 **Usage window**:
-A named limit on how much of an Agent's quota is used in a period (Claude's `5h` and `7d`), as a percentage that resets at a set time; the latest value per Agent and window is shown until it resets.
+A named limit on how much of an Agent's quota is used in a period (Claude's `5h` and `7d`, Antigravity's `gemini-wk` and `3p-wk`), as a percentage that resets at a set time; the latest value per Agent and window is shown until it resets.
 _Avoid_: Rate limit, quota, usage limit
 
 **Conversation**:
