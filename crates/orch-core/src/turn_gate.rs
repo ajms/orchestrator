@@ -30,7 +30,9 @@ impl TurnGate {
                 self.turn_reported = true;
                 match event {
                     AgentEvent::TurnEnded | AgentEvent::Failed { .. } => self.turn_closed = true,
-                    AgentEvent::PromptSubmitted => self.turn_closed = false,
+                    AgentEvent::PromptSubmitted
+                    | AgentEvent::QuestionAsked
+                    | AgentEvent::ToolStarted { subagent: None, .. } => self.turn_closed = false,
                     _ => {}
                 }
             }

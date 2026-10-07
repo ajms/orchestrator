@@ -114,6 +114,40 @@ fn a_late_permission_request_does_not_reopen_a_finished_turn() {
 }
 
 #[test]
+fn a_permission_request_after_the_agent_resumes_without_a_prompt_needs_input() {
+    let resumes = [
+        AgentEvent::ToolStarted {
+            tool: "Bash".into(),
+            subagent: None,
+        },
+        AgentEvent::QuestionAsked,
+    ];
+    for resume in resumes {
+        let mut status = working_session();
+        status.feed_event(AgentEvent::TurnEnded);
+        status.feed_event(resume.clone());
+        status.feed_event(AgentEvent::PermissionRequested);
+        assert_eq!(
+            status.agent_state(),
+            Some(AgentState::NeedsInput),
+            "{resume:?}"
+        );
+    }
+}
+
+#[test]
+fn a_late_subagent_tool_does_not_reopen_a_finished_turn() {
+    let mut status = working_session();
+    status.feed_event(AgentEvent::TurnEnded);
+    status.feed_event(AgentEvent::ToolStarted {
+        tool: "Bash".into(),
+        subagent: Some(SubagentId("a1".into())),
+    });
+    status.feed_event(AgentEvent::PermissionRequested);
+    assert_ne!(status.agent_state(), Some(AgentState::NeedsInput));
+}
+
+#[test]
 fn turn_ended_makes_the_agent_idle() {
     let mut status = idle_session();
     status.feed_event(AgentEvent::PromptSubmitted);
