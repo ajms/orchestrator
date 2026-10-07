@@ -13,7 +13,7 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{default_program, installed_adapter, known_adapter};
+use crate::agents::{default_program, installed_adapter, known_adapter, modes};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
 
@@ -217,10 +217,6 @@ impl Daemon {
             .loader
             .repo(root.path(), approval.as_ref())
             .map_err(refused)?;
-        let preset = select_preset(root.path(), &config, create.preset.as_deref())?;
-        if config.setup_script().is_err() {
-            return Err(untrusted(root.path(), &config));
-        }
         let agent_name = create
             .agent
             .clone()
@@ -229,6 +225,10 @@ impl Daemon {
             .agent(&agent_name)
             .map_err(|_| untrusted(root.path(), &config))?;
         let adapter = known_adapter(&agent).map_err(refused)?;
+        let preset = select_preset(root.path(), &config, create.preset.as_deref(), &agent_name)?;
+        if config.setup_script().is_err() {
+            return Err(untrusted(root.path(), &config));
+        }
         let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
         let base = match create.base {
@@ -305,7 +305,7 @@ impl Daemon {
         config
             .agent(&record.agent)
             .map_err(|_| untrusted(repo, &config))?;
-        select_preset(repo, &config, Some(&record.preset)).map(drop)
+        select_preset(repo, &config, Some(&record.preset), &record.agent).map(drop)
     }
 
     pub(crate) async fn check_teardown(&self, repo: &Path) -> Result<(), RequestError> {
@@ -400,10 +400,11 @@ impl Daemon {
                 .map_err(|refusal| gate_message("Changing the Preset", refusal))
         })?;
         let config = self.repo_config(&repo).await?;
-        let preset = select_preset(&repo, &config, Some(&name))?;
-        config
+        let agent = config
             .agent(&record.agent)
             .map_err(|_| untrusted(&repo, &config))?;
+        known_adapter(&agent).map_err(refused)?;
+        let preset = select_preset(&repo, &config, Some(&name), &record.agent)?;
         let mut restart = false;
         let mut replaced = None;
         self.update(id, |live| {
@@ -507,8 +508,8 @@ impl Daemon {
     ) -> Result<(Adapter, Vec<String>), String> {
         let agent = config.agent(&record.agent).map_err(|err| err.to_string())?;
         let adapter = installed_adapter(&agent, repo)?;
-        let preset =
-            select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
+        let preset = select_preset(repo, config, Some(&record.preset), &record.agent)
+            .map_err(|err| err.to_string())?;
         let mut spec = LaunchSpec::new(
             record.id.clone(),
             self.config.orch_program.to_string_lossy(),
@@ -653,11 +654,17 @@ pub(crate) fn select_preset(
     repo: &Path,
     config: &RepoConfig,
     name: Option<&str>,
+    agent: &str,
 ) -> Result<Preset, RequestError> {
-    config.select_preset(name).map_err(|err| match err {
-        PresetError::Unknown(name) => refused(format!("unknown Preset {name}")),
-        PresetError::Untrusted(_) => untrusted(repo, config),
-    })
+    config
+        .select_preset(name, modes(agent))
+        .map_err(|err| match err {
+            PresetError::Unknown(name) => refused(format!("unknown Preset {name}")),
+            PresetError::Untrusted(_) => untrusted(repo, config),
+            PresetError::Unsupported(name) => refused(format!(
+                "the {agent} Agent can't run Preset {name}'s permission mode"
+            )),
+        })
 }
 
 pub(crate) fn agent_command(

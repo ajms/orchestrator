@@ -143,13 +143,12 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
     tui.sessions(vec![session("webshop", "existing")]);
     tui.daemon().settings = vec![RepoSettings {
         repo: PathBuf::from("/home/me/webshop"),
-        presets: vec!["careful".into(), "plan".into()],
-        default_preset: None,
+        agents: vec![agent_offering("claude", &["careful", "plan"], None)],
+        default_agent: "claude".into(),
         default_base: None,
         review_command: None,
         branch_prefix: "orch/".into(),
         trust: None,
-        ..RepoSettings::default()
     }];
     let message = "branch orch/fix-login-timeout-v2 already exists".to_string();
     tui.daemon()

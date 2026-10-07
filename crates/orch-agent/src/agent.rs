@@ -102,6 +102,10 @@ pub trait AgentAdapter {
 
     fn launch(&self, spec: &LaunchSpec) -> Argv;
 
+    fn modes(&self) -> &'static [PermissionMode] {
+        &[]
+    }
+
     fn resume(
         &self,
         _spec: &LaunchSpec,

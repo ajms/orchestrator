@@ -344,8 +344,6 @@ pub enum Reply {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoSettings {
     pub repo: PathBuf,
-    pub presets: Vec<String>,
-    pub default_preset: Option<String>,
     pub agents: Vec<AgentChoice>,
     pub default_agent: String,
     pub default_base: Option<String>,
@@ -358,6 +356,20 @@ pub struct RepoSettings {
 pub struct AgentChoice {
     pub name: String,
     pub unavailable: Option<String>,
+    pub presets: Vec<PresetChoice>,
+    pub default_preset: Option<DefaultPreset>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PresetChoice {
+    pub name: String,
+    pub lacks_rules: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefaultPreset {
+    pub name: String,
+    pub unsupported: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -9,8 +9,9 @@ use crossterm::event::{
 };
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView, CreateSession, FlagsView, FromDaemon, PhaseView, Reply, RepoSettings, Request,
-    RequestError, ScreenSnapshot, SessionView, Size, SubagentView,
+    AgentChoice, AgentStateView, CreateSession, DefaultPreset, FlagsView, FromDaemon, PhaseView,
+    PresetChoice, Reply, RepoSettings, Request, RequestError, ScreenSnapshot, SessionView, Size,
+    SubagentView,
 };
 use orch_tui::{DaemonLink, Effect, Event, PaneId, RequestId, Tui, TuiConfig};
 use ratatui::Terminal;
@@ -470,6 +471,24 @@ pub fn create_requests(tui: &mut Harness) -> Vec<CreateSession> {
             _ => None,
         })
         .collect()
+}
+
+pub fn agent_offering(name: &str, presets: &[&str], default_preset: Option<&str>) -> AgentChoice {
+    AgentChoice {
+        name: name.into(),
+        unavailable: None,
+        presets: presets
+            .iter()
+            .map(|preset| PresetChoice {
+                name: preset.to_string(),
+                lacks_rules: false,
+            })
+            .collect(),
+        default_preset: default_preset.map(|name| DefaultPreset {
+            name: name.into(),
+            unsupported: None,
+        }),
+    }
 }
 
 pub fn id(text: &str) -> SessionId {

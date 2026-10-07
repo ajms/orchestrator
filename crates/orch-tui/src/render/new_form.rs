@@ -7,6 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
+use orch_protocol::DefaultPreset;
+
 use crate::new_form::{Field, NewForm};
 use crate::repo_picker::{PickerRow, RepoPicker};
 use crate::sessions::repo_name;
@@ -195,16 +197,29 @@ fn value(
             Some(agent) => Line::from(format!(" ◂ {} ▸", agent.name)),
             None => Line::from(" ◂ (Repo default) ▸"),
         },
-        Field::Preset => Line::from(match form.preset {
-            Some(at) => format!(" ◂ {} ▸", form.presets[at]),
-            None => match &form.default_preset {
-                Some(default) => format!(" ◂ {default} (Repo default) ▸"),
-                None => " ◂ (Repo default) ▸".to_string(),
-            },
-        }),
+        Field::Preset => Line::from(preset(form)),
         Field::Prompt => Line::default(),
     };
     (line, None)
+}
+
+fn preset(form: &NewForm) -> String {
+    let agent = form.chosen_agent();
+    let marked = |name: &str| match agent.filter(|_| form.lacks_rules(name)) {
+        Some(agent) => format!("{name} (no {} rules)", agent.name),
+        None => name.to_string(),
+    };
+    if let Some(at) = form.preset {
+        return format!(" ◂ {} ▸", marked(&form.presets[at].name));
+    }
+    match agent.and_then(|agent| agent.default_preset.as_ref()) {
+        Some(DefaultPreset {
+            name,
+            unsupported: Some(configured),
+        }) => format!(" ◂ {} (default {configured} unsupported) ▸", marked(name)),
+        Some(DefaultPreset { name, .. }) => format!(" ◂ {} (Repo default) ▸", marked(name)),
+        None => " ◂ (Repo default) ▸".to_string(),
+    }
 }
 
 fn single_line(

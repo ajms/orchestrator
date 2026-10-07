@@ -3,7 +3,7 @@ use orch_tui::{Effect, Event};
 use ratatui::style::Color;
 
 use crate::common::*;
-use crate::new_session::{config, field, form};
+use crate::new_session::{config, field, form, form_with_presets};
 
 fn shift_tab(tui: &mut Harness) {
     tui.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
@@ -19,7 +19,7 @@ fn prompt_of_create(tui: &mut Harness) -> String {
 
 #[test]
 fn tab_goes_from_the_prompt_through_repo_branch_base_agent_and_preset_back_to_the_prompt() {
-    let mut tui = form(config());
+    let mut tui = form_with_presets(config());
     tui.keys("Fix");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
@@ -42,7 +42,7 @@ fn tab_goes_from_the_prompt_through_repo_branch_base_agent_and_preset_back_to_th
 
 #[test]
 fn shift_tab_goes_back_from_the_prompt_to_the_preset() {
-    let mut tui = form(config());
+    let mut tui = form_with_presets(config());
     shift_tab(&mut tui);
     tui.press(KeyCode::Right);
     assert!(field(&mut tui, "Preset").contains("plan"));
@@ -50,7 +50,7 @@ fn shift_tab_goes_back_from_the_prompt_to_the_preset() {
 
 #[test]
 fn enter_on_branch_base_agent_and_preset_moves_to_the_next_field() {
-    let mut tui = form(config());
+    let mut tui = form_with_presets(config());
     tui.keys("Fix");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
@@ -535,7 +535,7 @@ fn enter_or_typing_on_the_repo_field_opens_the_picker() {
 
 #[test]
 fn up_and_down_on_preset_cycle_like_left_and_right() {
-    let mut tui = form(config());
+    let mut tui = form_with_presets(config());
     shift_tab(&mut tui);
     tui.press(KeyCode::Down);
     assert!(field(&mut tui, "Preset").contains("plan"));

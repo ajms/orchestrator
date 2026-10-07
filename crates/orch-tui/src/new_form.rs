@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use orch_git::slugify;
-use orch_protocol::{AgentChoice, CreateSession, RepoSettings};
+use orch_protocol::{AgentChoice, CreateSession, PresetChoice, RepoSettings};
 
 use crate::repo_picker::{KnownRepo, RepoChoice};
 use crate::text_input::{Suggested, TextInput};
@@ -44,10 +44,9 @@ pub struct NewForm {
     branch_prefix: String,
     pub base: Suggested,
     pub default_base: Option<String>,
-    pub default_preset: Option<String>,
     pub base_candidates: Vec<String>,
     base_choice: usize,
-    pub presets: Vec<String>,
+    pub presets: Vec<PresetChoice>,
     pub preset: Option<usize>,
     wanted_preset: Option<String>,
     pub agents: Vec<AgentChoice>,
@@ -58,12 +57,7 @@ pub struct NewForm {
 }
 
 impl NewForm {
-    pub fn new(
-        repos: Vec<KnownRepo>,
-        repo: Option<PathBuf>,
-        presets: Vec<String>,
-        prefix: &str,
-    ) -> Self {
+    pub fn new(repos: Vec<KnownRepo>, repo: Option<PathBuf>, prefix: &str) -> Self {
         let mut form = Self {
             field: Field::Prompt,
             repo: RepoChoice::new(repos, repo),
@@ -73,10 +67,9 @@ impl NewForm {
             branch_prefix: prefix.to_string(),
             base: Suggested::default(),
             default_base: None,
-            default_preset: None,
             base_candidates: Vec::new(),
             base_choice: 0,
-            presets,
+            presets: Vec::new(),
             preset: None,
             wanted_preset: None,
             agents: Vec::new(),
@@ -103,8 +96,8 @@ impl NewForm {
         self.base.set(create.base.unwrap_or_default());
         self.preset = create
             .preset
-            .as_ref()
-            .and_then(|name| self.presets.iter().position(|preset| preset == name));
+            .as_deref()
+            .and_then(|name| self.preset_at(name));
         self.wanted_preset = create.preset;
         self.agent = create.agent.as_ref().and_then(|name| self.agent_at(name));
         self.wanted_agent = create.agent;
@@ -115,17 +108,35 @@ impl NewForm {
         self.agents.iter().position(|agent| agent.name == name)
     }
 
+    fn preset_at(&self, name: &str) -> Option<usize> {
+        self.presets.iter().position(|preset| preset.name == name)
+    }
+
+    pub fn chosen_agent(&self) -> Option<&AgentChoice> {
+        self.agent.map(|at| &self.agents[at])
+    }
+
+    pub fn lacks_rules(&self, name: &str) -> bool {
+        self.presets
+            .iter()
+            .any(|preset| preset.name == name && preset.lacks_rules)
+    }
+
+    fn offer_presets(&mut self, wanted: Option<String>) {
+        if let Some(agent) = self.chosen_agent() {
+            self.presets = agent.presets.clone();
+        }
+        self.preset = wanted.and_then(|name| self.preset_at(&name));
+    }
+
     pub fn apply(&mut self, settings: RepoSettings) {
-        let wanted = self.wanted_preset.take();
-        self.presets = settings.presets;
-        self.preset =
-            wanted.and_then(|name| self.presets.iter().position(|preset| *preset == name));
+        let wanted_preset = self.wanted_preset.take();
         let wanted = self.wanted_agent.take();
         self.agents = settings.agents;
         self.agent = wanted
             .and_then(|name| self.agent_at(&name))
             .or_else(|| self.agent_at(&settings.default_agent));
-        self.default_preset = settings.default_preset;
+        self.offer_presets(wanted_preset);
         self.default_base = settings.default_base;
         self.branch_prefix = settings.branch_prefix;
         self.prefill_branch();
@@ -264,6 +275,8 @@ impl NewForm {
         }
         if let Some(next) = cycle(key.code, self.agent.unwrap_or(0), self.agents.len()) {
             self.agent = Some(next);
+            let chosen = self.preset.map(|at| self.presets[at].name.clone());
+            self.offer_presets(chosen);
         }
         Outcome::Stay
     }
@@ -312,7 +325,7 @@ impl NewForm {
             self.error = Some("the prompt is empty".into());
             return Outcome::Stay;
         }
-        let agent = self.agent.map(|at| &self.agents[at]);
+        let agent = self.chosen_agent();
         if let Some(why) = agent.and_then(|agent| agent.unavailable.clone()) {
             self.error = Some(why);
             return Outcome::Stay;
@@ -325,7 +338,7 @@ impl NewForm {
             prompt: self.prompt.text().to_string(),
             branch: (!self.branch.suggested() && !branch.is_empty()).then(|| branch.to_string()),
             base: (!base.is_empty()).then(|| base.to_string()),
-            preset: self.preset.map(|at| self.presets[at].clone()),
+            preset: self.preset.map(|at| self.presets[at].name.clone()),
             agent,
         })
     }

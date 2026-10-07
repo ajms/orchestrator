@@ -1,6 +1,6 @@
 mod common;
 
-use common::Fixture;
+use common::{Fixture, claude};
 use orch_agent::Preset;
 use orch_config::{PresetError, TrustItem, Untrusted};
 use orch_core::PermissionMode;
@@ -84,15 +84,18 @@ fn committed_loosening_presets_are_unusable_until_approved() {
 
     let untrusted = fx.untrusted();
     assert_eq!(
-        untrusted.select_preset(Some("yolo")),
+        untrusted.select_preset(Some("yolo"), claude()),
         Err(PresetError::Untrusted("yolo".into()))
     );
     assert_eq!(
-        untrusted.select_preset(None),
+        untrusted.select_preset(None, claude()),
         Err(PresetError::Untrusted("yolo".into()))
     );
     assert_eq!(
-        untrusted.select_preset(Some("tight")).unwrap().name,
+        untrusted
+            .select_preset(Some("tight"), claude())
+            .unwrap()
+            .name,
         "tight"
     );
     assert!(untrusted.presets().get("yolo").is_none());
@@ -105,8 +108,31 @@ fn committed_loosening_presets_are_unusable_until_approved() {
     ));
 
     let approved = fx.approved();
-    assert_eq!(approved.select_preset(None).unwrap().name, "yolo");
+    assert_eq!(approved.select_preset(None, claude()).unwrap().name, "yolo");
     assert!(approved.presets().get("yolo").is_some());
+}
+
+#[test]
+fn a_committed_preset_with_only_agent_allow_rules_needs_trust_and_changing_them_lapses_it() {
+    let fx = Fixture::new();
+    let agy_allows = |rule: &str| {
+        format!("[presets.agy]\nmode = \"plan\"\n[presets.agy.antigravity]\nallow = [\"{rule}\"]\n")
+    };
+    fx.repo_file(&agy_allows("command(ls)"));
+    assert_eq!(
+        fx.untrusted().select_preset(Some("agy"), claude()),
+        Err(PresetError::Untrusted("agy".into()))
+    );
+    let hash = fx.untrusted().trust_request().unwrap().hash;
+    let approved = fx.loader.repo(fx.repo_path(), Some(&hash)).unwrap();
+    assert_eq!(
+        approved.select_preset(Some("agy"), claude()).unwrap().name,
+        "agy"
+    );
+
+    fx.repo_file(&agy_allows("command(*)"));
+    let changed = fx.loader.repo(fx.repo_path(), Some(&hash)).unwrap();
+    assert!(!changed.is_trusted());
 }
 
 #[test]
@@ -115,7 +141,10 @@ fn personal_loosening_presets_are_always_trusted() {
     fx.global("[defaults.presets.yolo]\nmode = \"auto\"\n");
     let config = fx.untrusted();
     assert_eq!(config.trust_request(), None);
-    assert_eq!(config.select_preset(Some("yolo")).unwrap().name, "yolo");
+    assert_eq!(
+        config.select_preset(Some("yolo"), claude()).unwrap().name,
+        "yolo"
+    );
 }
 
 #[test]
@@ -147,11 +176,14 @@ fn committed_default_preset_that_loosens_needs_trust() {
 
     let untrusted = fx.untrusted();
     assert_eq!(
-        untrusted.select_preset(None),
+        untrusted.select_preset(None, claude()),
         Err(PresetError::Untrusted("edits".into()))
     );
     assert_eq!(
-        untrusted.select_preset(Some("edits")).unwrap().name,
+        untrusted
+            .select_preset(Some("edits"), claude())
+            .unwrap()
+            .name,
         "edits"
     );
     assert_eq!(
@@ -159,11 +191,13 @@ fn committed_default_preset_that_loosens_needs_trust() {
         vec![TrustItem::DefaultPreset(Preset {
             name: "edits".into(),
             mode: Some(PermissionMode::AcceptEdits),
-            allow: vec![],
-            deny: vec![],
+            ..Preset::default()
         })]
     );
-    assert_eq!(fx.approved().select_preset(None).unwrap().name, "edits");
+    assert_eq!(
+        fx.approved().select_preset(None, claude()).unwrap().name,
+        "edits"
+    );
 }
 
 #[test]
@@ -177,7 +211,7 @@ fn changing_the_committed_default_to_a_loosening_preset_lapses_approval() {
     let config = fx.loader.repo(fx.repo_path(), Some(&hash)).unwrap();
     assert!(!config.is_trusted());
     assert_eq!(
-        config.select_preset(None),
+        config.select_preset(None, claude()),
         Err(PresetError::Untrusted("auto".into()))
     );
 }
@@ -189,7 +223,7 @@ fn personal_default_preset_that_loosens_is_trusted() {
     fx.repo_file("preset = \"auto\"\n");
     let config = fx.untrusted();
     assert_eq!(config.trust_request(), None);
-    assert_eq!(config.select_preset(None).unwrap().name, "auto");
+    assert_eq!(config.select_preset(None, claude()).unwrap().name, "auto");
 }
 
 #[test]

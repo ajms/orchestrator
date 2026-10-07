@@ -1162,8 +1162,7 @@ impl App {
                 path,
             })
             .collect();
-        let presets = self.config.presets.names().map(String::from).collect();
-        NewForm::new(repos, start, presets, &self.config.branch_prefix)
+        NewForm::new(repos, start, &self.config.branch_prefix)
     }
 
     pub fn form_repo_changed(&mut self) {

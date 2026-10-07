@@ -62,9 +62,9 @@ impl ClaudeCode {
             "hooks": hooks,
             "statusLine": { "type": "command", "command": orch_command("tap") },
         });
-        let preset = &spec.preset;
-        if !preset.allow.is_empty() || !preset.deny.is_empty() {
-            settings["permissions"] = json!({ "allow": preset.allow, "deny": preset.deny });
+        let rules = spec.preset.rules_for(Self::NAME);
+        if let Some(rules) = rules.filter(|rules| !rules.is_empty()) {
+            settings["permissions"] = json!({ "allow": rules.allow, "deny": rules.deny });
         }
         settings
     }
@@ -101,6 +101,17 @@ impl AgentAdapter for ClaudeCode {
             titles: true,
             transcripts: true,
         }
+    }
+
+    fn modes(&self) -> &'static [PermissionMode] {
+        &[
+            PermissionMode::Default,
+            PermissionMode::AcceptEdits,
+            PermissionMode::Plan,
+            PermissionMode::Auto,
+            PermissionMode::DontAsk,
+            PermissionMode::BypassPermissions,
+        ]
     }
 
     fn launch(&self, spec: &LaunchSpec) -> Argv {

@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use orch_agent::{INHERIT, Preset, Presets, mode_from_name};
+use orch_agent::{
+    ClaudeCode, EDITS, INHERIT, Preset, Presets, Rules, known_agents, mode_from_name,
+};
+use orch_core::PermissionMode;
 use serde::Deserialize;
 
 use crate::error::ConfigProblem;
@@ -98,12 +101,22 @@ impl RepoLayer {
     }
 }
 
-pub const DEFAULT_AGENT: &str = "claude";
+pub const DEFAULT_AGENT: &str = ClaudeCode::NAME;
+
+#[derive(Debug, Default, Deserialize)]
+struct PresetLayer {
+    mode: Option<String>,
+    #[serde(default)]
+    allow: Vec<String>,
+    #[serde(default)]
+    deny: Vec<String>,
+    #[serde(flatten)]
+    agents: BTreeMap<String, RulesLayer>,
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PresetLayer {
-    mode: Option<String>,
+struct RulesLayer {
     #[serde(default)]
     allow: Vec<String>,
     #[serde(default)]
@@ -122,11 +135,41 @@ impl PresetLayer {
                     }
                 })?),
             };
+        if self.agents.contains_key(ClaudeCode::NAME) {
+            return Err(ConfigProblem::ClaudeRuleTable {
+                preset: name.into(),
+            });
+        }
+        if let Some(agent) = self
+            .agents
+            .keys()
+            .find(|agent| !known_agents().any(|known| known == agent.as_str()))
+        {
+            return Err(ConfigProblem::UnknownRuleAgent {
+                preset: name.into(),
+                agent: agent.clone(),
+            });
+        }
+        let claude = (ClaudeCode::NAME, &self.allow, &self.deny);
+        let agents = self
+            .agents
+            .iter()
+            .map(|(agent, rules)| (agent.as_str(), &rules.allow, &rules.deny));
+        let rules = std::iter::once(claude)
+            .chain(agents)
+            .map(|(agent, allow, deny)| {
+                let rules = Rules {
+                    allow: allow.clone(),
+                    deny: deny.clone(),
+                };
+                (agent.to_string(), rules)
+            })
+            .filter(|(_, rules)| !rules.is_empty())
+            .collect();
         Ok(Preset {
             name: name.into(),
             mode,
-            allow: self.allow.clone(),
-            deny: self.deny.clone(),
+            rules,
         })
     }
 }
@@ -148,6 +191,7 @@ struct LayeredAgent {
 pub enum PresetError {
     Unknown(String),
     Untrusted(String),
+    Unsupported(String),
 }
 
 #[derive(Debug, Clone)]
@@ -381,7 +425,30 @@ impl RepoConfig {
         Presets::new(usable).expect("reserved preset names are rejected at load")
     }
 
-    pub fn select_preset(&self, new: Option<&str>) -> Result<Preset, PresetError> {
+    pub fn select_preset(
+        &self,
+        new: Option<&str>,
+        modes: &[PermissionMode],
+    ) -> Result<Preset, PresetError> {
+        let name = new.or(self.default_preset()).unwrap_or(INHERIT);
+        let expressible = self
+            .all_presets()
+            .get(name)
+            .is_none_or(|preset| preset.expressible(modes));
+        match (expressible, new) {
+            (true, _) => self.select_any(new),
+            (false, Some(name)) => Err(PresetError::Unsupported(name.into())),
+            (false, None) => {
+                let edits = self.select_any(Some(EDITS))?;
+                match edits.expressible(modes) {
+                    true => Ok(edits),
+                    false => Ok(Preset::inherit()),
+                }
+            }
+        }
+    }
+
+    fn select_any(&self, new: Option<&str>) -> Result<Preset, PresetError> {
         let name = new.or(self.default_preset()).unwrap_or(INHERIT);
         let untrusted_definition = self
             .presets

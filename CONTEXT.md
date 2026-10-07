@@ -122,7 +122,7 @@ A per-Repo command run in a Worktree just before it is removed.
 _Avoid_: Cleanup hook, archive script
 
 **Preset**:
-A named level of Agent autonomy: a permission mode plus allow and deny rules, chosen per Session.
+A named level of Agent autonomy, chosen per Session: a permission mode from a shared vocabulary, plus allow and deny rules per Agent, each in that Agent's own syntax. Not every mode works for every Agent, so a Session is only offered the Presets its Agent can express.
 _Avoid_: Profile, policy, autonomy level
 
 **Guard**:

@@ -10,6 +10,7 @@ The Agent's own TUI always runs in the Holder's PTY (ADR 0001). The adapter neve
 pub trait AgentAdapter {
     fn capabilities(&self) -> Capabilities;
     fn launch(&self, spec: &LaunchSpec) -> Argv;
+    fn modes(&self) -> &'static [PermissionMode];
     fn resume(&self, spec: &LaunchSpec, conversation: &ConversationId, mode: Option<PermissionMode>) -> Option<Argv>;
     fn restart(&self, spec: &LaunchSpec, conversation: Option<&ConversationId>, mode: Option<PermissionMode>) -> Argv;
     fn draft(&self, conversation: &ConversationId) -> Option<Argv>;
@@ -28,6 +29,7 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | Method | Supplies |
 |---|---|
 | `launch` | The argv that starts a fresh Agent in the Worktree. `LaunchSpec` carries the Session id, the absolute `orch` binary (for hook and tap commands), the effective Preset and an optional initial prompt. Claude gets `--session-id`, `--settings` JSON (hooks → `orch hook --agent claude --session <id>`, `statusLine` → `orch tap --agent claude --session <id>`, the Preset's allow/deny), and `--permission-mode` unless the Preset is `inherit`. |
+| `modes` | The Preset modes the Agent can express, from the shared vocabulary (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`; `inherit` always works). The `:new` form only offers Presets with one of these modes, `:new` and `:preset` refuse any other, and a Repo or global default Preset outside them falls back to `edits` (or `inherit`, if `edits` is outside them too). The default is none, so only `inherit` and mode-less Presets. Claude supports all of them. An adapter reads only its own rules, `Preset::rules_for(<its Agent name>)`; in config, Claude's are the top-level `allow`/`deny` of `[presets.<name>]` and other Agents' are in `[presets.<name>.<agent>]` (names from `orch_agent::known_agents`: the built-in Agents plus planned ones). |
 | `resume` | The argv that continues the latest Conversation in the last observed mode. `None` means the Agent can't resume, so `restart` falls back to `launch`. |
 | `draft` | A side-channel one-shot that drafts a commit message or PR title/body without adding turns to the live Conversation. Claude uses `-p --resume <conv> --fork-session`. |
 | `map_hook` | Parses one hook payload, which `orch hook` forwards through the Holder, into normalized events. Every hook and statusline command an adapter injects carries `--agent <name>`: `orch hook` and `orch tap` pick the adapter from that flag (`orch_agent::by_name`) without asking the Daemon, and the Daemon drops payloads whose Agent isn't the Session's (ADR 0006). `--agent` defaults to `claude`, because Sessions started before the flag existed run hook and statusline commands without it. |
