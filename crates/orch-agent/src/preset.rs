@@ -17,6 +17,12 @@ impl Rules {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleVerdict {
+    Allow { rule: String },
+    Deny { rule: String },
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Preset {
     pub name: String,

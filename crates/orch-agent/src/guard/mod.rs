@@ -1,12 +1,14 @@
 mod gh;
 mod git;
-mod paths;
-mod shell;
+pub(crate) mod paths;
+pub(crate) mod shell;
 
 use std::path::{Path, PathBuf};
 
 use orch_core::GuardedAction;
 use serde::{Deserialize, Serialize};
+
+use crate::RuleVerdict;
 
 use shell::{SimpleCommand, Word};
 
@@ -37,8 +39,31 @@ pub enum GuardDecision {
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum GuardAnswer {
     Proceed,
+    Allow,
     Ask,
     Deny { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuardOutcome {
+    Answer(GuardAnswer),
+    Prompt { hit: GuardHit, allowed: GuardAnswer },
+}
+
+pub fn guard_outcome(decision: GuardDecision, verdict: Option<RuleVerdict>) -> GuardOutcome {
+    let allowed = match verdict {
+        Some(RuleVerdict::Deny { rule }) => {
+            return GuardOutcome::Answer(GuardAnswer::Deny {
+                reason: format!("The Preset rule {rule} denies this (Orchestrator)."),
+            });
+        }
+        Some(RuleVerdict::Allow { .. }) => GuardAnswer::Allow,
+        None => GuardAnswer::Proceed,
+    };
+    match decision {
+        GuardDecision::Allow => GuardOutcome::Answer(allowed),
+        GuardDecision::Ask(hit) => GuardOutcome::Prompt { hit, allowed },
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -157,12 +182,7 @@ impl<'a> GuardScope<'a> {
     }
 
     fn simple_command(&self, cwd: &mut PathBuf, command: &SimpleCommand) -> Vec<GuardHit> {
-        const WRAPPERS: [&str; 6] = ["env", "sudo", "command", "exec", "nohup", "time"];
-        let words: Vec<&Word> = command
-            .words
-            .iter()
-            .skip_while(|word| word.text.contains('=') || WRAPPERS.contains(&word.text.as_str()))
-            .collect();
+        let words = command.invocation();
         let Some((program, args)) = words.split_first() else {
             return Vec::new();
         };

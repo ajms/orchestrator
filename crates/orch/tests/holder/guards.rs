@@ -102,6 +102,28 @@ async fn guard_without_a_daemon_asks_the_user_and_is_still_recorded() {
 }
 
 #[tokio::test]
+async fn agy_is_told_to_force_its_own_prompt_when_no_daemon_answers_the_guard() {
+    let sandbox = Sandbox::new();
+    let tool_call = r#"{"toolCall":{"name":"run_command","args":{"CommandLine":"git checkout main"}},"stepIdx":3}"#;
+    let held = sandbox.hold(
+        "s1",
+        &format!("hook --agent antigravity --event PreToolUse {tool_call}\n"),
+    );
+    let mut observer = orch_holder::HolderClient::connect(&held.socket)
+        .await
+        .unwrap();
+
+    let snapshot = wait_for_screen(&mut observer, |text| text.contains("hook>")).await;
+    assert!(
+        snapshot
+            .text()
+            .contains(r#"hook> {"decision":"force_ask"}"#),
+        "{}",
+        snapshot.text()
+    );
+}
+
+#[tokio::test]
 async fn unanswered_guard_times_out_to_ask() {
     let sandbox = Sandbox::new();
     let held = sandbox.hold_with("s1", "", &["--guard-timeout-ms", "300"]);

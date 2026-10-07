@@ -2,15 +2,25 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Word {
+pub(crate) struct Word {
     pub text: String,
     pub dynamic: bool,
 }
 
 #[derive(Debug, Default)]
-pub(super) struct SimpleCommand {
+pub(crate) struct SimpleCommand {
     pub words: Vec<Word>,
     pub written: Vec<Word>,
+}
+
+impl SimpleCommand {
+    pub(crate) fn invocation(&self) -> Vec<&Word> {
+        const WRAPPERS: [&str; 6] = ["env", "sudo", "command", "exec", "nohup", "time"];
+        self.words
+            .iter()
+            .skip_while(|word| word.text.contains('=') || WRAPPERS.contains(&word.text.as_str()))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -119,7 +129,7 @@ fn eat(chars: &mut Peekable<Chars>, expected: char) -> bool {
     chars.next_if_eq(&expected).is_some()
 }
 
-pub(super) fn parse(script: &str) -> Vec<SimpleCommand> {
+pub(crate) fn parse(script: &str) -> Vec<SimpleCommand> {
     let mut parser = Parser::default();
     let mut chars = script.chars().peekable();
     while let Some(c) = chars.next() {

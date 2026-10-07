@@ -1,5 +1,5 @@
 use orch_agent::{AgentAdapter, Antigravity, ConversationTree, tag_hook_event};
-use orch_core::{AgentEvent, ConversationId, SubagentId};
+use orch_core::{AgentEvent, ConversationId, GuardedAction, SubagentId};
 use serde_json::{Value, json};
 
 const ROOT: &str = "3c1e9a40-7d52-4b8e-a6f1-2d9b0c4e7a13";
@@ -102,7 +102,7 @@ fn an_unmatched_subagent_is_labelled_by_the_first_line_of_its_prompt() {
 }
 
 #[test]
-fn a_subagents_tools_are_its_own() {
+fn a_subagents_tools_are_its_own_and_guarded() {
     let mut tree = tree();
     tap(&mut tree, ROOT);
     hook(
@@ -116,10 +116,19 @@ fn a_subagents_tools_are_its_own() {
             "PreToolUse",
             &child("subagent_pre_tool_use_run_command")
         ),
-        [AgentEvent::ToolStarted {
-            tool: "run_command".into(),
-            subagent: subagent(),
-        }]
+        [
+            AgentEvent::ToolStarted {
+                tool: "run_command".into(),
+                subagent: subagent(),
+            },
+            AgentEvent::GuardCheck {
+                tool: "run_command".into(),
+                action: GuardedAction::Shell {
+                    command: "cargo test login".into(),
+                },
+                cwd: Some("/home/dev/shop/.orchestrator/worktrees/fix-login".into()),
+            },
+        ]
     );
     assert_eq!(
         hook(&mut tree, "PostToolUse", &child("subagent_post_tool_use")),
