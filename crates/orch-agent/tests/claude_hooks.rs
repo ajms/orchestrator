@@ -1,5 +1,9 @@
 use orch_agent::{AgentAdapter, ClaudeCode, GuardAnswer};
-use orch_core::{AgentEvent, ConversationId, FailureKind, PermissionMode, SubagentId};
+use orch_core::{
+    AgentEvent, ConversationId, FailureKind, GuardedAction, PermissionMode, SubagentId,
+};
+
+const WORKTREE: &str = "/home/dev/shop/.orchestrator/worktrees/fix-login";
 
 fn fixture(name: &str) -> String {
     let path = format!(
@@ -89,12 +93,41 @@ fn a_main_agent_tool_starts_and_asks_for_a_guard_check() {
             main_tool(started, "Bash"),
             AgentEvent::GuardCheck {
                 tool: "Bash".into(),
-                input_json:
-                    r#"{"command":"cargo test","description":"Run tests","timeout":120000}"#.into(),
-                cwd: Some("/home/dev/shop/.orchestrator/worktrees/fix-login".into()),
+                action: GuardedAction::Shell {
+                    command: "cargo test".into()
+                },
+                cwd: Some(WORKTREE.into()),
             },
         ]
     );
+}
+
+#[test]
+fn each_guarded_tool_is_checked_as_its_agent_neutral_action() {
+    let write = |path: &str| GuardedAction::WriteFile {
+        path: format!("{WORKTREE}/{path}"),
+    };
+    for (fixture, action) in [
+        ("pre_tool_use_write", write("src/session.rs")),
+        ("pre_tool_use_edit", write("src/login.rs")),
+        ("pre_tool_use_multi_edit", write("src/login.rs")),
+        (
+            "pre_tool_use_notebook_edit",
+            write("notebooks/latency.ipynb"),
+        ),
+        (
+            "pre_tool_use_mcp",
+            GuardedAction::ExternalTool {
+                name: "mcp__github__create_issue".into(),
+            },
+        ),
+    ] {
+        let check = events(fixture).into_iter().find_map(|event| match event {
+            AgentEvent::GuardCheck { action, cwd, .. } => Some((action, cwd)),
+            _ => None,
+        });
+        assert_eq!(check, Some((action, Some(WORKTREE.into()))), "{fixture}");
+    }
 }
 
 #[test]
@@ -104,7 +137,17 @@ fn a_subagents_tool_is_attributed_to_it() {
         events[1],
         started("Grep".into(), Some(SubagentId("a7f3c9e1b2d4".into())))
     );
-    assert!(matches!(events[2], AgentEvent::GuardCheck { .. }));
+}
+
+#[test]
+fn tools_that_stay_inside_the_session_are_not_guard_checked() {
+    let events = events("pre_tool_use_in_subagent");
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::GuardCheck { .. })),
+        "{events:?}"
+    );
 }
 
 #[test]

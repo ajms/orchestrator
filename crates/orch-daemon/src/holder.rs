@@ -10,7 +10,8 @@ use orch_agent::{
     Capabilities, GuardAnswer, GuardContext, GuardDecision, TitleWatch, evaluate_guard,
 };
 use orch_core::{
-    AgentEvent, AgentState, ConversationId, Effect, Observation, PhaseEvent, SessionId,
+    AgentEvent, AgentState, ConversationId, Effect, GuardedAction, Observation, PhaseEvent,
+    SessionId,
 };
 use orch_holder::{
     AgentExit, AgentStatus, FromHolder, HolderClient, HolderEvent, HolderReader, ToHolder,
@@ -376,7 +377,7 @@ fn retitle(live: &mut Live, title: &str) {
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
     let check = guard_check(live.adapter.capabilities(), events);
     let agent_dirs = live.adapter.agent_dirs(&orch_config::xdg::process_env);
-    let decision = check.map(|(tool, input_json, cwd)| {
+    let decision = check.map(|(tool, action, cwd)| {
         let context = GuardContext {
             worktree: &live.record.worktree,
             branch: &live.record.branch,
@@ -385,7 +386,7 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
             allowed: &live.record.guard_allowances,
             agent_dirs: &agent_dirs,
         };
-        let decision = evaluate_guard(tool, input_json, cwd.as_deref().map(Path::new), &context);
+        let decision = evaluate_guard(action, cwd.as_deref().map(Path::new), &context);
         (tool.clone(), decision)
     });
     match decision {
@@ -407,18 +408,14 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
     }
 }
 
-type GuardCheck<'a> = (&'a String, &'a String, &'a Option<String>);
+type GuardCheck<'a> = (&'a String, &'a GuardedAction, &'a Option<String>);
 
 fn guard_check(capabilities: Capabilities, events: &[AgentEvent]) -> Option<GuardCheck<'_>> {
     if !capabilities.guards_available() {
         return None;
     }
     events.iter().find_map(|event| match event {
-        AgentEvent::GuardCheck {
-            tool,
-            input_json,
-            cwd,
-        } => Some((tool, input_json, cwd)),
+        AgentEvent::GuardCheck { tool, action, cwd } => Some((tool, action, cwd)),
         _ => None,
     })
 }
@@ -446,7 +443,9 @@ mod tests {
     fn check() -> Vec<AgentEvent> {
         vec![AgentEvent::GuardCheck {
             tool: "Bash".into(),
-            input_json: "{}".into(),
+            action: GuardedAction::Shell {
+                command: "ls".into(),
+            },
             cwd: None,
         }]
     }

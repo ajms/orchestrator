@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use orch_agent::{GuardContext, GuardDecision, GuardHit, GuardKind, evaluate_guard};
-use serde_json::json;
+use orch_core::GuardedAction;
 
 const REPO: &str = "/home/dev/shop";
 const WORKTREE: &str = "/home/dev/shop/.orchestrator/worktrees/fix-login";
@@ -17,17 +17,26 @@ fn context(worktree: &Path) -> GuardContext<'_> {
     }
 }
 
-fn decide(tool: &str, input: serde_json::Value) -> GuardDecision {
-    evaluate_guard(
-        tool,
-        &input.to_string(),
-        None,
-        &context(Path::new(WORKTREE)),
-    )
+fn write_file(path: impl Into<String>) -> GuardedAction {
+    GuardedAction::WriteFile { path: path.into() }
+}
+
+fn shell(command: impl Into<String>) -> GuardedAction {
+    GuardedAction::Shell {
+        command: command.into(),
+    }
+}
+
+fn external_tool(name: &str) -> GuardedAction {
+    GuardedAction::ExternalTool { name: name.into() }
+}
+
+fn decide(action: GuardedAction) -> GuardDecision {
+    evaluate_guard(&action, None, &context(Path::new(WORKTREE)))
 }
 
 fn bash(command: &str) -> GuardDecision {
-    decide("Bash", json!({ "command": command, "description": "test" }))
+    decide(shell(command))
 }
 
 fn ask(kind: GuardKind, target: &str) -> GuardDecision {
@@ -50,15 +59,7 @@ fn assert_asks(cases: &[(&str, GuardKind, &str)]) {
 }
 
 #[test]
-fn tools_that_stay_inside_the_session_are_allowed() {
-    assert_eq!(
-        decide("Read", json!({ "file_path": "/etc/passwd" })),
-        GuardDecision::Allow
-    );
-    assert_eq!(
-        decide("Grep", json!({ "pattern": "x", "path": "/" })),
-        GuardDecision::Allow
-    );
+fn shell_commands_that_stay_inside_the_session_are_allowed() {
     assert_allowed(&[
         "cargo test",
         "ls -la /etc",
@@ -69,48 +70,53 @@ fn tools_that_stay_inside_the_session_are_allowed() {
 }
 
 #[test]
-fn file_edits_inside_the_worktree_are_allowed() {
-    for (tool, key) in [
-        ("Write", "file_path"),
-        ("Edit", "file_path"),
-        ("MultiEdit", "file_path"),
-        ("NotebookEdit", "notebook_path"),
+fn file_writes_inside_the_worktree_are_allowed() {
+    for path in [
+        format!("{WORKTREE}/src/login.rs"),
+        "src/login.rs".to_string(),
     ] {
-        for path in [
-            format!("{WORKTREE}/src/login.rs"),
-            "src/login.rs".to_string(),
-        ] {
-            assert_eq!(
-                decide(tool, json!({ key: path })),
-                GuardDecision::Allow,
-                "{tool} {path}"
-            );
-        }
+        assert_eq!(decide(write_file(&path)), GuardDecision::Allow, "{path}");
     }
 }
 
 #[test]
-fn file_edits_outside_the_worktree_ask_with_the_resolved_path() {
+fn file_writes_outside_the_worktree_ask_with_the_resolved_path() {
     let main_checkout_file = format!("{REPO}/src/login.rs");
-    for (tool, key, path) in [
-        ("Write", "file_path", main_checkout_file.clone()),
-        (
-            "Edit",
-            "file_path",
-            format!("{WORKTREE}/../../../src/login.rs"),
-        ),
-        (
-            "NotebookEdit",
-            "notebook_path",
-            "../../../src/login.rs".to_string(),
-        ),
+    for path in [
+        main_checkout_file.clone(),
+        format!("{WORKTREE}/../../../src/login.rs"),
+        "../../../src/login.rs".to_string(),
     ] {
         assert_eq!(
-            decide(tool, json!({ key: path })),
+            decide(write_file(&path)),
             ask(GuardKind::WriteOutsideWorktree, &main_checkout_file),
-            "{tool} {path}"
+            "{path}"
         );
     }
+}
+
+#[test]
+fn an_external_tool_asks_on_first_use_and_an_allowance_covers_only_that_tool() {
+    let create_issue = "mcp__github__create_issue";
+    assert_eq!(
+        decide(external_tool(create_issue)),
+        ask(GuardKind::ExternalTool, create_issue)
+    );
+    let allowed = [GuardHit {
+        kind: GuardKind::ExternalTool,
+        target: create_issue.into(),
+    }];
+    let worktree = Path::new(WORKTREE);
+    let with_allowance = GuardContext {
+        allowed: &allowed,
+        ..context(worktree)
+    };
+    let check = |name: &str| evaluate_guard(&external_tool(name), None, &with_allowance);
+    assert_eq!(check(create_issue), GuardDecision::Allow);
+    assert_eq!(
+        check("mcp__github__merge_pull_request"),
+        ask(GuardKind::ExternalTool, "mcp__github__merge_pull_request")
+    );
 }
 
 #[test]
@@ -120,16 +126,17 @@ fn guards_that_are_off_allow_everything() {
         enabled: false,
         ..context(worktree)
     };
-    for command in [
-        "git push origin HEAD:main",
-        "git worktree add ../x",
-        "touch /etc/x",
+    for action in [
+        shell("git push origin HEAD:main"),
+        shell("git worktree add ../x"),
+        shell("touch /etc/x"),
+        write_file("/etc/x"),
+        external_tool("mcp__github__create_issue"),
     ] {
-        let input = json!({ "command": command }).to_string();
         assert_eq!(
-            evaluate_guard("Bash", &input, None, &off),
+            evaluate_guard(&action, None, &off),
             GuardDecision::Allow,
-            "{command}"
+            "{action:?}"
         );
     }
 }
@@ -151,14 +158,7 @@ fn an_allowance_for_the_session_covers_only_that_kind_and_target() {
         allowed: &allowed,
         ..context(worktree)
     };
-    let check = |command: &str| {
-        evaluate_guard(
-            "Bash",
-            &json!({ "command": command }).to_string(),
-            None,
-            &with_allowances,
-        )
-    };
+    let check = |command: &str| evaluate_guard(&shell(command), None, &with_allowances);
     assert_eq!(check("git worktree prune"), GuardDecision::Allow);
     assert_eq!(check("git branch -D spike"), GuardDecision::Allow);
     assert_eq!(
@@ -172,28 +172,19 @@ fn an_allowance_for_the_session_covers_only_that_kind_and_target() {
 fn relative_paths_resolve_against_the_agents_reported_cwd() {
     let worktree = Path::new(WORKTREE);
     let crate_dir = format!("{WORKTREE}/crates/app");
-    let check = |tool: &str, input: serde_json::Value, cwd: &str| {
-        evaluate_guard(
-            tool,
-            &input.to_string(),
-            Some(Path::new(cwd)),
-            &context(worktree),
-        )
+    let check = |action: GuardedAction, cwd: &str| {
+        evaluate_guard(&action, Some(Path::new(cwd)), &context(worktree))
     };
     assert_eq!(
-        check("Write", json!({ "file_path": "src/lib.rs" }), &crate_dir),
+        check(write_file("src/lib.rs"), &crate_dir),
         GuardDecision::Allow
     );
     assert_eq!(
-        check("Bash", json!({ "command": "touch notes.md" }), REPO),
+        check(shell("touch notes.md"), REPO),
         ask(GuardKind::WriteOutsideWorktree, "/home/dev/shop/notes.md")
     );
     assert_eq!(
-        check(
-            "Bash",
-            json!({ "command": "echo x > ../../../../../x" }),
-            &crate_dir
-        ),
+        check(shell("echo x > ../../../../../x"), &crate_dir),
         ask(GuardKind::WriteOutsideWorktree, "/home/dev/shop/x")
     );
 }
@@ -447,11 +438,7 @@ fn writing_temp_files_is_allowed() {
         "/tmp/claude-1000/project/session/scratchpad/plan.md".to_string(),
         temp.join("scratch.txt").to_string_lossy().into_owned(),
     ] {
-        assert_eq!(
-            decide("Write", json!({ "file_path": path })),
-            GuardDecision::Allow,
-            "{path}"
-        );
+        assert_eq!(decide(write_file(&path)), GuardDecision::Allow, "{path}");
     }
     assert_allowed(&[
         "cargo test > /tmp/test.log 2>&1",
@@ -475,30 +462,19 @@ fn writes_to_the_agents_own_dirs_are_allowed() {
         agent_dirs: &agent_dirs,
         ..context(worktree)
     };
-    let check = |tool: &str, input: serde_json::Value| {
-        evaluate_guard(tool, &input.to_string(), None, &with_agent_dirs)
-    };
+    let check = |action: GuardedAction| evaluate_guard(&action, None, &with_agent_dirs);
     let memory = "/home/dev/.claude/projects/-home-dev-shop/memory/MEMORY.md";
+    assert_eq!(check(write_file(memory)), GuardDecision::Allow);
     assert_eq!(
-        check("Write", json!({ "file_path": memory })),
+        check(write_file("/home/dev/.claude/plans/fix-login.md")),
         GuardDecision::Allow
     );
     assert_eq!(
-        check(
-            "Edit",
-            json!({ "file_path": "/home/dev/.claude/plans/fix-login.md" })
-        ),
+        check(shell(format!("echo x >> {memory}"))),
         GuardDecision::Allow
     );
     assert_eq!(
-        check("Bash", json!({ "command": format!("echo x >> {memory}") })),
-        GuardDecision::Allow
-    );
-    assert_eq!(
-        check(
-            "Write",
-            json!({ "file_path": "/home/dev/.claude/settings.json" })
-        ),
+        check(write_file("/home/dev/.claude/settings.json")),
         ask(
             GuardKind::WriteOutsideWorktree,
             "/home/dev/.claude/settings.json"
@@ -522,12 +498,6 @@ fn unknowable_bash_targets_are_left_to_the_agents_own_permissions() {
         "touch $(mktemp)",
         "git push origin \"$BRANCH\"",
     ]);
-}
-
-#[test]
-fn unparsable_tool_input_is_not_guarded() {
-    let decision = evaluate_guard("Write", "not json", None, &context(Path::new(WORKTREE)));
-    assert_eq!(decision, GuardDecision::Allow);
 }
 
 struct Scratch(PathBuf);
@@ -557,8 +527,11 @@ fn symlinks_are_resolved_before_judging_a_write() {
     std::os::unix::fs::symlink(&worktree, scratch.0.join("wt-link")).unwrap();
 
     let write = |path: PathBuf| {
-        let input = json!({ "file_path": path }).to_string();
-        evaluate_guard("Write", &input, None, &context(&worktree))
+        evaluate_guard(
+            &write_file(path.to_string_lossy()),
+            None,
+            &context(&worktree),
+        )
     };
     let escaped = scratch
         .0

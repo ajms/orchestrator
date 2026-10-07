@@ -62,7 +62,12 @@ The events come from `orch_core::AgentEvent`:
 - `TitleChanged { title }`, the Session title the user gave through the Agent; an empty title clears it and brings the slug back
 - `UsageSample { … }`
 - `SubagentStarted { id, agent_type, description }`, `SubagentFinished { id }`
-- `GuardCheck { tool, input_json, cwd }`, which the Daemon answers with allow, deny or ask
+- `GuardCheck { tool, action, cwd }`, which the Daemon answers with allow, deny or ask. `action` is an Agent-neutral `GuardedAction`, and `tool` is only shown in the Guard prompt:
+  - `WriteFile { path }`, a tool that writes or deletes a file; the path may be relative to `cwd`
+  - `Shell { command }`, a shell command line
+  - `ExternalTool { name }`, a tool that reaches beyond the Session (MCP, browser); the first use asks, and "allow for Session" covers that tool name afterwards
+
+  The adapter emits `GuardCheck` only for tools it maps to an action, so `evaluate_guard` knows no tool names. Claude maps `Write`, `Edit` and `MultiEdit` (`file_path`) and `NotebookEdit` (`notebook_path`) to `WriteFile`, `Bash` (`command`) to `Shell`, and every `mcp__*` tool to `ExternalTool`.
 
 A Subagent transcript is a list of `orch_core::TranscriptEntry`, which the Daemon streams to subscribed Clients as is:
 
@@ -83,7 +88,7 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
    - write `map_hook` / `map_tap` into the vocabulary above, and map anything that doesn't fit to nothing rather than inventing events;
    - if the Agent lets the user name a Conversation, implement `title_watch`; keep file reads there, so `map_hook` / `map_tap` stay pure;
    - if the Agent writes its Subagents' transcripts to files, implement `subagent_transcripts` into the entries above;
-   - for Guards, implement `is_guard_payload` and `guard_answer` for the Agent's blocking-hook protocol.
+   - for Guards, map each file-write, shell and external tool to a `GuardedAction` in `map_hook`, and implement `is_guard_payload` and `guard_answer` for the Agent's blocking-hook protocol.
 4. **Never write to the user's own Agent config.** Inject everything per launch through flags or env, as the Claude adapter does with `--settings`.
 5. **Test the mapping as pure functions** (Seam 3): fixture → events, and launch/resume argv for each Preset and capability combination. Test a `TitleWatch` through `follow` / `poll` and `SubagentTranscripts` through `follow` / `locate` / `read` against temporary transcript files. See `crates/orch-agent/tests/claude_*.rs`.
 6. **Register the adapter** in `crates/orch-daemon/src/agents.rs` (`adapter_for`) under its config name, so that `[defaults.agent] name = "<agent>"` (or a Repo's `[agent]`) selects it.

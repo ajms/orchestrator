@@ -388,6 +388,7 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::OtherRef => GuardKindView::OtherRef,
         GuardKind::WorktreeManagement => GuardKindView::WorktreeManagement,
         GuardKind::WriteOutsideWorktree => GuardKindView::WriteOutsideWorktree,
+        GuardKind::ExternalTool => GuardKindView::ExternalTool,
     }
 }
 

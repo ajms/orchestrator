@@ -37,6 +37,22 @@ fn a_guard_hit_on_the_selected_session_shows_a_prompt() {
 }
 
 #[test]
+fn an_external_tool_guard_says_the_tool_reaches_beyond_the_session() {
+    let mut view = with_agent(session("webshop", "guarded"), AgentStateView::NeedsInput);
+    view.guard_prompts = vec![GuardPrompt {
+        id: 7,
+        tool: "mcp__github__create_issue".into(),
+        kind: GuardKindView::ExternalTool,
+        target: "mcp__github__create_issue".into(),
+    }];
+    let mut tui = Harness::new();
+    tui.sessions(vec![view]);
+    let screen = tui.screen();
+    assert!(screen.contains("reaches beyond the Session"), "{screen}");
+    assert!(screen.contains("mcp__github__create_issue"), "{screen}");
+}
+
+#[test]
 fn a_guard_on_a_long_target_still_shows_the_keys() {
     let mut view = with_agent(session("webshop", "guarded"), AgentStateView::NeedsInput);
     view.guard_prompts = vec![GuardPrompt {

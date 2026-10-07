@@ -241,6 +241,10 @@ fn agent_state_guard_switch_and_allowances_persist_across_reopening() {
             kind: GuardKind::BaseBranch,
             target: "main".into(),
         },
+        GuardHit {
+            kind: GuardKind::ExternalTool,
+            target: "mcp__github__create_issue".into(),
+        },
     ];
     for state in [
         AgentState::Starting,
