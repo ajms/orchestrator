@@ -1,9 +1,9 @@
 use orch_agent::{AgentAdapter, Antigravity};
-use orch_core::{AgentEvent, ConversationId, PermissionMode};
+use orch_core::{AgentEvent, ConversationId, PermissionMode, UsageSample, UsageWindow};
 
 const CONVERSATION: &str = "3c1e9a40-7d52-4b8e-a6f1-2d9b0c4e7a13";
 
-fn events(name: &str) -> Vec<AgentEvent> {
+fn mapped(name: &str) -> Vec<AgentEvent> {
     let path = format!(
         "{}/tests/fixtures/antigravity/statusline/{name}.json",
         env!("CARGO_MANIFEST_DIR")
@@ -12,6 +12,36 @@ fn events(name: &str) -> Vec<AgentEvent> {
     Antigravity::default()
         .map_tap(&payload)
         .unwrap_or_else(|err| panic!("{name}: {err:?}"))
+}
+
+fn events(name: &str) -> Vec<AgentEvent> {
+    mapped(name)
+        .into_iter()
+        .filter(|event| !matches!(event, AgentEvent::UsageSample(_)))
+        .collect()
+}
+
+fn usage(name: &str) -> UsageSample {
+    let samples: Vec<_> = mapped(name)
+        .into_iter()
+        .filter_map(|event| match event {
+            AgentEvent::UsageSample(sample) => Some(sample),
+            _ => None,
+        })
+        .collect();
+    match samples.as_slice() {
+        [sample] => sample.clone(),
+        other => panic!("one usage sample expected, got {other:?}"),
+    }
+}
+
+fn weekly(name: &str, label: &str, used_percent: f64) -> UsageWindow {
+    UsageWindow {
+        name: name.into(),
+        label: label.into(),
+        used_percent,
+        resets_at_unix: Some(1_791_763_200),
+    }
 }
 
 fn conversation() -> AgentEvent {
@@ -63,6 +93,57 @@ fn a_working_line_clears_a_permission_prompt_and_tracks_plan_mode() {
             mode(PermissionMode::Plan),
             AgentEvent::PermissionCleared,
         ]
+    );
+}
+
+#[test]
+fn an_idle_line_samples_usage_with_one_window_per_quota_pool_and_no_cost() {
+    let sample = usage("idle");
+    assert_eq!(
+        sample,
+        UsageSample {
+            conversation: Some(ConversationId(CONVERSATION.into())),
+            model: Some("Gemini 3.8 Flash".into()),
+            context_used_percent: Some(1.8),
+            context_window_tokens: Some(1_048_576),
+            input_tokens: Some(18_342),
+            output_tokens: Some(912),
+            cost_usd: None,
+            windows: vec![
+                weekly("gemini-weekly", "gemini-wk", 17.0),
+                weekly("3p-weekly", "3p-wk", 0.0),
+            ],
+        }
+    );
+}
+
+#[test]
+fn an_exhausted_pool_omits_its_remaining_fraction_and_is_fully_used() {
+    assert_eq!(
+        usage("quota_exhausted").windows,
+        [
+            weekly("gemini-weekly", "gemini-wk", 100.0),
+            UsageWindow {
+                resets_at_unix: None,
+                ..weekly("3p-weekly", "3p-wk", 60.0)
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_pool_orch_does_not_know_is_labelled_by_its_name() {
+    let line = r#"{"quota":{"gemini-daily":{"remaining_fraction":0.5}}}"#;
+    let events = Antigravity::default().map_tap(line).unwrap();
+    let [AgentEvent::UsageSample(sample), ..] = events.as_slice() else {
+        panic!("a usage sample expected, got {events:?}");
+    };
+    assert_eq!(
+        sample.windows,
+        [UsageWindow {
+            resets_at_unix: None,
+            ..weekly("gemini-daily", "gemini-daily", 50.0)
+        }]
     );
 }
 
