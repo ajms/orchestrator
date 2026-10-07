@@ -31,5 +31,8 @@ pub(crate) fn decode(stdout: &str) -> DraftOutcome {
         };
         return DraftOutcome::Failed(error);
     }
-    DraftOutcome::Drafted(result["response"].as_str().unwrap_or_default().into())
+    match result["response"].as_str() {
+        Some(response) if !response.trim().is_empty() => DraftOutcome::Drafted(response.into()),
+        _ => DraftOutcome::NoResult,
+    }
 }
