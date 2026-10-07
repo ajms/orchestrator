@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 use orch_core::SessionId;
 use orch_git::ENV_REDIRECTING_GIT;
 use orch_protocol::{
-    Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport, Reply, Request,
-    RequestError, SessionView, Size, SubagentTranscript, daemon_socket, open_control,
+    AgentRateLimits, Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport,
+    Reply, Request, RequestError, SessionView, Size, SubagentTranscript, daemon_socket,
+    open_control,
 };
 use tempfile::TempDir;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
@@ -426,12 +427,6 @@ pub struct Ring {
     pub body: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RateLimits {
-    pub five_hour: Option<f64>,
-    pub seven_day: Option<f64>,
-}
-
 pub struct TestClient {
     pub client: Client,
     pub sessions: HashMap<SessionId, SessionView>,
@@ -441,7 +436,7 @@ pub struct TestClient {
     pub reports: Vec<ReconcileReport>,
     pub rings: Vec<Ring>,
     pub focused: Vec<SessionId>,
-    pub rate_limits: Vec<RateLimits>,
+    pub rate_limits: Vec<Vec<AgentRateLimits>>,
     pub copies: Vec<(SessionId, String)>,
     pub transcripts: Vec<SubagentTranscript>,
     session_in_view: Option<SessionId>,
@@ -551,13 +546,7 @@ impl TestClient {
                 body: body.clone(),
             }),
             FromDaemon::Focus { session } => self.focused.push(session.clone()),
-            FromDaemon::RateLimits {
-                five_hour,
-                seven_day,
-            } => self.rate_limits.push(RateLimits {
-                five_hour: *five_hour,
-                seven_day: *seven_day,
-            }),
+            FromDaemon::RateLimits { agents } => self.rate_limits.push(agents.clone()),
             FromDaemon::Clipboard { session, text } => {
                 self.copies.push((session.clone(), text.clone()))
             }

@@ -5,9 +5,9 @@ use std::time::Instant;
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt, LandingMode,
-    LeftoverView, PhaseView, ReconcileReport, Reply, Request, RequestError, SessionView, Size,
-    SubagentView, UsageReport,
+    AgentRateLimits, AgentStateView, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt,
+    LandingMode, LeftoverView, PhaseView, ReconcileReport, Reply, Request, RequestError,
+    SessionView, Size, SubagentView, UsageReport,
 };
 
 use crate::clipboard::copy_effects;
@@ -32,12 +32,6 @@ use crate::sidebar::{Row, SidebarView, Stop, SubagentRow, Viewport};
 use crate::transcript::Transcript;
 
 pub(crate) const NO_SESSION: &str = "no Session selected";
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct RateLimits {
-    pub five_hour: Option<f64>,
-    pub seven_day: Option<f64>,
-}
 
 pub(crate) enum Call {
     Request(RequestId, Request),
@@ -192,7 +186,7 @@ pub(crate) struct App {
     pub mode: Mode,
     pub prefix: Option<Prefix>,
     pub message: Option<String>,
-    pub rate_limits: RateLimits,
+    pub rate_limits: Vec<AgentRateLimits>,
     pub popup: Option<Popup>,
     pub review: Option<ReviewView>,
     pub reconcile: Option<ReconcileView>,
@@ -230,7 +224,7 @@ impl App {
             mode: Mode::Normal,
             prefix: None,
             message: None,
-            rate_limits: RateLimits::default(),
+            rate_limits: Vec::new(),
             popup: None,
             review: None,
             reconcile: None,
@@ -299,15 +293,7 @@ impl App {
                 title,
                 body,
             } => self.ring(&session, &title, &body),
-            FromDaemon::RateLimits {
-                five_hour,
-                seven_day,
-            } => {
-                self.rate_limits = RateLimits {
-                    five_hour,
-                    seven_day,
-                }
-            }
+            FromDaemon::RateLimits { agents } => self.rate_limits = agents,
             FromDaemon::Focus { session } => self.focus_session(session),
             FromDaemon::Clipboard { session, text } => {
                 if self.selected.as_ref() == Some(&session) {

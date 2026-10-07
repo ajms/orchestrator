@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -260,14 +260,26 @@ pub enum FromDaemon {
         session: SessionId,
     },
     RateLimits {
-        five_hour: Option<f64>,
-        seven_day: Option<f64>,
+        agents: Vec<AgentRateLimits>,
     },
     Clipboard {
         session: SessionId,
         text: String,
     },
     SubagentTranscript(SubagentTranscript),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentRateLimits {
+    pub agent: String,
+    pub limits: Vec<RateLimitView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RateLimitView {
+    pub name: String,
+    pub label: String,
+    pub used_percent: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -352,13 +364,20 @@ pub struct StaleOverrides {
 pub struct UsageReport {
     pub per_repo: Vec<RepoUsage>,
     pub today: Vec<RepoUsage>,
-    pub total: UsageTotalsView,
+    pub per_agent: Vec<AgentTotals>,
     pub estimated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepoUsage {
     pub repo: PathBuf,
+    pub agent: String,
+    pub totals: UsageTotalsView,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentTotals {
+    pub agent: String,
     pub totals: UsageTotalsView,
 }
 
@@ -366,7 +385,7 @@ pub struct RepoUsage {
 pub struct UsageTotalsView {
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

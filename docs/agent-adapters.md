@@ -43,7 +43,7 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 |---|---|
 | `hooks` | The Session uses the unobserved status machine, so its Agent state is **Unknown** ("activity unknown"). Exited and Errored still come from the process exit. There are no Guards, because Guards arrive as hooks. |
 | `resume` | `resume` returns `None`, so resume, reboot recovery and `:preset` start a fresh Conversation. |
-| `usage` | The adapter emits no `UsageSample`, so there is no context gauge, token totals or rate-limit badge. |
+| `usage` | The adapter emits no `UsageSample`, so there is no context gauge, token totals or usage windows. |
 | `modes` | The Daemon launches and resumes the Agent with the `inherit` Preset whatever was chosen (`Capabilities::effective_preset`, applied in `agent_command`), and no `ModeChanged` is reported. |
 | `guards` | The Daemon lets every blocking hook proceed without evaluating it (`Capabilities::guards_available`, which needs both hooks and guards, gates the Guard path). |
 | `subagents` | No `SubagentStarted`/`SubagentFinished`, so no nested Subagent rows. |
@@ -60,7 +60,7 @@ The events come from `orch_core::AgentEvent`:
 - `Failed { kind }`
 - `ModeChanged { mode }`, `ConversationChanged { id }`
 - `TitleChanged { title }`, the Session title the user gave through the Agent; an empty title clears it and brings the slug back
-- `UsageSample { … }`
+- `UsageSample { … }`. Its `limits` are named usage windows (`RateLimit { name, label, used_percent, resets_at_unix }`); the adapter picks the short `label` the statusline shows, and Claude reports `5h` and `7d`. The Daemon keeps the latest value per (Agent, window). `cost_usd` stays `None` when the Agent doesn't report cost, and orch never estimates it.
 - `SubagentStarted { id, agent_type, description }`, `SubagentFinished { id }`
 - `GuardCheck { tool, action, cwd }`, which the Daemon answers with allow, deny or ask. `action` is an Agent-neutral `GuardedAction`, and `tool` is only shown in the Guard prompt:
   - `WriteFile { path }`, a tool that writes or deletes a file; the path may be relative to `cwd`

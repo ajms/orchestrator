@@ -1,5 +1,5 @@
 use orch_protocol::AgentStateView;
-use orch_protocol::FromDaemon;
+use orch_protocol::{AgentRateLimits, FromDaemon, RateLimitView};
 use orch_tui::Event;
 use ratatui::style::Color;
 
@@ -27,29 +27,51 @@ fn the_statusline_summarises_agent_states_and_unseen_sessions() {
     assert!(status.contains("● 2"), "{status}");
 }
 
+fn limits(groups: &[(&str, &[(&str, f64)])]) -> Event {
+    Event::Daemon(FromDaemon::RateLimits {
+        agents: groups
+            .iter()
+            .map(|(agent, windows)| AgentRateLimits {
+                agent: (*agent).into(),
+                limits: windows
+                    .iter()
+                    .map(|(label, used_percent)| RateLimitView {
+                        name: format!("{label}-window"),
+                        label: (*label).into(),
+                        used_percent: *used_percent,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    })
+}
+
 #[test]
-fn a_rate_limit_badge_appears_above_80_percent_and_turns_red_at_95() {
+fn the_statusline_shows_each_agents_usage_windows_as_one_group() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "a")]);
-    tui.send(Event::Daemon(FromDaemon::RateLimits {
-        five_hour: Some(79.0),
-        seven_day: None,
-    }));
-    assert!(!statusline(&mut tui).contains("5h"));
+    assert!(!statusline(&mut tui).contains("claude"));
 
-    tui.send(Event::Daemon(FromDaemon::RateLimits {
-        five_hour: Some(83.2),
-        seven_day: Some(50.0),
-    }));
+    tui.send(limits(&[
+        ("claude", &[("5h", 42.0), ("7d", 18.0)]),
+        ("antigravity", &[("gemini-wk", 7.0), ("3p-wk", 0.0)]),
+    ]));
+
     let status = statusline(&mut tui);
-    assert!(status.contains("5h 83%"), "{status}");
-    assert!(!status.contains("7d"), "{status}");
-    assert_ne!(tui.colour_of("5h 83%"), Color::Red);
+    assert!(
+        status.contains("claude 5h 42% 7d 18% │ antigravity gemini-wk 7% 3p-wk 0%"),
+        "{status}"
+    );
+}
 
-    tui.send(Event::Daemon(FromDaemon::RateLimits {
-        five_hour: Some(83.2),
-        seven_day: Some(96.0),
-    }));
-    assert!(statusline(&mut tui).contains("7d 96%"));
+#[test]
+fn a_usage_window_turns_yellow_above_80_percent_and_red_at_95() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![session("webshop", "a")]);
+    tui.send(limits(&[("claude", &[("5h", 79.0), ("7d", 83.2)])]));
+    assert_ne!(tui.colour_of("5h 79%"), Color::Yellow);
+    assert_eq!(tui.colour_of("7d 83%"), Color::Yellow);
+
+    tui.send(limits(&[("claude", &[("5h", 79.0), ("7d", 96.0)])]));
     assert_eq!(tui.colour_of("7d 96%"), Color::Red);
 }

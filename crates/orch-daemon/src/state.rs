@@ -636,7 +636,7 @@ impl State {
         let sessions = self.sessions.values().map(Live::view).collect();
         outbox.send(FromDaemon::Sessions { sessions });
         if self.rate_limits.is_known() {
-            outbox.send(self.rate_limits.into());
+            outbox.send(self.rate_limits.message());
         }
         if let Some(report) = &self.report {
             outbox.send(FromDaemon::Reconciled {
@@ -720,14 +720,12 @@ impl State {
         }
     }
 
-    pub(crate) fn note_rate_limits(&mut self, sample: &orch_core::UsageSample) {
-        let latest = self.rate_limits.after(sample);
-        if latest == self.rate_limits {
+    pub(crate) fn note_rate_limits(&mut self, agent: &str, sample: &orch_core::UsageSample) {
+        if !self.rate_limits.note(agent, sample) {
             return;
         }
-        self.rate_limits = latest;
         for client in self.clients.values() {
-            client.outbox.send(latest.into());
+            client.outbox.send(self.rate_limits.message());
         }
     }
 

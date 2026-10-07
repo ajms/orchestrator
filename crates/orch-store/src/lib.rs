@@ -16,4 +16,4 @@ pub use orch_config::PortBlock;
 pub use repos::{Repo, RepoId};
 pub use sessions::{NewSession, SessionRecord};
 pub use store::Store;
-pub use usage::UsageTotals;
+pub use usage::{AgentUsage, UsageTotals};
