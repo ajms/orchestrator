@@ -36,11 +36,14 @@ impl Default for ClaudeCode {
 }
 
 impl ClaudeCode {
+    pub const NAME: &str = "claude";
+
     fn settings(&self, spec: &LaunchSpec) -> Value {
         let orch_command = |subcommand: &str| {
             format!(
-                "{} {subcommand} --session {}",
+                "{} {subcommand} --agent {} --session {}",
                 quote(&spec.orch_program),
+                Self::NAME,
                 quote(spec.session.as_str())
             )
         };

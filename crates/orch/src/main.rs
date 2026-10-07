@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use orch_agent::ClaudeCode;
 
 const VERSION: &str = match option_env!("ORCH_VERSION") {
     Some(v) => v,
@@ -35,12 +36,16 @@ enum Command {
     Doctor(doctor::DoctorArgs),
     Hold(hold::HoldArgs),
     Hook {
+        #[arg(long, default_value = ClaudeCode::NAME)]
+        agent: String,
         #[arg(long)]
         session: String,
     },
     #[command(subcommand)]
     Repo(repo::RepoCommand),
     Tap {
+        #[arg(long, default_value = ClaudeCode::NAME)]
+        agent: String,
         #[arg(long)]
         session: String,
     },
@@ -65,9 +70,9 @@ fn main() -> ExitCode {
         Some(Command::Daemon(args)) => daemon::run(args),
         Some(Command::Doctor(args)) => doctor::run(args),
         Some(Command::Hold(args)) => hold::run(args),
-        Some(Command::Hook { session }) => hook::run(&session),
+        Some(Command::Hook { agent, session }) => hook::run(&agent, &session),
         Some(Command::Repo(command)) => repo::run(command),
-        Some(Command::Tap { session }) => tap::run(&session),
+        Some(Command::Tap { agent, session }) => tap::run(&agent, &session),
         Some(Command::Trust(args)) => trust::run(args),
         Some(Command::WorktreeHook { worktree }) => worktree_hook::run(&worktree),
         Some(Command::FakeAgent { script, agent_args }) => {

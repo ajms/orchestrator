@@ -36,10 +36,10 @@ fn hook_commands(settings: &Value, event: &str) -> Vec<String> {
 }
 
 #[test]
-fn launch_routes_every_observed_hook_to_the_orch_hook_shim() {
+fn launch_routes_every_observed_hook_to_the_orch_hook_shim_as_claude() {
     let argv = ClaudeCode::default().launch(&spec(Preset::inherit()));
     let settings = settings(&argv.args);
-    let shim = format!("'/opt/orch/bin/orch' hook --session '{SESSION}'");
+    let shim = format!("'/opt/orch/bin/orch' hook --agent claude --session '{SESSION}'");
     for event in [
         "SessionStart",
         "UserPromptSubmit",
@@ -73,13 +73,13 @@ fn guard_hook_waits_for_the_users_answer_instead_of_timing_out() {
 }
 
 #[test]
-fn launch_taps_the_statusline_with_the_session_id_in_its_command() {
+fn launch_taps_the_statusline_as_claude_with_the_session_id_in_its_command() {
     let argv = ClaudeCode::default().launch(&spec(Preset::inherit()));
     let status_line = &settings(&argv.args)["statusLine"];
     assert_eq!(status_line["type"], "command");
     assert_eq!(
         status_line["command"],
-        format!("'/opt/orch/bin/orch' tap --session '{SESSION}'")
+        format!("'/opt/orch/bin/orch' tap --agent claude --session '{SESSION}'")
     );
 }
 
@@ -93,7 +93,7 @@ fn orch_program_paths_are_shell_quoted_in_injected_commands() {
     let argv = ClaudeCode::default().launch(&spec);
     assert_eq!(
         settings(&argv.args)["statusLine"]["command"],
-        format!("'/home/me/it'\\''s here/orch' tap --session '{SESSION}'")
+        format!("'/home/me/it'\\''s here/orch' tap --agent claude --session '{SESSION}'")
     );
 }
 

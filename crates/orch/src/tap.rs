@@ -11,16 +11,20 @@ use crate::subprocess::run_with_input;
 
 const STATUSLINE_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub fn run(session: &str) -> ExitCode {
+pub fn run(agent: &str, session: &str) -> ExitCode {
     let mut payload = String::new();
     if std::io::stdin().read_to_string(&mut payload).is_err() {
         return ExitCode::SUCCESS;
     }
     if let Ok(session) = SessionId::parse(session) {
         let tap = ToHolder::Tap {
+            agent: agent.into(),
             payload: payload.clone(),
         };
         let _ = report(&locate_socket(&session), &tap);
+    }
+    if agent != ClaudeCode::NAME {
+        return ExitCode::SUCCESS;
     }
     let claude = ClaudeCode::default();
     let line = std::env::current_dir()

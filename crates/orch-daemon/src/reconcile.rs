@@ -342,7 +342,10 @@ impl Daemon {
                 base,
                 phase: Phase::Active,
                 preset,
-                agent: config.default_agent().into(),
+                agent: hello
+                    .agent_name
+                    .clone()
+                    .unwrap_or_else(|| config.default_agent().into()),
                 port_block: hello.port_block,
             })
             .await
