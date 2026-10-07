@@ -2,9 +2,9 @@ use std::io::{Read, Write};
 use std::process::{Command, ExitCode};
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, by_name};
+use orch_agent::by_name;
 use orch_config::xdg;
-use orch_core::{AgentEvent, SessionId};
+use orch_core::SessionId;
 use orch_holder::{ToHolder, locate_socket, report};
 
 use crate::subprocess::run_with_input;
@@ -36,32 +36,9 @@ pub fn run(agent: &str, session: Option<&str>) -> ExitCode {
                 Some(STATUSLINE_TIMEOUT),
             )
         })
-        .unwrap_or_else(|| match adapter.hookup() {
-            Some(_) => Vec::new(),
-            None => minimal_line(adapter.as_ref(), &payload).into_bytes(),
-        });
+        .unwrap_or_else(|| adapter.fallback_statusline(&payload).into_bytes());
     let mut stdout = std::io::stdout();
     let _ = stdout.write_all(&line);
     let _ = stdout.flush();
     ExitCode::SUCCESS
-}
-
-fn minimal_line(agent: &dyn AgentAdapter, payload: &str) -> String {
-    let sample = agent
-        .map_tap(payload)
-        .ok()
-        .into_iter()
-        .flatten()
-        .find_map(|event| match event {
-            AgentEvent::UsageSample(sample) => Some(sample),
-            _ => None,
-        });
-    let model = sample
-        .as_ref()
-        .and_then(|sample| sample.model.clone())
-        .unwrap_or_else(|| "?".into());
-    let context = sample
-        .and_then(|sample| sample.context_used_percent)
-        .map_or_else(|| "?".into(), |percent| format!("{percent:.0}"));
-    format!("{model} · {context}%\n")
 }

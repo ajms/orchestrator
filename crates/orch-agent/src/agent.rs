@@ -155,6 +155,14 @@ pub trait AgentAdapter {
         None
     }
 
+    fn fallback_hook_reply(&self) -> Option<String> {
+        None
+    }
+
+    fn fallback_statusline(&self, payload: &str) -> String {
+        minimal_statusline(&self.map_tap(payload).unwrap_or_default())
+    }
+
     fn hookup(&self) -> Option<Box<dyn AgentHookup>> {
         None
     }
@@ -170,4 +178,18 @@ pub trait AgentAdapter {
     ) -> Option<String> {
         None
     }
+}
+
+fn minimal_statusline(events: &[AgentEvent]) -> String {
+    let sample = events.iter().find_map(|event| match event {
+        AgentEvent::UsageSample(sample) => Some(sample),
+        _ => None,
+    });
+    let model = sample
+        .and_then(|sample| sample.model.clone())
+        .unwrap_or_else(|| "?".into());
+    let context = sample
+        .and_then(|sample| sample.context_used_percent)
+        .map_or_else(|| "?".into(), |percent| format!("{percent:.0}"));
+    format!("{model} · {context}%\n")
 }

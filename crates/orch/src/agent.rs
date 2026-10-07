@@ -23,18 +23,43 @@ pub struct HookupArgs {
 const DECLINED: u8 = 1;
 const FAILED: u8 = 2;
 
+#[derive(Clone, Copy)]
+enum Change {
+    Install,
+    Uninstall,
+}
+
+impl Change {
+    fn verb(self) -> &'static str {
+        match self {
+            Change::Install => "install",
+            Change::Uninstall => "uninstall",
+        }
+    }
+
+    fn plan(self, hookup: &dyn AgentHookup) -> Result<Vec<FileEdit>, HookupError> {
+        match self {
+            Change::Install => {
+                let program = client::orch_program().map_err(|err| HookupError(err.to_string()))?;
+                hookup.install(&program.to_string_lossy(), &xdg::process_env)
+            }
+            Change::Uninstall => hookup.uninstall(&xdg::process_env),
+        }
+    }
+}
+
 pub fn run(command: AgentCommand) -> ExitCode {
-    let (install, args) = match command {
-        AgentCommand::Install(args) => (true, args),
-        AgentCommand::Uninstall(args) => (false, args),
+    let (change, args) = match command {
+        AgentCommand::Install(args) => (Change::Install, args),
+        AgentCommand::Uninstall(args) => (Change::Uninstall, args),
     };
-    match hookup(install, &args) {
+    match hookup(change, &args) {
         Ok(code) => code,
         Err(err) => client::fail("agent", FAILED, err),
     }
 }
 
-fn hookup(install: bool, args: &HookupArgs) -> Result<ExitCode, String> {
+fn hookup(change: Change, args: &HookupArgs) -> Result<ExitCode, String> {
     let adapter = by_name(&args.agent).ok_or_else(|| {
         let names = built_in_names().collect::<Vec<_>>().join(", ");
         format!(
@@ -49,8 +74,10 @@ fn hookup(install: bool, args: &HookupArgs) -> Result<ExitCode, String> {
         );
         return Ok(ExitCode::SUCCESS);
     };
-    let edits = plan(hookup.as_ref(), install).map_err(|err| err.to_string())?;
-    let verb = if install { "install" } else { "uninstall" };
+    let edits = change
+        .plan(hookup.as_ref())
+        .map_err(|err| err.to_string())?;
+    let verb = change.verb();
     if edits.is_empty() {
         println!(
             "Nothing to {verb}: the {} Agent hookup is already {verb}ed.",
@@ -74,16 +101,6 @@ fn hookup(install: bool, args: &HookupArgs) -> Result<ExitCode, String> {
     apply_hookup(&edits).map_err(|err| err.to_string())?;
     println!("The {} Agent hookup is {verb}ed.", args.agent);
     Ok(ExitCode::SUCCESS)
-}
-
-fn plan(hookup: &dyn AgentHookup, install: bool) -> Result<Vec<FileEdit>, HookupError> {
-    match install {
-        true => {
-            let program = client::orch_program().map_err(|err| HookupError(err.to_string()))?;
-            hookup.install(&program.to_string_lossy(), &xdg::process_env)
-        }
-        false => hookup.uninstall(&xdg::process_env),
-    }
 }
 
 fn capitalised(verb: &str) -> String {
@@ -145,4 +162,44 @@ fn diff_lines<'a>(before: &[&'a str], after: &[&'a str]) -> Vec<(char, &'a str)>
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn diff(before: Option<&str>, after: Option<&str>) -> String {
+        render_diff(&FileEdit {
+            path: PathBuf::from("/h/settings.json"),
+            before: before.map(Into::into),
+            after: after.map(Into::into),
+        })
+    }
+
+    #[test]
+    fn the_diff_keeps_shared_lines_and_marks_the_changed_ones() {
+        let shown = diff(
+            Some("{\n  \"a\": 1,\n  \"b\": 2\n}\n"),
+            Some("{\n  \"a\": 1,\n  \"b\": 3\n}\n"),
+        );
+
+        assert_eq!(
+            shown,
+            "--- /h/settings.json\n+++ /h/settings.json\n {\n   \"a\": 1,\n-  \"b\": 2\n+  \"b\": 3\n }\n"
+        );
+    }
+
+    #[test]
+    fn a_new_file_is_all_additions_and_a_removed_file_all_removals() {
+        assert_eq!(
+            diff(None, Some("{}\n")),
+            "--- /dev/null\n+++ /h/settings.json\n+{}\n"
+        );
+        assert_eq!(
+            diff(Some("{}\n"), None),
+            "--- /h/settings.json\n+++ /dev/null\n-{}\n"
+        );
+    }
 }
