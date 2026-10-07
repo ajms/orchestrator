@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, Antigravity, Draft};
+use orch_agent::{AgentAdapter, Antigravity, Draft, DraftOutcome};
 use orch_core::ConversationId;
 use orch_protocol::{
     AgentStateView as State, GuardKindView, LandingMode, PhaseView, Reply, Request, TranscriptEntry,
@@ -226,7 +226,7 @@ async fn agys_stream_json_print_mode_answers_the_user_event_on_stdin() {
     let adapter = Antigravity {
         program: agy.agy.display().to_string(),
     };
-    let Some(Draft { argv, io, .. }) = adapter.draft(None) else {
+    let Some(Draft { argv, .. }) = adapter.draft(None) else {
         panic!("Antigravity drafts");
     };
     let mut command = agy.command(&argv.program);
@@ -234,16 +234,12 @@ async fn agys_stream_json_print_mode_answers_the_user_event_on_stdin() {
 
     let output = run_with_stdin(
         command,
-        &io.encode("Reply with the single word pineapple and nothing else."),
+        &adapter.encode_draft("Reply with the single word pineapple and nothing else."),
         TURN,
     );
 
-    let response = io.decode(&String::from_utf8_lossy(&output.stdout));
-    let answered = response
-        .as_ref()
-        .ok()
-        .and_then(Option::as_deref)
-        .is_some_and(|text| text.to_lowercase().contains("pineapple"));
+    let response = adapter.decode_draft(&String::from_utf8_lossy(&output.stdout));
+    let answered = matches!(&response, DraftOutcome::Drafted(text) if text.to_lowercase().contains("pineapple"));
     assert!(
         output.status.success() && answered,
         "agy {:?} did not answer the user event on stdin with a result: {response:?} from {output:?}",

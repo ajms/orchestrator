@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+use crate::DraftOutcome;
+
 const SUCCESS: &str = "SUCCESS";
 
 pub(crate) fn encode(prompt: &str) -> String {
@@ -10,7 +12,7 @@ pub(crate) fn encode(prompt: &str) -> String {
     format!("{line}\n")
 }
 
-pub(crate) fn decode(stdout: &str) -> Result<Option<String>, String> {
+pub(crate) fn decode(stdout: &str) -> DraftOutcome {
     let Some(result) = stdout
         .lines()
         .rev()
@@ -18,7 +20,7 @@ pub(crate) fn decode(stdout: &str) -> Result<Option<String>, String> {
         .find(|event| event["event"] == "result")
         .map(|event| event["result"].clone())
     else {
-        return Ok(None);
+        return DraftOutcome::NoResult;
     };
     let status = result["status"].as_str().unwrap_or_default();
     if status != SUCCESS {
@@ -27,7 +29,7 @@ pub(crate) fn decode(stdout: &str) -> Result<Option<String>, String> {
             Value::String(error) => error.clone(),
             error => error.to_string(),
         };
-        return Err(error);
+        return DraftOutcome::Failed(error);
     }
-    Ok(Some(result["response"].as_str().unwrap_or_default().into()))
+    DraftOutcome::Drafted(result["response"].as_str().unwrap_or_default().into())
 }
