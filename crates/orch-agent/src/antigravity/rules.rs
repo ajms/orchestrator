@@ -4,14 +4,13 @@ use orch_core::GuardedAction;
 use serde_json::Value;
 
 use super::guards::MCP_PREFIX;
-use super::invocations::{KEYWORDS, invocations, risky_git, runs_another_command};
+use crate::guard::invocations::{KEYWORDS, invocations, risky_git, runs_another_command};
 use crate::guard::paths;
-use crate::guard::shell::{self, SimpleCommand, Word};
+use crate::guard::shell::{self, DirectoryChange, SimpleCommand, Word};
 use crate::{RuleScope, RuleVerdict, Rules};
 
 const ANY: &str = "*";
 const GIT_DIR: &str = ".git";
-const DIRECTORY_CHANGES: [&str; 3] = ["cd", "pushd", "popd"];
 
 enum Rule<'a> {
     Command(Vec<&'a str>),
@@ -155,19 +154,11 @@ impl<'r> Checker<'_, 'r> {
         let mut cwds = vec![cwd.clone()];
         let mut first = None;
         for command in shell::parse(line) {
-            let changes_directory = command
-                .words
-                .first()
-                .is_some_and(|word| DIRECTORY_CHANGES.contains(&word.text.as_str()));
-            let into = match command.words.as_slice() {
-                [cd, dir] if cd.text == "cd" && !dir.dynamic && !dir.text.starts_with('-') => {
-                    Some(paths::resolve(&cwd, &dir.text))
-                }
-                _ => None,
+            let into = match command.directory_change() {
+                Some(DirectoryChange::Into(dir)) => Some(paths::resolve(&cwd, &dir.text)),
+                Some(DirectoryChange::Unknown) => return None,
+                None => None,
             };
-            if changes_directory && into.is_none() {
-                return None;
-            }
             let rule = self.allowed_command(&cwds, &command)?;
             first.get_or_insert(rule);
             if let Some(into) = into {

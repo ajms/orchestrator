@@ -1,7 +1,6 @@
 mod guards;
 mod hooks;
 mod hookup;
-mod invocations;
 mod rules;
 mod statusline;
 mod subagents;

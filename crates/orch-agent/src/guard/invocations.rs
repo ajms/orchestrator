@@ -1,4 +1,4 @@
-use crate::guard::shell;
+use super::shell;
 
 struct Wrapper {
     name: &'static str,
@@ -73,14 +73,14 @@ const WRAPPERS: [Wrapper; 14] = [
     wrapper("coproc", "", &[]),
 ];
 const EVAL: &str = "eval";
-pub(super) const KEYWORDS: [&str; 12] = [
+pub(crate) const KEYWORDS: [&str; 12] = [
     "if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "fi", "function",
 ];
 const SHELLS: [&str; 6] = ["sh", "bash", "zsh", "dash", "ksh", "fish"];
 const FIND_EXECS: [&str; 4] = ["-exec", "-execdir", "-ok", "-okdir"];
 const MAX_DEPTH: usize = 8;
 
-const GIT_GLOBALS_WITH_VALUES: [&str; 6] = [
+pub(super) const GIT_GLOBALS_WITH_VALUES: [&str; 6] = [
     "-C",
     "-c",
     "--git-dir",
@@ -92,11 +92,11 @@ const RISKY_GIT_GLOBALS: [&str; 3] = ["-c", "--config-env", "--exec-path"];
 const RISKY_GIT_SUBCOMMANDS: [&str; 3] = ["config", "filter-branch", "bundle"];
 const REMOTE_GIT_SUBCOMMANDS: [&str; 5] = ["clone", "fetch", "pull", "ls-remote", "push"];
 
-pub(super) fn runs_another_command(word: &str) -> bool {
+pub(crate) fn runs_another_command(word: &str) -> bool {
     word == EVAL || WRAPPERS.iter().any(|wrapper| wrapper.name == word)
 }
 
-pub(super) fn invocations(line: &str) -> Vec<Vec<String>> {
+pub(crate) fn invocations(line: &str) -> Vec<Vec<String>> {
     let mut found = Vec::new();
     collect(line, &mut found, 0);
     found
@@ -142,29 +142,30 @@ fn collect_words(words: &[&str], found: &mut Vec<Vec<String>>, depth: usize) {
     }
 }
 
-fn program_words(words: &[&str]) -> (Vec<String>, Vec<String>) {
+pub(super) fn program_start<S: AsRef<str>>(words: &[S], scripts: &mut Vec<String>) -> usize {
     let mut at = 0;
-    let mut scripts = Vec::new();
-    while let Some(&word) = words.get(at) {
+    while let Some(word) = words.get(at).map(AsRef::as_ref) {
         if word == "function" {
             at += 2;
         } else if KEYWORDS.contains(&word) || word.contains('=') && !word.starts_with('-') {
             at += 1;
-        } else if word == EVAL {
-            scripts.push(words[at + 1..].join(" "));
-            return (Vec::new(), scripts);
         } else if let Some(wrapper) = WRAPPERS.iter().find(|wrapper| wrapper.name == word) {
-            at = skip_flags(wrapper, words, at + 1, &mut scripts) + wrapper.positionals;
+            at = skip_flags(wrapper, words, at + 1, scripts) + wrapper.positionals;
         } else {
             break;
         }
     }
-    let mut words: Vec<String> = words
-        .get(at..)
-        .unwrap_or_default()
-        .iter()
-        .map(|word| word.to_string())
-        .collect();
+    at.min(words.len())
+}
+
+fn program_words(words: &[&str]) -> (Vec<String>, Vec<String>) {
+    let mut scripts = Vec::new();
+    let at = program_start(words, &mut scripts);
+    if words.get(at) == Some(&EVAL) {
+        scripts.push(words[at + 1..].join(" "));
+        return (Vec::new(), scripts);
+    }
+    let mut words: Vec<String> = words[at..].iter().map(|word| word.to_string()).collect();
     if let Some(program) = words.first_mut() {
         *program = program.rsplit('/').next().unwrap_or_default().into();
     }
@@ -175,17 +176,17 @@ fn program_words(words: &[&str]) -> (Vec<String>, Vec<String>) {
     (words, scripts)
 }
 
-fn skip_flags(
+fn skip_flags<S: AsRef<str>>(
     wrapper: &Wrapper,
-    words: &[&str],
+    words: &[S],
     mut at: usize,
     scripts: &mut Vec<String>,
 ) -> usize {
     let value = |at: &mut usize| {
         *at += 1;
-        words.get(*at - 1).copied().unwrap_or_default()
+        words.get(*at - 1).map_or("", AsRef::as_ref)
     };
-    while let Some(&flag) = words.get(at) {
+    while let Some(flag) = words.get(at).map(AsRef::as_ref) {
         if flag == "--" {
             return at + 1;
         }
@@ -263,7 +264,7 @@ fn git_globals<S: AsRef<str>>(args: &[S]) -> usize {
     at.min(args.len())
 }
 
-pub(super) fn risky_git(args: &[&str]) -> bool {
+pub(crate) fn risky_git(args: &[&str]) -> bool {
     let globals = git_globals(args);
     let names = |word: &str| word.split('=').next().unwrap_or_default().to_string();
     if args[..globals]
