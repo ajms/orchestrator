@@ -350,6 +350,8 @@ fn pushing_to_the_base_branch_or_other_refs_asks() {
         ),
         ("git push --tags", GuardKind::OtherRef, "tags"),
         ("git push --all origin", GuardKind::OtherRef, "all branches"),
+        ("git push origin ma{in,x}", GuardKind::BaseBranch, "main"),
+        ("git push \"$REMOTE\" main", GuardKind::BaseBranch, "main"),
         (
             "git push origin v1.2.0:refs/tags/v1.2.0",
             GuardKind::OtherRef,
@@ -471,6 +473,8 @@ fn shell_writes_outside_the_worktree_ask_best_effort() {
         "echo done | tee -a notes.md",
         "cp README.md docs/",
         "rm -rf target",
+        "rm -rf target/*",
+        "mkdir -p src/{a,b}",
     ]);
     assert_asks(&[
         (
@@ -517,6 +521,36 @@ fn shell_writes_outside_the_worktree_ask_best_effort() {
             "git -C /home/dev/shop commit -m sneaky",
             GuardKind::WriteOutsideWorktree,
             "/home/dev/shop",
+        ),
+        (
+            "rm -rf /home/dev/other/*",
+            GuardKind::WriteOutsideWorktree,
+            "/home/dev/other/*",
+        ),
+        (
+            "cp x ../sibling/{a,b}",
+            GuardKind::WriteOutsideWorktree,
+            "/home/dev/shop/.orchestrator/worktrees/sibling/a",
+        ),
+        (
+            "rm -rf src/*/../../..",
+            GuardKind::WriteOutsideWorktree,
+            "/home/dev/shop/.orchestrator/worktrees",
+        ),
+        (
+            "rm -rf .*",
+            GuardKind::WriteOutsideWorktree,
+            "/home/dev/shop/.orchestrator/worktrees",
+        ),
+        (
+            "touch ~dev/.bashrc",
+            GuardKind::WriteOutsideWorktree,
+            "~dev/.bashrc",
+        ),
+        (
+            "git -C /home/dev/sho* commit -m sneaky",
+            GuardKind::WriteOutsideWorktree,
+            "/home/dev/sho*",
         ),
     ]);
 }
