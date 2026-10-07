@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use crate::DraftOutcome;
 
 const SUCCESS: &str = "SUCCESS";
+const EMPTY_RESPONSE: &str = "agy returned an empty response";
 
 pub(crate) fn encode(prompt: &str) -> String {
     let line = json!({
@@ -33,6 +34,6 @@ pub(crate) fn decode(stdout: &str) -> DraftOutcome {
     }
     match result["response"].as_str() {
         Some(response) if !response.trim().is_empty() => DraftOutcome::Drafted(response.into()),
-        _ => DraftOutcome::NoResult,
+        _ => DraftOutcome::Failed(EMPTY_RESPONSE.into()),
     }
 }
