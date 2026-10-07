@@ -9,6 +9,7 @@ pub enum Error {
     Io { context: String, message: String },
     GitTooOld { found: GitVersion },
     NotAnOrchestratorWorktree { path: PathBuf },
+    InvalidSubagentWorktreeName { name: String },
 }
 
 impl Error {
@@ -35,6 +36,9 @@ impl fmt::Display for Error {
                 "{} is not under the Repo's .orchestrator/worktrees directory",
                 path.display()
             ),
+            Error::InvalidSubagentWorktreeName { name } => {
+                write!(f, "{name:?} is not a valid Subagent worktree name")
+            }
         }
     }
 }

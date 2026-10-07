@@ -1,4 +1,4 @@
-use orch_agent::{AgentAdapter, ClaudeCode, GuardAnswer};
+use orch_agent::{AgentAdapter, ClaudeCode, GuardAnswer, WorktreeRequest};
 use orch_core::{AgentEvent, ConversationId, FailureKind, PermissionMode, SubagentId};
 
 fn fixture(name: &str) -> String {
@@ -317,4 +317,22 @@ fn a_stale_or_disabled_quota_auto_resume_leaves_the_state_alone() {
             "{fixture}"
         );
     }
+}
+
+#[test]
+fn worktree_hooks_ask_to_create_or_remove_a_subagent_worktree() {
+    let claude = ClaudeCode::default();
+    assert_eq!(
+        claude.worktree_request(&fixture("worktree_create")),
+        Some(WorktreeRequest::Create {
+            name: "agent-a6bda78ea0936cda8".into()
+        })
+    );
+    assert_eq!(
+        claude.worktree_request(&fixture("worktree_remove")),
+        Some(WorktreeRequest::Remove {
+            path: "/repo/.orchestrator/subagents/work/agent-a6bda78ea0936cda8".into()
+        })
+    );
+    assert_eq!(claude.worktree_request(&fixture("stop")), None);
 }

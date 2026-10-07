@@ -126,7 +126,12 @@ impl Repo {
         if paths.is_empty() {
             return Ok(());
         }
-        self.git(["worktree", "repair"]).args(paths).run().map(drop)
+        let subagents = paths.iter().flat_map(|path| self.subagent_worktrees(path));
+        self.git(["worktree", "repair"])
+            .args(paths)
+            .args(subagents)
+            .run()
+            .map(drop)
     }
 
     pub fn worktree_exists(&self, path: &Path) -> bool {
@@ -172,20 +177,26 @@ impl Repo {
             });
         }
         let mut outcome = None;
+        self.remove_subagent_worktrees(path);
         if path.is_dir() {
             outcome = teardown.map(|script| script.run(path));
-            if self.worktree_exists(path) {
-                self.git(["worktree", "remove"])
-                    .args(FORCE_EVEN_IF_DIRTY_OR_LOCKED)
-                    .arg(path)
-                    .run()?;
-            } else {
-                fs::remove_dir_all(path)
-                    .map_err(|error| Error::io(format!("remove {}", path.display()), error))?;
-            }
+            self.remove_checkout(path)?;
         }
         self.git(["worktree", "prune"]).run()?;
         Ok(outcome)
+    }
+
+    pub(crate) fn remove_checkout(&self, path: &Path) -> Result<(), Error> {
+        if self.worktree_exists(path) {
+            self.git(["worktree", "remove"])
+                .args(FORCE_EVEN_IF_DIRTY_OR_LOCKED)
+                .arg(path)
+                .run()?;
+        } else if path.exists() {
+            fs::remove_dir_all(path)
+                .map_err(|error| Error::io(format!("remove {}", path.display()), error))?;
+        }
+        Ok(())
     }
 
     pub(crate) fn delete_branch(&self, branch: &str) -> Result<(), Error> {

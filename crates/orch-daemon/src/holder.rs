@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use orch_agent::{
-    Capabilities, GuardAnswer, GuardContext, GuardDecision, TitleWatch, evaluate_guard,
+    AgentAdapter, Capabilities, GuardAnswer, GuardContext, GuardDecision, TitleWatch,
+    evaluate_guard,
 };
 use orch_core::{
     AgentEvent, AgentState, ConversationId, Effect, Observation, PhaseEvent, SessionId,
@@ -375,7 +376,7 @@ fn retitle(live: &mut Live, title: &str) {
 
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
     let check = guard_check(live.adapter.capabilities(), events);
-    let agent_dirs = live.adapter.agent_dirs(&orch_config::xdg::process_env);
+    let agent_dirs = guard_dirs(live.adapter.as_ref(), &live.record.worktree);
     let decision = check.map(|(tool, input_json, cwd)| {
         let context = GuardContext {
             worktree: &live.record.worktree,
@@ -405,6 +406,12 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
             });
         }
     }
+}
+
+fn guard_dirs(adapter: &dyn AgentAdapter, worktree: &Path) -> Vec<PathBuf> {
+    let mut dirs = adapter.agent_dirs(&orch_config::xdg::process_env);
+    dirs.push(orch_git::subagent_worktrees_dir(worktree));
+    dirs
 }
 
 type GuardCheck<'a> = (&'a String, &'a String, &'a Option<String>);
@@ -459,6 +466,16 @@ mod tests {
             ..Capabilities::default()
         };
         assert!(guard_check(capabilities, &check()).is_some());
+    }
+
+    #[test]
+    fn the_guard_counts_the_sessions_subagent_worktrees_as_its_own() {
+        let dirs = guard_dirs(
+            &orch_agent::ClaudeCode::default(),
+            Path::new("/repo/.orchestrator/worktrees/work"),
+        );
+        assert!(dirs.contains(&PathBuf::from("/repo/.orchestrator/subagents/work")));
+        assert!(!dirs.contains(&PathBuf::from("/repo/.orchestrator/subagents")));
     }
 
     #[test]

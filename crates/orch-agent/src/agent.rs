@@ -53,6 +53,7 @@ pub struct LaunchSpec {
     pub orch_program: String,
     pub preset: Preset,
     pub prompt: Option<String>,
+    pub worktree: Option<PathBuf>,
 }
 
 impl LaunchSpec {
@@ -62,6 +63,7 @@ impl LaunchSpec {
             orch_program: orch_program.into(),
             preset,
             prompt: None,
+            worktree: None,
         }
     }
 
@@ -71,6 +73,19 @@ impl LaunchSpec {
             ..self
         }
     }
+
+    pub fn with_worktree(self, worktree: impl Into<PathBuf>) -> Self {
+        Self {
+            worktree: Some(worktree.into()),
+            ..self
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorktreeRequest {
+    Create { name: String },
+    Remove { path: PathBuf },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +162,10 @@ pub trait AgentAdapter {
     }
 
     fn guard_answer(&self, _answer: &GuardAnswer) -> Option<String> {
+        None
+    }
+
+    fn worktree_request(&self, _payload: &str) -> Option<WorktreeRequest> {
         None
     }
 

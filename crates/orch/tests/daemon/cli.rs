@@ -549,3 +549,62 @@ async fn no_idle_exit_and_an_idle_timeout_conflict() {
         stderr(&output)
     );
 }
+
+#[tokio::test]
+async fn the_worktree_hook_makes_and_removes_subagent_worktrees_for_a_session() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let worktree = repo.join(".orchestrator/worktrees/work");
+    let worktree = worktree.to_str().unwrap();
+    git(
+        &repo,
+        &["worktree", "add", "-q", "-b", "orch/work", worktree],
+    );
+    let hook = ["worktree-hook", "--worktree", worktree];
+    let subagent = repo.join(".orchestrator/subagents/work/agent-1");
+
+    let created = orch_with_input(
+        &env,
+        &hook,
+        r#"{"hook_event_name":"WorktreeCreate","name":"agent-1"}"#,
+    )
+    .await;
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert_eq!(stdout(&created), format!("{}\n", subagent.display()));
+    assert!(subagent.join("README.md").exists());
+
+    let removed = orch_with_input(
+        &env,
+        &hook,
+        &format!(
+            r#"{{"hook_event_name":"WorktreeRemove","worktree_path":"{}"}}"#,
+            subagent.display()
+        ),
+    )
+    .await;
+    assert!(removed.status.success(), "{}", stderr(&removed));
+    assert!(!subagent.exists());
+}
+
+#[tokio::test]
+async fn the_worktree_hook_fails_loudly_when_it_cannot_make_the_worktree() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let worktree = repo.join(".orchestrator/worktrees/work");
+    let worktree = worktree.to_str().unwrap();
+    git(
+        &repo,
+        &["worktree", "add", "-q", "-b", "orch/work", worktree],
+    );
+
+    let created = orch_with_input(
+        &env,
+        &["worktree-hook", "--worktree", worktree],
+        r#"{"hook_event_name":"WorktreeCreate","name":"../escape"}"#,
+    )
+    .await;
+
+    assert!(!created.status.success());
+    assert!(stdout(&created).is_empty());
+    assert!(stderr(&created).contains("escape"), "{}", stderr(&created));
+}

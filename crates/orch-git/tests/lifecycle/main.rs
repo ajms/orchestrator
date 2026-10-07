@@ -7,4 +7,5 @@ mod repo;
 mod review;
 mod slug;
 mod stacking;
+mod subagents;
 mod worktree;

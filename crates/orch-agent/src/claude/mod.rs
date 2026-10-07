@@ -16,7 +16,7 @@ use transcript::TranscriptTitles;
 use crate::shell::quote;
 use crate::{
     AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, SubagentTranscripts,
-    TitleWatch,
+    TitleWatch, WorktreeRequest,
 };
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
@@ -45,7 +45,7 @@ impl ClaudeCode {
             )
         };
         let hook_command = orch_command("hook");
-        let hooks: Map<String, Value> = HookEvent::OBSERVED
+        let mut hooks: Map<String, Value> = HookEvent::OBSERVED
             .into_iter()
             .map(|event| {
                 let mut hook = json!({ "type": "command", "command": hook_command });
@@ -55,6 +55,17 @@ impl ClaudeCode {
                 (event.name(), json!([{ "matcher": "*", "hooks": [hook] }]))
             })
             .collect();
+        if let Some(worktree) = &spec.worktree {
+            let command = format!(
+                "{} worktree-hook --worktree {}",
+                quote(&spec.orch_program),
+                quote(&worktree.to_string_lossy())
+            );
+            let hook = json!([{ "hooks": [{ "type": "command", "command": command }] }]);
+            for event in [HookEvent::WorktreeCreate, HookEvent::WorktreeRemove] {
+                hooks.insert(event.name(), hook.clone());
+            }
+        }
         let mut settings = json!({
             "hooks": hooks,
             "statusLine": { "type": "command", "command": orch_command("tap") },
@@ -158,6 +169,10 @@ impl AgentAdapter for ClaudeCode {
             output["hookSpecificOutput"]["permissionDecisionReason"] = json!(reason);
         }
         Some(output.to_string())
+    }
+
+    fn worktree_request(&self, payload: &str) -> Option<WorktreeRequest> {
+        hooks::worktree_request(payload)
     }
 
     fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {

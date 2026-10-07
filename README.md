@@ -46,6 +46,8 @@ In the TUI, type `:new`, write a prompt (`Ctrl+g` opens `$EDITOR`, `Ctrl+r` pick
 2. runs the Repo's Setup script;
 3. starts Claude in the pane.
 
+When Claude runs a Subagent in its own worktree, `orch` creates that worktree at `.orchestrator/subagents/<slug>/<name>` on Branch `worktree-<name>`, starting from the Session's HEAD. Guards treat it as part of the Session, so the Subagent can edit there without a prompt. It is removed with the Session. A Subagent Branch with commits that were never merged into the Session is kept.
+
 When the Agent is done, press `d` to review, then run `:land` to squash onto the Base branch or open a PR.
 
 ## Commands
@@ -60,7 +62,7 @@ When the Agent is done, press `d` to review, then run `:land` to squash onto the
 | `orch daemon [--no-idle-exit]` | Run the Daemon in the foreground |
 | `orch daemon install` / `uninstall` | Manage the systemd user unit |
 
-`orch hold`, `orch hook` and `orch tap` are internal plumbing. The Daemon and the Agent's hooks call them.
+`orch hold`, `orch hook`, `orch tap` and `orch worktree-hook` are internal plumbing. The Daemon and the Agent's hooks call them.
 
 ## Keymap
 
