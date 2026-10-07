@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -5,25 +6,31 @@ use std::time::{Duration, Instant};
 use orch_holder::{HolderClient, ToHolder};
 use serde_json::{Value, json};
 
-use crate::agy::{Held, STARTUP, TRUST_ANSWER, hold, is_trust_screen, isolate};
+use crate::agy::{Held, STARTUP, TRUST_ANSWER, hold, is_trust_screen};
+use crate::isolation::Isolation;
 
-pub const CAPTURE_STATUSLINE: &str = r#"if [ -n "$ORCH_REAL_AGY_CAPTURE" ]; then cat > "$ORCH_REAL_AGY_CAPTURE/statusline-$(date +%s%N).json"; else cat > /dev/null; fi"#;
+pub const CAPTURE_STATUSLINE: &str = r#"d="$ORCH_REAL_AGY_CAPTURE/$ORCH_SESSION"; if [ -n "$ORCH_REAL_AGY_CAPTURE" ] && [ -n "$ORCH_SESSION" ]; then mkdir -p "$d" && cat > "$d/statusline-$(date +%s%N).json"; else cat > /dev/null; fi"#;
+pub const SHARING_KEYS: [&str; 5] = [
+    "telemetryEnabled",
+    "dataSharingEnabled",
+    "dataSharing",
+    "shareUsageData",
+    "usageStatisticsEnabled",
+];
 const ONBOARDED: &str = "onboarded";
 const STAMP: &str = "stamp";
 const DOWN: &[u8] = b"\x1b[B";
 const ENTER: &[u8] = b"\r";
 
-static BUILDING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-pub fn dir() -> PathBuf {
+pub fn template_dir() -> PathBuf {
     Path::new(env!("CARGO_TARGET_TMPDIR")).join("real-agy-template")
 }
 
 pub async fn prepare(agy: &Path) -> PathBuf {
-    let _building = BUILDING.lock().await;
-    let dir = dir();
-    std::fs::create_dir_all(dir.join("home")).unwrap();
-    let stamp = stamp(&dir, agy);
+    let dir = template_dir();
+    let isolation = Isolation::under(&dir);
+    std::fs::create_dir_all(&isolation.home).unwrap();
+    let stamp = stamp(&isolation, agy);
     match std::fs::read_to_string(dir.join(STAMP)) {
         Ok(found) if found == stamp => return dir,
         Ok(_) => std::fs::remove_dir_all(&dir).unwrap(),
@@ -33,19 +40,28 @@ pub async fn prepare(agy: &Path) -> PathBuf {
         std::fs::create_dir_all(dir.join(sub)).unwrap();
     }
     if !dir.join(ONBOARDED).exists() {
-        onboard(&dir, agy).await;
+        onboard(&dir, &isolation, agy).await;
         std::fs::write(dir.join(ONBOARDED), "").unwrap();
     }
-    let settings = dir.join("home/.gemini/antigravity-cli/settings.json");
-    refuse_data_sharing(&settings);
+    let settings = isolation.home.join(".gemini/antigravity-cli/settings.json");
+    let verdict = sharing_verdict(std::fs::read_to_string(&settings).ok().as_deref());
+    if let Err(problem) = verdict {
+        panic!(
+            "{}: {problem}\n{}",
+            settings.display(),
+            manual(&dir, &isolation, agy, "")
+        );
+    }
     set_statusline(&settings);
-    install_hookup(&dir);
+    install_hookup(&dir, &isolation);
     std::fs::write(dir.join(STAMP), stamp).unwrap();
     dir
 }
 
-fn stamp(dir: &Path, agy: &Path) -> String {
-    let version = template_command(dir, agy)
+fn stamp(isolation: &Isolation, agy: &Path) -> String {
+    let mut command = Command::new(agy);
+    let version = isolation
+        .apply(&mut command)
         .arg("--version")
         .output()
         .unwrap();
@@ -57,40 +73,35 @@ fn stamp(dir: &Path, agy: &Path) -> String {
     )
 }
 
-fn template_command(dir: &Path, program: impl AsRef<std::ffi::OsStr>) -> Command {
-    let mut command = Command::new(program);
-    isolate(&mut command, &dir.join("home"))
-        .env("XDG_CONFIG_HOME", dir.join("config"))
-        .env("XDG_STATE_HOME", dir.join("state"));
-    command
-}
-
-fn manual(dir: &Path, screen: &str) -> String {
+fn manual(dir: &Path, isolation: &Isolation, agy: &Path, screen: &str) -> String {
     format!(
-        "agy's onboarding could not be driven. Screen:\n{screen}\n\
-         Onboard the template by hand: from {work} run\n  \
-         HOME={home} XDG_CONFIG_HOME={config} XDG_STATE_HOME={state} XDG_DATA_HOME={home}/.local/share XDG_CACHE_HOME={home}/.cache agy\n\
-         pick any theme, turn data sharing OFF, leave agy at the trust screen with ctrl+c, then\n  \
-         touch {marker}\nand run the suite again.",
+        "agy's onboarding needs a hand. Screen:\n{screen}\n\
+         Delete {dir} if it holds a bad onboarding, then from {work} run\n  {line}\n\
+         pick any theme, turn data sharing OFF, quit agy at the trust screen with ctrl+c, then\n  \
+         touch {marker}\nand run the suite again. If agy's data-sharing setting is not one of {SHARING_KEYS:?}, add its key to SHARING_KEYS in {file}.",
+        dir = dir.display(),
         work = dir.join("work").display(),
-        home = dir.join("home").display(),
-        config = dir.join("config").display(),
-        state = dir.join("state").display(),
+        line = isolation.shell_line(agy),
         marker = dir.join(ONBOARDED).display(),
+        file = file!(),
     )
 }
 
-async fn onboard(dir: &Path, agy: &Path) {
+async fn onboard(dir: &Path, isolation: &Isolation, agy: &Path) {
     let runtime = tempfile::Builder::new().prefix("oa").tempdir().unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_orch"));
+    isolation.apply(&mut command);
+    let argv: Vec<OsString> = vec![agy.into()];
     let mut held = hold(
-        template_command(dir, env!("CARGO_BIN_EXE_orch")),
+        command,
         runtime.path(),
         "onboarding",
         &dir.join("work"),
-        agy,
+        &argv,
     )
     .await;
-    drive_onboarding(&mut held, dir).await;
+    let manual = |screen: &str| manual(dir, isolation, agy, screen);
+    drive_onboarding(&mut held, &manual).await;
     held.client.send(&ToHolder::Kill).await.unwrap();
 }
 
@@ -111,7 +122,7 @@ fn is_consent_screen(lower: &str) -> bool {
         .any(|needle| lower.contains(needle))
 }
 
-async fn drive_onboarding(held: &mut Held, dir: &Path) {
+async fn drive_onboarding(held: &mut Held, manual: &dyn Fn(&str) -> String) {
     let deadline = Instant::now() + 2 * STARTUP;
     let mut consented = false;
     let mut acted_on = String::new();
@@ -119,7 +130,7 @@ async fn drive_onboarding(held: &mut Held, dir: &Path) {
     let mut changed_at = Instant::now();
     loop {
         let text = screen(&mut held.client).await;
-        assert!(Instant::now() < deadline, "{}", manual(dir, &text));
+        assert!(Instant::now() < deadline, "{}", manual(&text));
         if text != last {
             last = text.clone();
             changed_at = Instant::now();
@@ -134,7 +145,7 @@ async fn drive_onboarding(held: &mut Held, dir: &Path) {
                 press(&mut held.client, TRUST_ANSWER).await;
                 acted_on = text;
             } else if is_consent_screen(&lower) {
-                choose_off(&mut held.client, dir).await;
+                choose_off(&mut held.client, manual).await;
                 consented = true;
                 acted_on = text;
             } else if lower.contains("theme") {
@@ -149,9 +160,15 @@ async fn drive_onboarding(held: &mut Held, dir: &Path) {
 }
 
 fn selected_line(text: &str) -> Option<&str> {
-    const MARKERS: [char; 7] = ['❯', '›', '▸', '►', '>', '●', '◉'];
+    const MARKERS: [char; 6] = ['❯', '›', '▸', '►', '●', '◉'];
+    let marked = |line: &&str| line.trim_start().starts_with(MARKERS);
+    let quoted = |line: &&str| {
+        let line = line.trim_start();
+        line.starts_with("> ") && !line[2..].trim().is_empty()
+    };
     text.lines()
-        .find(|line| line.trim_start().starts_with(MARKERS))
+        .find(marked)
+        .or_else(|| text.lines().find(quoted))
 }
 
 fn is_off(line: &str) -> bool {
@@ -163,7 +180,7 @@ fn is_off(line: &str) -> bool {
         .any(|word| OFF.contains(&word))
 }
 
-async fn choose_off(client: &mut HolderClient, dir: &Path) {
+async fn choose_off(client: &mut HolderClient, manual: &dyn Fn(&str) -> String) {
     for _ in 0..8 {
         let text = screen(client).await;
         match selected_line(&text) {
@@ -172,65 +189,113 @@ async fn choose_off(client: &mut HolderClient, dir: &Path) {
                 return;
             }
             Some(_) => press(client, DOWN).await,
-            None => panic!("{}", manual(dir, &text)),
+            None => panic!("{}", manual(&text)),
         }
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
-    panic!("{}", manual(dir, &screen(client).await));
+    panic!("{}", manual(&screen(client).await));
 }
 
-fn sharing_keys(value: &Value, path: &str, found: &mut Vec<String>) {
+fn walk<'a>(value: &'a Value, path: &str, found: &mut Vec<(String, &'a Value)>) {
     match value {
-        Value::Object(map) => {
-            for (key, value) in map {
-                let path = format!("{path}.{key}");
-                let key = key.to_lowercase();
-                let sharing = ["shar", "telemetry", "improve", "usagestat"]
-                    .iter()
-                    .any(|needle| key.contains(needle));
-                match value {
-                    Value::Bool(true) if sharing => found.push(path),
-                    _ => sharing_keys(value, &path, found),
-                }
-            }
-        }
-        Value::Array(items) => items
-            .iter()
-            .for_each(|item| sharing_keys(item, path, found)),
+        Value::Object(map) => map.iter().for_each(|(key, value)| {
+            let path = format!("{path}.{key}");
+            found.push((path.clone(), value));
+            walk(value, &path, found);
+        }),
+        Value::Array(items) => items.iter().for_each(|item| walk(item, path, found)),
         _ => {}
     }
 }
 
-fn read_settings(settings: &Path) -> Value {
-    std::fs::read_to_string(settings)
+pub fn sharing_verdict(settings: Option<&str>) -> Result<Vec<String>, String> {
+    let settings = settings.ok_or("agy wrote no settings.json")?;
+    let value: Value = serde_json::from_str(settings)
         .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_else(|| json!({}))
-}
-
-fn refuse_data_sharing(settings: &Path) {
-    let mut on = Vec::new();
-    sharing_keys(&read_settings(settings), "", &mut on);
-    assert!(
-        on.is_empty(),
-        "data sharing looks on in {}: {on:?}; delete {} and run again",
-        settings.display(),
-        dir().display()
-    );
+        .filter(Value::is_object)
+        .ok_or("settings.json is not a JSON object")?;
+    let mut entries = Vec::new();
+    walk(&value, "", &mut entries);
+    let key = |path: &str| path.rsplit('.').next().unwrap_or_default().to_string();
+    let sharing_on: Vec<String> = entries
+        .iter()
+        .filter(|(path, value)| {
+            let key = key(path).to_lowercase();
+            **value == true
+                && ["shar", "telemetry", "improve", "usagestat"]
+                    .iter()
+                    .any(|needle| key.contains(needle))
+        })
+        .map(|(path, _)| path.clone())
+        .collect();
+    if !sharing_on.is_empty() {
+        return Err(format!("data sharing is on: {sharing_on:?}"));
+    }
+    let off: Vec<String> = entries
+        .iter()
+        .filter(|(path, value)| **value == false && SHARING_KEYS.contains(&key(path).as_str()))
+        .map(|(path, _)| path.clone())
+        .collect();
+    match off.is_empty() {
+        true => Err(format!(
+            "none of {SHARING_KEYS:?} is set to false, so data sharing is not known to be off"
+        )),
+        false => Ok(off),
+    }
 }
 
 fn set_statusline(settings: &Path) {
-    let mut value = read_settings(settings);
+    let mut value: Value =
+        serde_json::from_str(&std::fs::read_to_string(settings).unwrap()).unwrap();
     value["statusLine"] = json!({ "type": "command", "command": CAPTURE_STATUSLINE });
-    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     std::fs::write(settings, serde_json::to_string_pretty(&value).unwrap()).unwrap();
 }
 
-fn install_hookup(dir: &Path) {
-    let installed = template_command(dir, env!("CARGO_BIN_EXE_orch"))
+fn install_hookup(dir: &Path, isolation: &Isolation) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_orch"));
+    let installed = isolation
+        .apply(&mut command)
         .args(["agent", "install", "antigravity", "--yes"])
         .current_dir(dir.join("work"))
         .output()
         .unwrap();
     assert!(installed.status.success(), "{installed:?}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_selected_option_is_the_line_with_a_selection_marker() {
+        let screen =
+            "Help improve agy?\n> Quoted note\n  Yes, share usage data\n ❯ No, keep it off\n";
+
+        assert_eq!(selected_line(screen), Some(" ❯ No, keep it off"));
+        assert_eq!(selected_line("  >\n  plain\n"), None);
+    }
+
+    #[test]
+    fn an_option_reads_as_off_by_its_words_not_their_letters() {
+        assert!(is_off("❯ No, don't share"));
+        assert!(is_off("› Turn data sharing off"));
+        assert!(!is_off("❯ Yes, share now and help us know more"));
+    }
+
+    #[test]
+    fn data_sharing_counts_as_off_only_when_a_known_key_says_so() {
+        assert_eq!(
+            sharing_verdict(Some(r#"{"telemetryEnabled":false,"theme":"dark"}"#)),
+            Ok(vec![".telemetryEnabled".to_string()])
+        );
+        assert!(sharing_verdict(None).is_err());
+        assert!(sharing_verdict(Some("not json")).is_err());
+        assert!(sharing_verdict(Some(r#"{"theme":"dark"}"#)).is_err());
+        assert!(
+            sharing_verdict(Some(
+                r#"{"telemetryEnabled":false,"ux":{"shareCrashes":true}}"#
+            ))
+            .is_err()
+        );
+    }
 }
