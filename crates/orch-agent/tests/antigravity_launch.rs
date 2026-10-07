@@ -180,7 +180,7 @@ fn agy_output_without_a_result_event_has_no_draft() {
 }
 
 #[test]
-fn a_successful_agy_result_without_a_response_text_has_no_draft() {
+fn a_successful_agy_result_without_a_response_text_fails_as_an_empty_response() {
     for response in [None, Some(json!(42)), Some(json!(" \n"))] {
         let mut result = json!({ "conversation_id": CONVERSATION, "status": "SUCCESS" });
         if let Some(response) = &response {
@@ -188,7 +188,7 @@ fn a_successful_agy_result_without_a_response_text_has_no_draft() {
         }
         assert_eq!(
             Antigravity::default().decode_draft(&agy_output(result)),
-            DraftOutcome::NoResult,
+            DraftOutcome::Failed("agy returned an empty response".into()),
             "response {response:?}"
         );
     }
