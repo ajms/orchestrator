@@ -9,8 +9,8 @@ mod preset;
 mod shell;
 
 pub use agent::{
-    AgentAdapter, Argv, Capabilities, LaunchSpec, PayloadError, SubagentTranscripts, TitleWatch,
-    TranscriptRead, TranscriptReader, WorktreeRequest,
+    AgentAdapter, Argv, Capabilities, Draft, DraftInput, LaunchSpec, PayloadError,
+    SubagentTranscripts, TitleWatch, TranscriptRead, TranscriptReader, WorktreeRequest,
 };
 pub use antigravity::Antigravity;
 pub use built_in::{Adapter, built_in_names, by_name, with_binary};

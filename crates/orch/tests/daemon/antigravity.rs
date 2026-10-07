@@ -1,8 +1,8 @@
 use orch_agent::Antigravity;
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView as State, AgentUsageWindows, CreateSession, PhaseView, Reply, Request,
-    UsageWindowView,
+    AgentStateView as State, AgentUsageWindows, CreateSession, LandingMode, PhaseView, Reply,
+    Request, UsageWindowView,
 };
 use serde_json::{Value, json};
 
@@ -16,8 +16,10 @@ async fn antigravity_session(
     client: &mut TestClient,
     preset: &str,
 ) -> (SessionId, PaneView) {
+    let script = env.path("agy.script");
+    std::fs::write(&script, "draft -p\n").unwrap();
     env.write_config(&format!(
-        "[defaults.agents.antigravity]\nbinary = {:?}\nargs = [\"fake-agent\", \"--\"]\n",
+        "[defaults.agents.antigravity]\nbinary = {:?}\nargs = [\"fake-agent\", \"--script\", {script:?}, \"--\"]\n",
         env!("CARGO_BIN_EXE_orch")
     ));
     let installed = orch(env, &["agent", "install", "antigravity", "--yes"]).await;
@@ -221,4 +223,41 @@ async fn each_agy_quota_pool_shows_as_a_usage_window_of_the_agent() {
             ],
         }]]
     );
+}
+
+#[tokio::test]
+async fn agy_drafts_in_a_fresh_headless_run_fed_the_whole_diff_against_the_base() {
+    let env = Env::new();
+    let mut daemon = env.daemon_command(std::time::Duration::from_secs(600));
+    daemon.env("ORCH_SESSION", "outer-session");
+    let _daemon = env.spawn_daemon(&mut daemon).await;
+    let mut client = env.client().await;
+    let (id, mut pane) = antigravity_session(&env, &mut client, "edits").await;
+    tap(&mut pane, json!({ "agent_state": "idle" })).await;
+    until_state(&mut client, &id, State::Idle).await;
+    let worktree = client.sessions[&id].worktree.clone();
+    commit(&worktree, "committed.txt", "committed line\n");
+    std::fs::write(worktree.join("README.md"), "uncommitted line\n").unwrap();
+    std::fs::write(worktree.join("untracked.txt"), "untracked line\n").unwrap();
+
+    let drafted = client
+        .request(Request::Draft {
+            session: id.clone(),
+            mode: LandingMode::Squash,
+        })
+        .await;
+    let Ok(Reply::Drafted { title, body }) = drafted else {
+        panic!("no draft: {drafted:?}");
+    };
+
+    assert_eq!(title, "Drafted from nothing");
+    assert!(
+        body.starts_with("args: -p\nORCH_SESSION=<unset>\n"),
+        "{body}"
+    );
+    assert!(body.contains("commit message"), "{body}");
+    for change in ["+committed line", "+uncommitted line", "+untracked line"] {
+        assert!(body.contains(change), "{change} missing from {body}");
+    }
+    assert!(!pane.text().contains("Drafted"));
 }

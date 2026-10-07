@@ -1,12 +1,15 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
-use orch_agent::Argv;
+use orch_agent::{Argv, Draft, DraftInput};
 use orch_core::SessionId;
+use orch_holder::SESSION_ENV;
 use orch_protocol::{LandingMode, Reply, RequestError};
+use orch_store::SessionRecord;
 
 use crate::agents::installed_adapter;
-use crate::lifecycle::{PROMPT_FILE, refused, untrusted};
-use crate::state::Daemon;
+use crate::lifecycle::{PROMPT_FILE, refused, untrusted, with_git};
+use crate::state::{Daemon, session_worktree};
 use crate::subprocess;
 
 const DRAFT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -20,6 +23,24 @@ fn instruction(mode: LandingMode, base: &str) -> String {
             "Write a pull request title and description for all changes on this Branch compared with the Base branch {base}. Reply with the title only on the first line, a blank line, then the description in Markdown."
         ),
     }
+}
+
+async fn with_base_diff(
+    prompt: String,
+    repo: PathBuf,
+    record: &SessionRecord,
+) -> Result<String, RequestError> {
+    let worktree = session_worktree(record);
+    let diff = with_git(repo, move |git| {
+        let snapshot = git.review_snapshot(&worktree)?;
+        git.diff(&snapshot.merge_base, &snapshot.tree)
+    })
+    .await?
+    .map_err(refused)?;
+    Ok(format!(
+        "{prompt}\n\nThe changes are this diff against {}, so you need no tools:\n\n{diff}",
+        record.base
+    ))
 }
 
 fn split_draft(text: &str) -> Reply {
@@ -38,30 +59,31 @@ impl Daemon {
         mode: LandingMode,
     ) -> Result<Reply, RequestError> {
         let (record, repo) = self.snapshot(id).ok_or(RequestError::UnknownSession)?;
-        let Some(conversation) = record.latest_conversation().cloned() else {
-            return Ok(self.default_draft(id, &record.slug).await);
-        };
         let config = self.repo_config(&repo).await?;
         let agent = config
             .agent(&record.agent)
             .map_err(|_| untrusted(&repo, &config))?;
         let adapter = installed_adapter(&agent, &repo).map_err(refused)?;
-        let Some(Argv { program, args }) = adapter.draft(&conversation) else {
+        let Some(Draft {
+            argv: Argv { program, args },
+            input,
+        }) = adapter.draft(record.latest_conversation())
+        else {
             return Ok(self.default_draft(id, &record.slug).await);
         };
+        let mut prompt = instruction(mode, &record.base);
+        if input == DraftInput::InstructionAndBaseDiff {
+            prompt = with_base_diff(prompt, repo, &record).await?;
+        }
         let mut command = crate::subprocess::command(program);
         command
             .args(&agent.args)
             .args(args)
-            .current_dir(&record.worktree);
-        let drafted = subprocess::run(
-            command,
-            Some(instruction(mode, &record.base)),
-            DRAFT_TIMEOUT,
-            "the Agent's draft",
-        )
-        .await
-        .map_err(refused)?;
+            .current_dir(&record.worktree)
+            .env_remove(SESSION_ENV);
+        let drafted = subprocess::run(command, Some(prompt), DRAFT_TIMEOUT, "the Agent's draft")
+            .await
+            .map_err(refused)?;
         Ok(split_draft(&drafted))
     }
 

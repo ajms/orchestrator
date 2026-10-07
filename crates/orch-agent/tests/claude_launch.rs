@@ -1,4 +1,4 @@
-use orch_agent::{AgentAdapter, ClaudeCode, LaunchSpec, Preset, Presets, Rules};
+use orch_agent::{AgentAdapter, ClaudeCode, DraftInput, LaunchSpec, Preset, Presets, Rules};
 use orch_core::{ConversationId, PermissionMode, SessionId};
 use serde_json::Value;
 
@@ -182,13 +182,22 @@ fn resume_comes_back_in_the_given_mode_rather_than_the_presets() {
 #[test]
 fn draft_forks_the_conversation_in_print_mode_without_our_hooks() {
     let draft = ClaudeCode::default()
-        .draft(&conversation())
+        .draft(Some(&conversation()))
         .expect("claude can draft");
-    assert_eq!(draft.program, "claude");
-    assert!(draft.args.contains(&"-p".to_string()));
-    assert!(draft.args.contains(&"--fork-session".to_string()));
-    assert_eq!(flag(&draft.args, "--resume"), Some(conversation().as_str()));
-    assert_eq!(flag(&draft.args, "--settings"), None);
+    assert_eq!(draft.argv.program, "claude");
+    assert!(draft.argv.args.contains(&"-p".to_string()));
+    assert!(draft.argv.args.contains(&"--fork-session".to_string()));
+    assert_eq!(
+        flag(&draft.argv.args, "--resume"),
+        Some(conversation().as_str())
+    );
+    assert_eq!(flag(&draft.argv.args, "--settings"), None);
+    assert_eq!(draft.input, DraftInput::Instruction);
+}
+
+#[test]
+fn claude_cannot_draft_before_it_has_a_conversation() {
+    assert_eq!(ClaudeCode::default().draft(None), None);
 }
 
 #[test]

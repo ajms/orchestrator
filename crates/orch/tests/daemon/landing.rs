@@ -210,12 +210,18 @@ async fn the_agent_drafts_messages_in_a_forked_side_conversation() {
     let (id, mut pane) = idle_session(&env, &mut client, "Draft me").await;
     pane.type_line("print before-draft").await;
     pane.wait_for_text("before-draft").await;
+    std::fs::write(
+        client.sessions[&id].worktree.join("untracked.txt"),
+        "untracked line\n",
+    )
+    .unwrap();
     client.history.clear();
 
     let (title, body) = draft(&mut client, &id, LandingMode::Squash).await;
     assert_eq!(title, "Drafted from conv-1");
     assert!(body.contains("-p --resume conv-1 --fork-session"), "{body}");
     assert!(body.contains("commit message"), "{body}");
+    assert!(!body.contains("untracked line"), "{body}");
 
     let (_, body) = draft(&mut client, &id, LandingMode::Pr).await;
     assert!(body.contains("pull request"), "{body}");

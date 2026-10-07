@@ -1,4 +1,4 @@
-use orch_agent::{AgentAdapter, Antigravity, LaunchSpec, Preset, Presets};
+use orch_agent::{AgentAdapter, Antigravity, DraftInput, LaunchSpec, Preset, Presets};
 use orch_core::{ConversationId, PermissionMode, SessionId};
 
 const CONVERSATION: &str = "3c1e9a40-7d52-4b8e-a6f1-2d9b0c4e7a13";
@@ -90,4 +90,15 @@ fn antigravity_offers_only_the_modes_agy_can_launch() {
         .map(|preset| preset.name.as_str())
         .collect();
     assert_eq!(offered, ["plan", "ask", "edits", "inherit"]);
+}
+
+#[test]
+fn draft_runs_a_fresh_headless_agy_fed_the_base_diff_whatever_the_conversation() {
+    let conversation = ConversationId(CONVERSATION.into());
+    for latest in [Some(&conversation), None] {
+        let draft = Antigravity::default().draft(latest).expect("agy drafts");
+        assert_eq!(draft.argv.program, "agy");
+        assert_eq!(draft.argv.args, ["-p"]);
+        assert_eq!(draft.input, DraftInput::InstructionAndBaseDiff);
+    }
 }
