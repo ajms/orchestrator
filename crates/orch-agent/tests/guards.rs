@@ -96,6 +96,49 @@ fn file_writes_outside_the_worktree_ask_with_the_resolved_path() {
 }
 
 #[test]
+fn redirections_the_shell_reads_as_writes_are_seen_as_writes() {
+    assert_asks(&[
+        (
+            "git status >&/etc/passwd",
+            GuardKind::WriteOutsideWorktree,
+            "/etc/passwd",
+        ),
+        (
+            "git status >\\\n/etc/passwd",
+            GuardKind::WriteOutsideWorktree,
+            "/etc/passwd",
+        ),
+        (
+            "echo hi >| /etc/passwd",
+            GuardKind::WriteOutsideWorktree,
+            "/etc/passwd",
+        ),
+    ]);
+    assert_allowed(&["git status >&2", "git status 2>&1", "git status >&-"]);
+}
+
+#[test]
+fn a_line_continuation_does_not_hide_a_command() {
+    assert_asks(&[("git che\\\nckout main", GuardKind::BaseBranch, "main")]);
+}
+
+#[test]
+fn commands_inside_substitutions_are_seen_even_with_quoted_parentheses() {
+    assert_asks(&[
+        (
+            "echo $(echo \")\"; git checkout main)",
+            GuardKind::BaseBranch,
+            "main",
+        ),
+        (
+            "echo `echo '\\`'; git checkout main`",
+            GuardKind::BaseBranch,
+            "main",
+        ),
+    ]);
+}
+
+#[test]
 fn an_external_tool_asks_on_first_use_and_an_allowance_covers_only_that_tool() {
     let create_issue = "mcp__github__create_issue";
     assert_eq!(

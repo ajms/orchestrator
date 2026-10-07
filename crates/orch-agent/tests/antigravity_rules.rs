@@ -150,6 +150,85 @@ fn a_deny_rule_sees_through_wrappers_paths_keywords_and_nested_shells() {
 }
 
 #[test]
+fn a_deny_rule_sees_through_more_wrappers_their_flags_and_scripts() {
+    for line in [
+        "command -p git push",
+        "time -p git push",
+        "sudo -iu root git push",
+        "exec -a x git push",
+        "eval 'git push'",
+        "eval git push",
+        "xargs -n 1 git push",
+        "timeout -s KILL 10 git push",
+        "stdbuf -oL git push",
+        "setsid git push",
+        "coproc git push",
+        "nice -n 5 git push",
+        "env -S 'git push'",
+        "deploy() { git push; }",
+        "function deploy { git push; }",
+        "git -C /tmp/other push",
+        "git -c user.name=x push",
+        "git --git-dir=/tmp/x/.git --work-tree=/tmp/x push",
+        "g\\\nit push",
+        "echo $(echo \")\"; git push)",
+    ] {
+        assert!(denies("command(git push)", shell(line)), "{line}");
+    }
+}
+
+#[test]
+fn an_allowed_command_line_cannot_redirect_through_a_dup_or_a_line_continuation() {
+    for line in [
+        "git status >&/etc/passwd",
+        "git status >\\\n/etc/passwd",
+        "git status >| /etc/passwd",
+    ] {
+        assert!(!allows("command(git status)", shell(line)), "{line}");
+    }
+    assert!(allows("command(git status)", shell("git status 2>&1")));
+}
+
+#[test]
+fn a_cd_other_than_into_one_static_directory_ends_the_allowed_line() {
+    let rules = preset(Antigravity::NAME, &["command(*)", "write_file(notes)"], &[]);
+    for line in [
+        "cd && echo x > notes/a",
+        "cd -P /etc && echo x > notes/a",
+        "pushd /etc && echo x > notes/a",
+        "popd && echo x > notes/a",
+    ] {
+        assert_eq!(verdict(&rules, shell(line)), None, "{line}");
+    }
+    assert_eq!(
+        verdict(&rules, shell("cd src && echo x > ../notes/a")),
+        allowed_by("command(*)")
+    );
+}
+
+#[test]
+fn an_allow_rule_never_covers_git_options_that_run_or_write_elsewhere() {
+    for line in [
+        "git -c core.pager=sh status",
+        "git log --output=/etc/passwd",
+        "git fetch --upload-pack=evil",
+        "git rebase --exec 'rm -rf src'",
+        "git --exec-path=/tmp status",
+    ] {
+        assert!(!allows("command(git)", shell(line)), "{line}");
+    }
+}
+
+#[test]
+fn write_file_allow_rules_leave_the_git_dir_alone_unless_they_name_it() {
+    assert!(!allows("write_file(*)", write(".git/hooks/pre-commit")));
+    assert!(!allows("write_file(**)", write(".git/config")));
+    assert!(!allows("write_file(src)", write("src/.git/config")));
+    assert!(allows("write_file(.git/info)", write(".git/info/exclude")));
+    assert!(denies("write_file(**)", write(".git/config")));
+}
+
+#[test]
 fn a_write_file_rule_covers_a_path_and_everything_under_it() {
     assert!(allows("write_file(*)", write("/etc/hosts")));
     assert!(allows(
@@ -245,11 +324,18 @@ fn a_mcp_rule_names_a_server_and_a_tool() {
     let home = AgyHome::with_servers(&["chrome-devtools", "github"]);
     let snapshot = "mcp_chrome_devtools_take_memory_snapshot";
     assert!(home.allows("mcp(chrome-devtools/take_memory_snapshot)", snapshot));
-    assert!(home.allows("mcp(chrome-devtools/*)", snapshot));
+    assert!(home.allows("mcp(chrome-devtools/*)", "mcp_chrome_devtools_navigate"));
     assert!(home.allows("mcp(*)", snapshot));
     assert!(!home.allows("mcp(chrome-devtools/navigate_page)", snapshot));
     assert!(!home.allows("mcp(github/*)", snapshot));
     assert!(!home.allows("mcp(*)", "open_browser_url"));
+}
+
+#[test]
+fn a_mcp_server_wildcard_never_allows_a_tool_an_unseen_longer_server_could_own() {
+    let home = AgyHome::with_servers(&["chrome"]);
+    assert!(!home.allows("mcp(chrome/*)", "mcp_chrome_devtools_take_memory_snapshot"));
+    assert!(home.allows("mcp(chrome/*)", "mcp_chrome_navigate"));
 }
 
 #[test]

@@ -97,16 +97,19 @@ impl Parser {
         }
     }
 
+    fn escaped(&mut self, chars: &mut Peekable<Chars>) {
+        match chars.next() {
+            Some('\n') | None => {}
+            Some(escaped) => self.push(escaped),
+        }
+    }
+
     fn double_quoted(&mut self, chars: &mut Peekable<Chars>) {
         self.word();
         while let Some(c) = chars.next() {
             match c {
                 '"' => break,
-                '\\' => {
-                    if let Some(escaped) = chars.next() {
-                        self.push(escaped);
-                    }
-                }
+                '\\' => self.escaped(chars),
                 '$' | '`' => self.expansion(c, chars),
                 c => self.push(c),
             }
@@ -116,21 +119,65 @@ impl Parser {
     fn expansion(&mut self, c: char, chars: &mut Peekable<Chars>) {
         self.push_dynamic();
         let nested = match c {
-            '`' => Some(chars.by_ref().take_while(|&c| c != '`').collect()),
+            '`' => Some(backticks(chars)),
             _ if chars.peek() == Some(&'(') => Some(substitution(chars)),
             _ => None,
         };
         self.current.nested.extend(nested);
     }
+
+    fn duplication(&mut self, chars: &mut Peekable<Chars>) {
+        let mut target = String::new();
+        while let Some(digit) = chars.next_if(char::is_ascii_digit) {
+            target.push(digit);
+        }
+        let ends_word =
+            |c: Option<&char>| c.is_none_or(|c| c.is_whitespace() || ";&|<>()".contains(*c));
+        let closes = target.is_empty() && eat(chars, '-');
+        let duplicates = closes || !target.is_empty() && ends_word(chars.peek());
+        self.start_redirect(if duplicates {
+            Redirect::Ignore
+        } else {
+            Redirect::Write
+        });
+        for c in target.chars() {
+            self.push(c);
+        }
+        if closes {
+            self.push('-');
+        }
+    }
+}
+
+fn copy_quoted(chars: &mut Peekable<Chars>, inner: &mut String, quote: char) {
+    while let Some(c) = chars.next() {
+        inner.push(c);
+        if c == quote {
+            break;
+        }
+        if c == '\\'
+            && quote == '"'
+            && let Some(escaped) = chars.next()
+        {
+            inner.push(escaped);
+        }
+    }
 }
 
 fn substitution(chars: &mut Peekable<Chars>) -> String {
-    let mut depth = 0;
+    chars.next();
+    let mut depth = 1;
     let mut inner = String::new();
-    for c in chars.by_ref() {
+    while let Some(c) = chars.next() {
         match c {
-            '(' if depth == 0 => {
-                depth = 1;
+            '\\' => {
+                inner.push(c);
+                inner.extend(chars.next());
+                continue;
+            }
+            '\'' | '"' => {
+                inner.push(c);
+                copy_quoted(chars, &mut inner, c);
                 continue;
             }
             '(' => depth += 1,
@@ -139,6 +186,25 @@ fn substitution(chars: &mut Peekable<Chars>) -> String {
             _ => {}
         }
         inner.push(c);
+    }
+    inner
+}
+
+fn backticks(chars: &mut Peekable<Chars>) -> String {
+    let mut inner = String::new();
+    while let Some(c) = chars.next() {
+        match c {
+            '`' => break,
+            '\\' => match chars.next() {
+                Some(escaped @ ('`' | '$' | '\\')) => inner.push(escaped),
+                Some(other) => {
+                    inner.push('\\');
+                    inner.push(other);
+                }
+                None => {}
+            },
+            c => inner.push(c),
+        }
     }
     inner
 }
@@ -154,20 +220,17 @@ pub(crate) fn parse(script: &str) -> Vec<SimpleCommand> {
         match c {
             '\'' => parser.single_quoted(&mut chars),
             '"' => parser.double_quoted(&mut chars),
-            '\\' => {
-                if let Some(escaped) = chars.next() {
-                    parser.push(escaped);
-                }
-            }
+            '\\' => parser.escaped(&mut chars),
             '$' | '`' => parser.expansion(c, &mut chars),
             '>' => {
-                eat(&mut chars, '>');
-                let duplicates_fd = eat(&mut chars, '&');
-                parser.start_redirect(if duplicates_fd {
-                    Redirect::Ignore
+                if !eat(&mut chars, '>') {
+                    eat(&mut chars, '|');
+                }
+                if eat(&mut chars, '&') {
+                    parser.duplication(&mut chars);
                 } else {
-                    Redirect::Write
-                });
+                    parser.start_redirect(Redirect::Write);
+                }
             }
             '&' if eat(&mut chars, '>') => {
                 eat(&mut chars, '>');

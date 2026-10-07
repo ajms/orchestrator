@@ -86,9 +86,6 @@ pub fn evaluate_guard(
     cwd: Option<&Path>,
     context: &GuardContext,
 ) -> GuardDecision {
-    if *action == GuardedAction::Unreadable {
-        return GuardDecision::Unreadable;
-    }
     if !context.enabled {
         return GuardDecision::Allow;
     }
@@ -104,7 +101,7 @@ pub fn evaluate_guard(
             kind: GuardKind::ExternalTool,
             target: name.clone(),
         }],
-        GuardedAction::Unreadable => Vec::new(),
+        GuardedAction::Unreadable => return GuardDecision::Unreadable,
     };
     hits.into_iter()
         .find(|hit| !context.allowed.contains(hit))

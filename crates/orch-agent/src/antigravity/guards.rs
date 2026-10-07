@@ -22,22 +22,22 @@ pub(super) const MCP_PREFIX: &str = "mcp_";
 
 pub(super) fn guard_check(tool: &str, args: &Value) -> Option<AgentEvent> {
     let field = |key: &str| args.get(key).and_then(Value::as_str).map(String::from);
-    let readable = |action: Option<GuardedAction>| action.unwrap_or(GuardedAction::Unreadable);
+    let or_unreadable = |action: Option<GuardedAction>| action.unwrap_or(GuardedAction::Unreadable);
     let (action, cwd) = match tool {
         _ if WRITE_TOOLS.contains(&tool) => {
             let path = PATH_FIELDS.iter().find_map(|key| field(key));
             (
-                readable(path.map(|path| GuardedAction::WriteFile { path })),
+                or_unreadable(path.map(|path| GuardedAction::WriteFile { path })),
                 None,
             )
         }
         "run_command" => {
             let command = field("CommandLine").map(|command| GuardedAction::Shell { command });
-            (readable(command), field("Cwd"))
+            (or_unreadable(command), field("Cwd"))
         }
         "send_command_input" => {
             let command = field("Input").map(|command| GuardedAction::Shell { command });
-            (readable(command), None)
+            (or_unreadable(command), None)
         }
         _ if is_external(tool) => (GuardedAction::ExternalTool { name: tool.into() }, None),
         _ => return None,
