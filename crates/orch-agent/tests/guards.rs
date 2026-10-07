@@ -353,6 +353,21 @@ fn pushing_to_the_base_branch_or_other_refs_asks() {
         ("git push origin ma{in,x}", GuardKind::BaseBranch, "main"),
         ("git push \"$REMOTE\" main", GuardKind::BaseBranch, "main"),
         (
+            "sudo -u root git push origin main",
+            GuardKind::BaseBranch,
+            "main",
+        ),
+        (
+            "if git push origin main; then :; fi",
+            GuardKind::BaseBranch,
+            "main",
+        ),
+        (
+            "git --config-env core.x=X push origin main",
+            GuardKind::BaseBranch,
+            "main",
+        ),
+        (
             "git push origin v1.2.0:refs/tags/v1.2.0",
             GuardKind::OtherRef,
             "refs/tags/v1.2.0",

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use super::invocations::GIT_GLOBALS_WITH_VALUES;
 use super::shell::Word;
 use super::{GuardHit, GuardKind, GuardScope, other_ref, paths};
 
@@ -133,7 +134,7 @@ pub(super) fn hits(scope: &GuardScope, cwd: &Path, args: &[&Word]) -> Vec<GuardH
                     git_cwd = dir;
                 }
             }
-            "-c" | "--git-dir" | "--work-tree" | "--namespace" => {
+            option if GIT_GLOBALS_WITH_VALUES.contains(&option) => {
                 words.next();
             }
             option if option.starts_with('-') => {}

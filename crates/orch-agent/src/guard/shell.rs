@@ -2,6 +2,8 @@ use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::str::Chars;
 
+use super::invocations;
+
 const MAX_CANDIDATES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,13 +75,30 @@ pub(crate) struct SimpleCommand {
     pub nested: Vec<String>,
 }
 
+pub(crate) enum DirectoryChange<'w> {
+    Into(&'w Word),
+    Unknown,
+}
+
 impl SimpleCommand {
     pub(crate) fn invocation(&self) -> Vec<&Word> {
-        const WRAPPERS: [&str; 6] = ["env", "sudo", "command", "exec", "nohup", "time"];
-        self.words
-            .iter()
-            .skip_while(|word| word.text.contains('=') || WRAPPERS.contains(&word.text.as_str()))
-            .collect()
+        let texts: Vec<&str> = self.words.iter().map(|word| word.text.as_str()).collect();
+        let start = invocations::program_start(&texts, &mut Vec::new());
+        self.words[start..].iter().collect()
+    }
+
+    pub(crate) fn directory_change(&self) -> Option<DirectoryChange<'_>> {
+        let words = self.invocation();
+        let (program, args) = words.split_first()?;
+        let mut operands = args.iter().filter(|word| !word.text.starts_with('-'));
+        match program.text.as_str() {
+            "cd" | "pushd" => Some(match (operands.next(), operands.next()) {
+                (Some(dir), None) if !dir.dynamic => DirectoryChange::Into(dir),
+                _ => DirectoryChange::Unknown,
+            }),
+            "popd" => Some(DirectoryChange::Unknown),
+            _ => None,
+        }
     }
 }
 

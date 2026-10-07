@@ -1,5 +1,6 @@
 mod gh;
 mod git;
+pub(crate) mod invocations;
 pub(crate) mod paths;
 pub(crate) mod shell;
 
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::RuleVerdict;
 
-use shell::{SimpleCommand, Word};
+use shell::{DirectoryChange, SimpleCommand, Word};
 
 pub const GUARD_WAIT_SECS: u64 = 7 * 24 * 60 * 60;
 
@@ -109,19 +110,6 @@ pub fn evaluate_guard(
         .map_or(GuardDecision::Allow, GuardDecision::Ask)
 }
 
-fn loses_directory(command: &SimpleCommand) -> bool {
-    let words = command.invocation();
-    let Some((program, args)) = words.split_first() else {
-        return false;
-    };
-    let operand = args.iter().find(|word| !word.text.starts_with('-'));
-    match program.text.as_str() {
-        "cd" | "pushd" => operand.is_none_or(|dir| dir.dynamic),
-        "popd" => true,
-        _ => false,
-    }
-}
-
 fn other_ref(target: &str) -> GuardHit {
     GuardHit {
         kind: GuardKind::OtherRef,
@@ -214,8 +202,12 @@ impl<'a> GuardScope<'a> {
             for nested in &command.nested {
                 hits.extend(self.bash(&cwd, nested));
             }
-            hits.extend(self.simple_command(&mut cwd, &command));
-            lost |= loses_directory(&command);
+            hits.extend(self.simple_command(&cwd, &command));
+            match command.directory_change() {
+                Some(DirectoryChange::Into(dir)) => cwd = paths::resolve(&cwd, &dir.text),
+                Some(DirectoryChange::Unknown) => lost = true,
+                None => {}
+            }
             if !cwds.contains(&cwd) {
                 cwds.push(cwd.clone());
             }
@@ -234,7 +226,7 @@ impl<'a> GuardScope<'a> {
         cwds.iter().find_map(|cwd| self.write(cwd, &target.text))
     }
 
-    fn simple_command(&self, cwd: &mut PathBuf, command: &SimpleCommand) -> Vec<GuardHit> {
+    fn simple_command(&self, cwd: &Path, command: &SimpleCommand) -> Vec<GuardHit> {
         let words = command.invocation();
         let Some((program, args)) = words.split_first() else {
             return Vec::new();
@@ -245,12 +237,6 @@ impl<'a> GuardScope<'a> {
             .filter(|word| !word.text.starts_with('-'))
             .collect();
         match program.text.rsplit('/').next().unwrap_or_default() {
-            "cd" | "pushd" => {
-                if let Some(dir) = operands.first().filter(|dir| !dir.dynamic) {
-                    *cwd = paths::resolve(cwd, &dir.text);
-                }
-                Vec::new()
-            }
             "touch" | "mkdir" | "rm" | "rmdir" | "tee" | "mv" | "truncate" => {
                 self.written(cwd, &operands)
             }
