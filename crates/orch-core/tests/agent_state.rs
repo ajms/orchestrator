@@ -213,3 +213,64 @@ fn an_adopted_agent_resumes_from_its_persisted_state() {
     status.feed_event(AgentEvent::PromptSubmitted);
     assert_eq!(status.agent_state(), Some(AgentState::Idle));
 }
+
+#[test]
+fn ready_before_the_first_turn_settles_the_agent_as_idle() {
+    let mut status = starting_session();
+    status.feed_event(AgentEvent::Ready);
+    assert_eq!(status.agent_state(), Some(AgentState::Idle));
+
+    let mut status = starting_session();
+    status.feed_event(AgentEvent::PermissionRequested);
+    status.feed(Observation::UserInput);
+    status.feed_event(AgentEvent::Ready);
+    assert_eq!(status.agent_state(), Some(AgentState::Idle));
+}
+
+#[test]
+fn ready_after_a_turn_began_keeps_the_agent_state() {
+    let mut status = starting_session();
+    status.feed_event(AgentEvent::PromptSubmitted);
+    status.feed_event(AgentEvent::Ready);
+    assert_eq!(status.agent_state(), Some(AgentState::Working));
+
+    status.feed_event(AgentEvent::Failed {
+        kind: FailureKind::Other("error".into()),
+    });
+    status.feed_event(AgentEvent::Ready);
+    assert_eq!(status.agent_state(), Some(AgentState::Errored));
+}
+
+#[test]
+fn a_respawned_agent_can_be_ready_again() {
+    let mut status = working_session();
+    status.feed(Observation::Exited { code: Some(0) });
+    status.feed(Observation::Spawned);
+    status.feed_event(AgentEvent::Ready);
+    assert_eq!(status.agent_state(), Some(AgentState::Idle));
+}
+
+#[test]
+fn a_cleared_permission_prompt_leaves_needs_input() {
+    let mut status = working_session();
+    status.feed_event(AgentEvent::PermissionRequested);
+    status.feed_event(AgentEvent::PermissionCleared);
+    assert_eq!(status.agent_state(), Some(AgentState::Working));
+}
+
+#[test]
+fn a_cleared_permission_prompt_leaves_questions_guards_and_other_states_alone() {
+    let mut asked = working_session();
+    asked.feed_event(AgentEvent::PermissionRequested);
+    asked.feed_event(AgentEvent::QuestionAsked);
+    let mut guarded = working_session();
+    guarded.feed(Observation::GuardPrompted);
+    for mut status in [asked, guarded] {
+        status.feed_event(AgentEvent::PermissionCleared);
+        assert_eq!(status.agent_state(), Some(AgentState::NeedsInput));
+    }
+
+    let mut status = idle_session();
+    status.feed_event(AgentEvent::PermissionCleared);
+    assert_eq!(status.agent_state(), Some(AgentState::Idle));
+}

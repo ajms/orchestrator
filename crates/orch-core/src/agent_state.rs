@@ -39,6 +39,16 @@ impl AgentState {
             | AgentEvent::PermissionDenied => AgentState::Working,
             AgentEvent::PermissionRequested | AgentEvent::QuestionAsked => AgentState::NeedsInput,
             AgentEvent::Failed { .. } => AgentState::Errored,
+            AgentEvent::Ready => match self {
+                AgentState::Starting | AgentState::NeedsInput | AgentState::Working => {
+                    AgentState::Idle
+                }
+                other => other,
+            },
+            AgentEvent::PermissionCleared => match self {
+                AgentState::NeedsInput => AgentState::Working,
+                other => other,
+            },
             AgentEvent::ModeChanged { .. }
             | AgentEvent::ConversationChanged { .. }
             | AgentEvent::TitleChanged { .. }

@@ -1,4 +1,6 @@
-use orch_agent::{AgentAdapter, Argv, Capabilities, ClaudeCode, LaunchSpec, Preset, Presets};
+use orch_agent::{
+    AgentAdapter, Antigravity, Argv, Capabilities, ClaudeCode, LaunchSpec, Preset, Presets,
+};
 use orch_core::{AgentState, ConversationId, Observation, PermissionMode, PhaseEvent, SessionId};
 use std::time::Instant;
 
@@ -91,6 +93,16 @@ fn claude_restarts_by_resuming_the_latest_conversation() {
         claude.restart(&spec(edits()), None, mode),
         claude.launch(&spec(edits()))
     );
+}
+
+#[test]
+fn an_antigravity_session_is_observed_and_runs_its_preset() {
+    let capabilities = Antigravity::default().capabilities();
+    let mut status = capabilities.session_status();
+    status.transition(PhaseEvent::SetupSucceeded).unwrap();
+    status.observe(Observation::Spawned, Instant::now());
+    assert_eq!(status.agent_state(), Some(AgentState::Starting));
+    assert_eq!(capabilities.effective_preset(edits()), edits());
 }
 
 #[test]

@@ -12,11 +12,6 @@ use orch_holder::SESSION_ENV;
 use crate::subprocess::run_with_input;
 
 pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
-    if agent_args.iter().any(|arg| arg == "-p") {
-        return draft(agent_args);
-    }
-    disable_echo();
-    announce(agent_args);
     let scripted = match script.map(std::fs::read_to_string).transpose() {
         Ok(text) => text.unwrap_or_default(),
         Err(err) => {
@@ -24,6 +19,11 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Some(conversation_flag) = draft_request(&scripted, agent_args) {
+        return draft(agent_args, conversation_flag);
+    }
+    disable_echo();
+    announce(agent_args);
     for line in scripted.lines() {
         if let Some(code) = execute(line) {
             return code;
@@ -40,12 +40,23 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn draft(agent_args: &[String]) -> ExitCode {
+fn draft_request<'a>(script: &'a str, agent_args: &[String]) -> Option<Option<&'a str>> {
+    script.lines().find_map(|line| {
+        let mut words = line.strip_prefix("draft ")?.split_whitespace();
+        let flag = words.next()?;
+        agent_args
+            .iter()
+            .any(|arg| arg == flag)
+            .then(|| words.next())
+    })
+}
+
+fn draft(agent_args: &[String], conversation_flag: Option<&str>) -> ExitCode {
     let mut instruction = String::new();
     let _ = std::io::stdin().read_to_string(&mut instruction);
     let conversation = agent_args
         .iter()
-        .skip_while(|arg| *arg != "--resume")
+        .skip_while(|arg| Some(arg.as_str()) != conversation_flag)
         .nth(1)
         .map_or("nothing", String::as_str);
     print!(
@@ -60,16 +71,18 @@ fn announce(agent_args: &[String]) {
     let mut args = agent_args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--settings" => {
-                args.next();
-            }
             "--" => {
                 let prompt: Vec<&str> = args.by_ref().map(String::as_str).collect();
                 say(&format!("prompt> {}", prompt.join(" ")));
             }
-            flag if flag.starts_with("--") => {
+            flag if flag.len() > 1 && flag.starts_with('-') => {
                 let value = args.next().map_or("", String::as_str);
-                say(&format!("{}> {value}", &flag[2..]));
+                let value = if value.starts_with('{') {
+                    "{…}"
+                } else {
+                    value
+                };
+                say(&format!("{}> {value}", flag.trim_start_matches('-')));
             }
             other => say(&format!("arg> {other}")),
         }
@@ -88,7 +101,7 @@ fn execute(line: &str) -> Option<ExitCode> {
     let line = line.trim_end_matches('\r');
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     match command {
-        "" => {}
+        "" | "draft" => {}
         "print" => say(&unescape(rest)),
         "lines" => {
             let (count, prefix) = rest.split_once(' ').unwrap_or((rest, "line"));
@@ -194,14 +207,13 @@ fn run_orch_subcommand(subcommand: &str, rest: &str) -> String {
     let orch = std::env::current_exe().unwrap_or_else(|_| "orch".into());
     let mut command = Command::new(orch);
     command.args([subcommand, "--session", &session]);
-    let payload = match rest.strip_prefix("--agent ") {
-        Some(rest) => {
-            let (agent, payload) = rest.split_once(' ').unwrap_or((rest, ""));
-            command.args(["--agent", agent]);
-            payload
-        }
-        None => rest,
-    };
+    let mut payload = rest;
+    while let Some(flagged) = payload.strip_prefix("--") {
+        let (flag, after) = flagged.split_once(' ').unwrap_or((flagged, ""));
+        let (value, after) = after.split_once(' ').unwrap_or((after, ""));
+        command.arg(format!("--{flag}")).arg(value);
+        payload = after;
+    }
     run_with_input(&mut command, payload.as_bytes(), None)
         .map(|output| String::from_utf8_lossy(&output).into_owned())
         .unwrap_or_else(|| "<failed>".into())

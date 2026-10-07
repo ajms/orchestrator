@@ -42,6 +42,8 @@ enum Command {
         agent: String,
         #[arg(long)]
         session: Option<String>,
+        #[arg(long)]
+        event: Option<String>,
     },
     #[command(subcommand)]
     Repo(repo::RepoCommand),
@@ -68,9 +70,11 @@ fn main() -> ExitCode {
         Some(Command::Daemon(args)) => daemon::run(args),
         Some(Command::Doctor(args)) => doctor::run(args),
         Some(Command::Hold(args)) => hold::run(args),
-        Some(Command::Hook { agent, session }) => {
-            hook::run(&agent, session_or_env(session).as_deref())
-        }
+        Some(Command::Hook {
+            agent,
+            session,
+            event,
+        }) => hook::run(&agent, session_or_env(session).as_deref(), event.as_deref()),
         Some(Command::Repo(command)) => repo::run(command),
         Some(Command::Tap { agent, session }) => {
             tap::run(&agent, session_or_env(session).as_deref())

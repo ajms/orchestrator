@@ -1,6 +1,6 @@
 # A daemon plus one holder process per Session, not tmux
 
-Sessions must outlive the TUI, and embedded Agents (ADR 0001) need a process that owns their PTY. Each Agent therefore runs under its own small Holder process. The Holder owns the PTY, a terminal emulator with scrollback, and a local socket, and it buffers hook events. A single Daemon owns everything else: SQLite state (it is the only writer), hook routing, PR polling, Port blocks, and relaying screens to any number of TUI Clients over a Unix socket. Because of the Holders, the daemon can crash or be upgraded without killing Agents; only a reboot suspends them, and they come back through `claude --resume`.
+Sessions must outlive the TUI, and embedded Agents (ADR 0001) need a process that owns their PTY. Each Agent therefore runs under its own small Holder process. The Holder owns the PTY, a terminal emulator with scrollback, and a local socket, and it buffers hook events. A single Daemon owns everything else: SQLite state (it is the only writer), hook routing, PR polling, Port blocks, and relaying screens to any number of TUI Clients over a Unix socket. Because of the Holders, the daemon can crash or be upgraded without killing Agents; only a reboot suspends them, and they come back through the Agent's own resume (e.g. `claude --resume`, `agy --conversation`).
 
 ## Considered options
 
