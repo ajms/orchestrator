@@ -163,6 +163,14 @@ fn a_pool_orch_does_not_know_is_labelled_by_its_name() {
 }
 
 #[test]
+fn a_null_remaining_fraction_keeps_its_pool_as_fully_used() {
+    assert_eq!(
+        windows_of(r#"{"gemini-weekly":{"remaining_fraction":null}}"#),
+        [unscheduled("gemini-weekly", "gemini-wk", 100.0)]
+    );
+}
+
+#[test]
 fn a_remaining_fraction_outside_zero_to_one_stays_within_zero_to_a_hundred_percent() {
     assert_eq!(
         windows_of(

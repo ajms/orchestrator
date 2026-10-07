@@ -32,7 +32,7 @@ struct ContextWindow {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct Pool {
-    remaining_fraction: f64,
+    remaining_fraction: Option<f64>,
     reset_time: Option<String>,
 }
 
@@ -68,7 +68,8 @@ fn window((name, pool): (String, Value)) -> Option<UsageWindow> {
     let pool: Pool = serde_json::from_value(pool).ok()?;
     Some(UsageWindow {
         label: label(&name).into(),
-        used_percent: (100.0 - pool.remaining_fraction * 100.0).clamp(0.0, 100.0),
+        used_percent: (100.0 - pool.remaining_fraction.unwrap_or_default() * 100.0)
+            .clamp(0.0, 100.0),
         resets_at_unix: pool
             .reset_time
             .and_then(|at| OffsetDateTime::parse(&at, &Rfc3339).ok())
