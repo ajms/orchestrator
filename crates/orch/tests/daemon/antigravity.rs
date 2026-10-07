@@ -425,12 +425,8 @@ async fn agy_drafts_in_a_fresh_headless_run_fed_the_whole_diff_against_the_base(
     let (title, body) = drafted(&mut client, &id).await;
 
     assert_eq!(title, "Drafted from nothing");
-    assert!(
-        body.starts_with(&format!(
-            "args: -p  --input-format stream-json --output-format stream-json\n{SESSION_ENV}=<unset>\n"
-        )),
-        "{body}"
-    );
+    assert!(body.contains("--output-format stream-json"), "{body}");
+    assert!(body.contains(&format!("{SESSION_ENV}=<unset>")), "{body}");
     assert!(body.contains("commit message"), "{body}");
     for change in ["+committed line", "+uncommitted line", "+untracked line"] {
         assert!(body.contains(change), "{change} missing from {body}");

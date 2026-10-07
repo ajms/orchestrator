@@ -87,19 +87,22 @@ impl<'a> DraftRequest<'a> {
             print!("{drafted}");
             return ExitCode::SUCCESS;
         }
-        let result = match self.error {
-            Some(error) => json!({ "status": "ERROR", "error": error }),
-            None => json!({ "status": "SUCCESS", "response": drafted }),
+        let (result, exit) = match self.error {
+            Some(error) => {
+                eprintln!("fake-agent: the draft failed");
+                (
+                    json!({ "status": "ERROR", "error": error }),
+                    ExitCode::FAILURE,
+                )
+            }
+            None => (
+                json!({ "status": "SUCCESS", "response": drafted }),
+                ExitCode::SUCCESS,
+            ),
         };
         println!("{}", json!({ "event": "init", "conversation_id": "draft" }));
         println!("{}", json!({ "event": "result", "result": result }));
-        match self.error {
-            Some(_) => {
-                eprintln!("fake-agent: the draft failed");
-                ExitCode::FAILURE
-            }
-            None => ExitCode::SUCCESS,
-        }
+        exit
     }
 }
 
