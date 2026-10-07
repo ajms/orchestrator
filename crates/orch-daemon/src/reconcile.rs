@@ -12,7 +12,7 @@ use orch_protocol::{
 };
 use orch_store::{NewSession, PortBlock, RepoRoot, SessionRecord};
 
-use crate::agents::session_adapter;
+use crate::agents::adapter_by_name;
 use crate::cleanup::{CleanupMarker, remove_session_dir};
 use crate::lifecycle::{
     Busy, HOLDER_EXIT_WAIT, new_session_id, refused, select_preset, session_env, with_git,
@@ -264,7 +264,7 @@ impl Daemon {
             })
             .await?
             .map_err(refused)?;
-        let adapter = session_adapter(&record.agent);
+        let adapter = adapter_by_name(&record.agent);
         self.lock().insert(Live::new(record.clone(), repo, adapter));
         Ok(record)
     }

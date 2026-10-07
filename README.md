@@ -168,7 +168,7 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `preset` | Default Preset for new Sessions (built-in default: `edits`) |
 | `review_command` | Command shown when reviewing a Session; not allowed in `.orchestrator.toml` |
 | `agent` | Default Agent for new Sessions (built-in default: `claude`); the `:new` form can pick another. A Session keeps its Agent for good. |
-| `[agents.<name>]` | `binary` (default: the Agent's own, e.g. `claude` on `PATH`) and `args` for that Agent, read at every launch, resume and Draft |
+| `[agents.<name>]` | `binary` (default: the Agent's own, e.g. `claude` on `PATH`; a path with a `/` is relative to the Repo root) and `args` for that Agent, read at every launch, resume and Draft |
 | `[presets.<name>]` | `mode`, `allow`, `deny` |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
 

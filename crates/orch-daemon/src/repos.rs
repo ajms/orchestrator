@@ -6,7 +6,7 @@ use orch_core::SessionId;
 use orch_protocol::{AgentChoice, Reply, RepoSettings, RequestError, StaleOverrides};
 use orch_store::RepoRoot;
 
-use crate::agents::{BUILT_IN, launchable};
+use crate::agents::{built_in_names, installed_adapter};
 use crate::lifecycle::{Busy, refused, trust_needed, with_git};
 use crate::reconcile::Pass;
 use crate::state::Daemon;
@@ -165,7 +165,7 @@ impl Daemon {
 }
 
 fn agent_choices(config: &RepoConfig, repo: &Path) -> Vec<AgentChoice> {
-    let mut names = BUILT_IN.to_vec();
+    let mut names = built_in_names().collect::<Vec<_>>();
     if !names.contains(&config.default_agent()) {
         names.push(config.default_agent());
     }
@@ -176,7 +176,7 @@ fn agent_choices(config: &RepoConfig, repo: &Path) -> Vec<AgentChoice> {
             unavailable: config
                 .agent(name)
                 .ok()
-                .and_then(|agent| launchable(&agent, repo).err()),
+                .and_then(|agent| installed_adapter(&agent, repo).err()),
         })
         .collect()
 }

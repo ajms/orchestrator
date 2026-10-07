@@ -13,7 +13,7 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{Adapter, adapter_for, default_program, launchable, session_adapter};
+use crate::agents::{Adapter, adapter_by_name, default_program, installed_adapter, known_adapter};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
 
@@ -228,7 +228,7 @@ impl Daemon {
         let agent = config
             .agent(&agent_name)
             .map_err(|_| untrusted(root.path(), &config))?;
-        let adapter = adapter_for(&agent).map_err(refused)?;
+        let adapter = known_adapter(&agent).map_err(refused)?;
         let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
         let base = match create.base {
@@ -506,7 +506,7 @@ impl Daemon {
         resume: bool,
     ) -> Result<(Adapter, Vec<String>), String> {
         let agent = config.agent(&record.agent).map_err(|err| err.to_string())?;
-        let adapter = launchable(&agent, &record.worktree)?;
+        let adapter = installed_adapter(&agent, repo)?;
         let preset =
             select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
         let mut spec = LaunchSpec::new(
@@ -636,7 +636,7 @@ impl Daemon {
             let Some(repo) = repos.iter().find(|repo| repo.id == record.repo) else {
                 continue;
             };
-            let adapter = session_adapter(&record.agent);
+            let adapter = adapter_by_name(&record.agent);
             let id = record.id.clone();
             let mut live = Live::new(record, repo.path.clone(), adapter);
             live.setup_output = self.read_setup_log(&id).await;
