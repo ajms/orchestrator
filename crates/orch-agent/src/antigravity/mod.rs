@@ -35,13 +35,30 @@ impl Antigravity {
     }
 }
 
+const GUARD_EVENT: &str = "PreToolUse";
+const NAMED_MODES: [PermissionMode; 2] = [PermissionMode::AcceptEdits, PermissionMode::Plan];
+
+fn mode_name(mode: PermissionMode) -> Option<&'static str> {
+    match mode {
+        PermissionMode::AcceptEdits => Some("accept-edits"),
+        PermissionMode::Plan => Some("plan"),
+        _ => None,
+    }
+}
+
+fn mode_from_name(name: Option<&str>) -> Option<PermissionMode> {
+    match name {
+        None | Some("") => Some(PermissionMode::Default),
+        Some(name) => NAMED_MODES
+            .into_iter()
+            .find(|mode| mode_name(*mode) == Some(name)),
+    }
+}
+
 fn mode_args(mode: Option<PermissionMode>) -> Vec<String> {
-    let mode = match mode {
-        Some(PermissionMode::AcceptEdits) => "accept-edits",
-        Some(PermissionMode::Plan) => "plan",
-        _ => return Vec::new(),
-    };
-    vec!["--mode".into(), mode.into()]
+    mode.and_then(mode_name)
+        .map(|name| vec!["--mode".into(), name.into()])
+        .unwrap_or_default()
 }
 
 impl AgentAdapter for Antigravity {
@@ -76,9 +93,8 @@ impl AgentAdapter for Antigravity {
         conversation: &ConversationId,
         observed_mode: Option<PermissionMode>,
     ) -> Option<Argv> {
-        let mode = spec.preset.mode.and(observed_mode.or(spec.preset.mode));
         let mut args = vec!["--conversation".into(), conversation.as_str().into()];
-        args.extend(mode_args(mode));
+        args.extend(mode_args(spec.resume_mode(observed_mode)));
         Some(self.argv(args))
     }
 

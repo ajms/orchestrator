@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
-use super::Antigravity;
+use super::{Antigravity, GUARD_EVENT};
 use crate::GUARD_WAIT_SECS;
 use crate::hookup::{
     AgentHookup, FileEdit, HookupError, HookupState, Lookup, file_edit, read_optional,
@@ -12,7 +12,6 @@ use crate::shell::quote;
 const HOOK_NAME: &str = "orch";
 const TOOL_EVENTS: [&str; 2] = ["PreToolUse", "PostToolUse"];
 const LOOP_EVENTS: [&str; 3] = ["PreInvocation", "PostInvocation", "Stop"];
-const GUARD_EVENT: &str = "PreToolUse";
 const STATUS_LINE: &str = "statusLine";
 const FILES: &str = "files";
 const HOOKS: &str = "hooks";

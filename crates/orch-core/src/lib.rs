@@ -7,6 +7,7 @@ mod stacking;
 mod status;
 mod subagent;
 mod transcript;
+mod turn_gate;
 
 pub use agent_state::AgentState;
 pub use event::{

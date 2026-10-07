@@ -89,7 +89,7 @@ pub struct UsageSample {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
     SessionStarted,
-    Ready,
+    AwaitingPrompt,
     PromptSubmitted,
     ToolStarted {
         tool: String,
@@ -130,6 +130,20 @@ pub enum AgentEvent {
         action: GuardedAction,
         cwd: Option<String>,
     },
+}
+
+impl AgentEvent {
+    pub fn is_turn_activity(&self) -> bool {
+        matches!(
+            self,
+            AgentEvent::PromptSubmitted
+                | AgentEvent::ToolStarted { .. }
+                | AgentEvent::ToolFinished { .. }
+                | AgentEvent::QuestionAsked
+                | AgentEvent::TurnEnded
+                | AgentEvent::Failed { .. }
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
