@@ -1,6 +1,7 @@
 use std::time::Instant;
 
-use orch_agent::{AgentAdapter, Antigravity, tag_hook_event};
+use orch_agent::hook_event::tag_hook_event;
+use orch_agent::{AgentAdapter, Antigravity};
 use orch_core::{AgentEvent, AgentState, FailureKind, Observation, PhaseEvent};
 
 fn fixture(name: &str) -> String {

@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use orch_agent::hook_event::tag_hook_event;
 use orch_agent::{
     AgentAdapter, Antigravity, GuardAnswer, GuardContext, GuardDecision, GuardHit, GuardKind,
-    GuardOutcome, RuleVerdict, evaluate_guard, guard_outcome, tag_hook_event,
+    GuardOutcome, RuleVerdict, evaluate_guard, guard_outcome,
 };
 use orch_core::{AgentEvent, GuardedAction};
 use serde_json::{Value, json};

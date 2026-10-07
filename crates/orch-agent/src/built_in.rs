@@ -6,24 +6,34 @@ pub type Adapter = Arc<dyn AgentAdapter + Send + Sync>;
 
 type Build = fn(Option<String>) -> (Adapter, String);
 
-const BUILT_IN: [(&str, Build); 2] = [(ClaudeCode::NAME, claude), (Antigravity::NAME, antigravity)];
+const BUILT_IN: [(&str, Build); 2] = [
+    (ClaudeCode::NAME, build::<ClaudeCode>),
+    (Antigravity::NAME, build::<Antigravity>),
+];
 
-fn claude(binary: Option<String>) -> (Adapter, String) {
-    let mut claude = ClaudeCode::default();
-    if let Some(binary) = binary {
-        claude.program = binary;
-    }
-    let program = claude.program.clone();
-    (Arc::new(claude), program)
+trait BuiltIn: AgentAdapter + Default + Send + Sync + 'static {
+    fn program(&mut self) -> &mut String;
 }
 
-fn antigravity(binary: Option<String>) -> (Adapter, String) {
-    let mut antigravity = Antigravity::default();
-    if let Some(binary) = binary {
-        antigravity.program = binary;
+impl BuiltIn for ClaudeCode {
+    fn program(&mut self) -> &mut String {
+        &mut self.program
     }
-    let program = antigravity.program.clone();
-    (Arc::new(antigravity), program)
+}
+
+impl BuiltIn for Antigravity {
+    fn program(&mut self) -> &mut String {
+        &mut self.program
+    }
+}
+
+fn build<A: BuiltIn>(binary: Option<String>) -> (Adapter, String) {
+    let mut adapter = A::default();
+    if let Some(binary) = binary {
+        *adapter.program() = binary;
+    }
+    let program = adapter.program().clone();
+    (Arc::new(adapter), program)
 }
 
 pub fn built_in_names() -> impl Iterator<Item = &'static str> {

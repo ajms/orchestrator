@@ -1,7 +1,8 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use orch_agent::{GuardAnswer, by_name, tag_hook_event};
+use orch_agent::hook_event::tag_hook_event;
+use orch_agent::{GuardAnswer, by_name};
 use orch_core::SessionId;
 use orch_holder::{ToHolder, locate_socket, report, request_guard};
 
