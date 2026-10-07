@@ -118,6 +118,54 @@ fn redirections_the_shell_reads_as_writes_are_seen_as_writes() {
 }
 
 #[test]
+fn a_redirect_into_a_name_the_shell_would_expand_is_a_write_outside_the_worktree() {
+    assert_asks(&[
+        (
+            "echo x > {../../x,}",
+            GuardKind::WriteOutsideWorktree,
+            "{../../x,}",
+        ),
+        (
+            "echo x > ~dev/.bashrc",
+            GuardKind::WriteOutsideWorktree,
+            "~dev/.bashrc",
+        ),
+        (
+            "echo x > ~+/../x",
+            GuardKind::WriteOutsideWorktree,
+            "~+/../x",
+        ),
+        ("echo x > ~-/x", GuardKind::WriteOutsideWorktree, "~-/x"),
+        ("echo x > s*/y", GuardKind::WriteOutsideWorktree, "s*/y"),
+    ]);
+    assert_allowed(&[
+        "cargo test -p orch-agent",
+        "git commit -m \"msg\"",
+        "npm run build",
+        "ls -la src/",
+        "echo x > 'a {b}.txt'",
+    ]);
+}
+
+#[test]
+fn a_redirect_is_judged_from_every_directory_the_line_has_been_in() {
+    assert_asks(&[(
+        "cd a/b/c; echo x > ../../../x",
+        GuardKind::WriteOutsideWorktree,
+        "/home/dev/shop/x",
+    )]);
+    let line = shell(format!("false && cd {WORKTREE}; echo x > .bashrc"));
+    assert_eq!(
+        evaluate_guard(
+            &line,
+            Some(Path::new("/home/dev")),
+            &context(Path::new(WORKTREE))
+        ),
+        ask(GuardKind::WriteOutsideWorktree, "/home/dev/.bashrc")
+    );
+}
+
+#[test]
 fn a_line_continuation_does_not_hide_a_command() {
     assert_asks(&[("git che\\\nckout main", GuardKind::BaseBranch, "main")]);
 }
@@ -535,12 +583,9 @@ fn quoted_text_is_not_mistaken_for_commands_or_redirections() {
 }
 
 #[test]
-fn unknowable_bash_targets_are_left_to_the_agents_own_permissions() {
-    assert_allowed(&[
-        "echo x > \"$OUT\"",
-        "touch $(mktemp)",
-        "git push origin \"$BRANCH\"",
-    ]);
+fn unknowable_operands_are_left_to_the_agents_own_permissions_but_redirects_ask() {
+    assert_allowed(&["touch $(mktemp)", "git push origin \"$BRANCH\""]);
+    assert_asks(&[("echo x > \"$OUT\"", GuardKind::WriteOutsideWorktree, "$OUT")]);
 }
 
 struct Scratch(PathBuf);

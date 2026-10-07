@@ -21,6 +21,7 @@ impl Rules {
 pub enum RuleVerdict {
     Allow { rule: String },
     Deny { rule: String },
+    Unverifiable,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

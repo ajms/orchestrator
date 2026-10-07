@@ -4,7 +4,7 @@ use orch_core::GuardedAction;
 use serde_json::Value;
 
 use super::guards::MCP_PREFIX;
-use super::invocations::{KEYWORDS, invocations, is_wrapper};
+use super::invocations::{KEYWORDS, invocations, risky_git, runs_another_command};
 use crate::guard::paths;
 use crate::guard::shell::{self, SimpleCommand, Word};
 use crate::{RuleScope, RuleVerdict, Rules};
@@ -12,13 +12,6 @@ use crate::{RuleScope, RuleVerdict, Rules};
 const ANY: &str = "*";
 const GIT_DIR: &str = ".git";
 const DIRECTORY_CHANGES: [&str; 3] = ["cd", "pushd", "popd"];
-const RISKY_GIT_OPTIONS: [&str; 5] = [
-    "--output",
-    "--upload-pack",
-    "--exec",
-    "--config-env",
-    "--receive-pack",
-];
 
 enum Rule<'a> {
     Command(Vec<&'a str>),
@@ -69,6 +62,9 @@ pub(super) fn verdict(
     action: &GuardedAction,
     scope: &RuleScope,
 ) -> Option<RuleVerdict> {
+    if *action == GuardedAction::Unreadable {
+        return (!rules.deny.is_empty()).then_some(RuleVerdict::Unverifiable);
+    }
     let deny = parse_all(&rules.deny);
     let allow = parse_all(&rules.allow);
     let checker = Checker {
@@ -89,6 +85,12 @@ pub(super) fn verdict(
 enum Strictness {
     Deny,
     Allow,
+}
+
+impl Strictness {
+    fn opens(self, name: &str) -> bool {
+        matches!(self, Strictness::Deny) || !name.eq_ignore_ascii_case(GIT_DIR)
+    }
 }
 
 struct Checker<'s, 'r> {
@@ -150,6 +152,7 @@ impl<'r> Checker<'_, 'r> {
 
     fn allowed_line(&self, line: &str) -> Option<&'r String> {
         let mut cwd = self.cwd();
+        let mut cwds = vec![cwd.clone()];
         let mut first = None;
         for command in shell::parse(line) {
             let changes_directory = command
@@ -165,16 +168,19 @@ impl<'r> Checker<'_, 'r> {
             if changes_directory && into.is_none() {
                 return None;
             }
-            let rule = self.allowed_command(&cwd, &command)?;
+            let rule = self.allowed_command(&cwds, &command)?;
             first.get_or_insert(rule);
             if let Some(into) = into {
                 cwd = into;
+                if !cwds.contains(&cwd) {
+                    cwds.push(cwd.clone());
+                }
             }
         }
         first
     }
 
-    fn allowed_command(&self, cwd: &Path, command: &SimpleCommand) -> Option<&'r String> {
+    fn allowed_command(&self, cwds: &[PathBuf], command: &SimpleCommand) -> Option<&'r String> {
         let words: Vec<&str> = command
             .words
             .iter()
@@ -184,14 +190,14 @@ impl<'r> Checker<'_, 'r> {
             && command.nested.is_empty()
             && command.words.iter().all(|word| !word.dynamic)
             && !words[0].contains('=')
-            && !is_wrapper(words[0])
+            && !runs_another_command(words[0])
             && !KEYWORDS.contains(&words[0])
-            && !(words[0] == "git" && words.iter().any(|word| risky_git_option(word)));
+            && !(words[0] == "git" && risky_git(&words[1..]));
         if !plain
             || !command
                 .written
                 .iter()
-                .all(|word| self.allowed_target(cwd, word))
+                .all(|word| self.allowed_target(cwds, word))
         {
             return None;
         }
@@ -201,12 +207,12 @@ impl<'r> Checker<'_, 'r> {
         })
     }
 
-    fn allowed_target(&self, cwd: &Path, word: &Word) -> bool {
-        if word.dynamic {
-            return false;
-        }
-        let target = paths::resolve(cwd, &word.text);
-        paths::is_harmless(&target) || self.allowed_write(&target).is_some()
+    fn allowed_target(&self, cwds: &[PathBuf], word: &Word) -> bool {
+        !word.dynamic
+            && cwds.iter().all(|cwd| {
+                let target = paths::resolve(cwd, &word.text);
+                paths::is_harmless(&target) || self.allowed_write(&target).is_some()
+            })
     }
 
     fn allowed_tool(&self, name: &str) -> Option<&'r String> {
@@ -216,9 +222,8 @@ impl<'r> Checker<'_, 'r> {
                 Rule::AnyMcp => name.starts_with(MCP_PREFIX),
                 Rule::Mcp { server, tool } => owner(name, &servers)
                     .filter(|(owner, _)| *owner == server)
-                    .is_some_and(|(_, rest)| match tool {
-                        ANY => !rest.contains('_'),
-                        tool => rest == underscored(tool),
+                    .is_some_and(|(_, rest)| {
+                        !rest.contains('_') && (tool == ANY || rest == underscored(tool))
                     }),
                 _ => false,
             };
@@ -230,19 +235,12 @@ impl<'r> Checker<'_, 'r> {
         let path = parts(path);
         let path: Vec<&str> = path.iter().map(String::as_str).collect();
         if pattern == ANY {
-            return matches!(strictness, Strictness::Deny) || !path.contains(&GIT_DIR);
+            return path.iter().all(|name| strictness.opens(name));
         }
         let pattern = parts(&paths::resolve(&self.worktree(), pattern));
         let pattern: Vec<&str> = pattern.iter().map(String::as_str).collect();
         glob_covers(&pattern, &path, strictness)
     }
-}
-
-fn risky_git_option(word: &str) -> bool {
-    word == "-c"
-        || RISKY_GIT_OPTIONS
-            .iter()
-            .any(|option| word.starts_with(option))
 }
 
 fn parts(path: &Path) -> Vec<String> {
@@ -253,7 +251,7 @@ fn parts(path: &Path) -> Vec<String> {
 }
 
 fn glob_covers(pattern: &[&str], path: &[&str], strictness: Strictness) -> bool {
-    let open = |name: &&str| matches!(strictness, Strictness::Deny) || *name != GIT_DIR;
+    let open = |name: &&str| strictness.opens(name);
     match pattern.split_first() {
         None => path.iter().all(open),
         Some((&"**", rest)) => (0..=path.len())
