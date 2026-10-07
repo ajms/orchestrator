@@ -315,10 +315,24 @@ async fn alternate_screen_mirror_stays_in_sync_and_returns_to_main_history() {
     }
 
     assert!(!mirror.screen().alternate_screen());
-    assert_eq!(
-        mirror.screen().contents(),
-        client.snapshot().await.unwrap().text()
-    );
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let held = client.snapshot().await.unwrap().text();
+        let drain = std::time::Duration::from_millis(50);
+        while let Ok(Ok(Some(message))) = tokio::time::timeout(drain, client.recv()).await {
+            if let FromHolder::Output { bytes } = message {
+                mirror.process(&bytes);
+            }
+        }
+        if mirror.screen().contents() == held {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "mirror {:?} never caught up with the Holder's {held:?}",
+            mirror.screen().contents()
+        );
+    }
     mirror.screen_mut().set_scrollback(usize::MAX);
     assert!(mirror.screen().contents().starts_with("row 0\nrow 1\n"));
 }

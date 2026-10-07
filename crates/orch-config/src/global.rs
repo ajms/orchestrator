@@ -35,6 +35,10 @@ impl GlobalFile {
         if ports.blocks().next().is_none() {
             return Err(ConfigProblem::EmptyPortRange(ports));
         }
+        self.defaults.check()?;
+        for layer in self.repos.values() {
+            layer.check()?;
+        }
         if !self.defaults.notifications.is_empty() {
             return Err(ConfigProblem::Misplaced {
                 key: "notifications",

@@ -1,4 +1,4 @@
-use orch_agent::GuardAnswer;
+use orch_agent::{ClaudeCode, GuardAnswer};
 use orch_holder::{HolderEvent, ToHolder};
 use serde_json::Value;
 
@@ -12,6 +12,7 @@ async fn guard_request(client: &mut orch_holder::HolderClient) -> u64 {
         HolderEvent::Hook {
             payload,
             guard: Some(id),
+            ..
         } => {
             assert_eq!(payload, PRE_TOOL_USE);
             id
@@ -93,9 +94,32 @@ async fn guard_without_a_daemon_asks_the_user_and_is_still_recorded() {
     assert_eq!(
         next_hook_or_tap(&mut client).await,
         HolderEvent::Hook {
+            agent: Some(ClaudeCode::NAME.into()),
             payload: PRE_TOOL_USE.into(),
             guard: None
         }
+    );
+}
+
+#[tokio::test]
+async fn agy_is_told_to_force_its_own_prompt_when_no_daemon_answers_the_guard() {
+    let sandbox = Sandbox::new();
+    let tool_call = r#"{"toolCall":{"name":"run_command","args":{"CommandLine":"git checkout main"}},"stepIdx":3}"#;
+    let held = sandbox.hold(
+        "s1",
+        &format!("hook --agent antigravity --event PreToolUse {tool_call}\n"),
+    );
+    let mut observer = orch_holder::HolderClient::connect(&held.socket)
+        .await
+        .unwrap();
+
+    let snapshot = wait_for_screen(&mut observer, |text| text.contains("hook>")).await;
+    assert!(
+        snapshot
+            .text()
+            .contains(r#"hook> {"decision":"force_ask"}"#),
+        "{}",
+        snapshot.text()
     );
 }
 

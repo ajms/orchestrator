@@ -1,8 +1,10 @@
 mod common;
 
-use common::Fixture;
+use std::path::Path;
+
+use common::{Fixture, new_session};
 use orch_core::{ConversationId, SessionId, UsageSample};
-use orch_store::{StoreError, UsageTotals};
+use orch_store::{RepoAgentUsage, StoreError, UsageTotals};
 
 fn sample(conversation: Option<&str>, input: u64, output: u64, cost: f64) -> UsageSample {
     UsageSample {
@@ -18,7 +20,15 @@ fn totals(input_tokens: u64, output_tokens: u64, cost_usd: f64) -> UsageTotals {
     UsageTotals {
         input_tokens,
         output_tokens,
-        cost_usd,
+        cost_usd: Some(cost_usd),
+    }
+}
+
+fn claude(repo: &Path, totals: UsageTotals) -> RepoAgentUsage {
+    RepoAgentUsage {
+        repo: repo.into(),
+        agent: "claude".into(),
+        totals,
     }
 }
 
@@ -169,11 +179,11 @@ fn usage_is_totalled_per_repo_overall_and_for_today() {
         .unwrap();
 
     let expected = vec![
-        (a.path.clone(), totals(310, 31, 1.75)),
-        (b.path.clone(), totals(7, 7, 2.0)),
+        claude(&a.path, totals(310, 31, 1.75)),
+        claude(&b.path, totals(7, 7, 2.0)),
     ];
-    assert_eq!(fx.store.usage_per_repo().unwrap(), expected);
-    assert_eq!(fx.store.usage_per_repo_today().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent_today().unwrap(), expected);
 }
 
 #[test]
@@ -188,9 +198,9 @@ fn a_forgotten_repo_keeps_counting_toward_usage() {
     fx.store.save_session(&session).unwrap();
     fx.store.forget_repo(repo.id).unwrap();
 
-    let expected = vec![(repo.path.clone(), totals(100, 10, 0.5))];
-    assert_eq!(fx.store.usage_per_repo().unwrap(), expected);
-    assert_eq!(fx.store.usage_per_repo_today().unwrap(), expected);
+    let expected = vec![claude(&repo.path, totals(100, 10, 0.5))];
+    assert_eq!(fx.store.usage_per_repo_and_agent().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent_today().unwrap(), expected);
 }
 
 #[test]
@@ -208,7 +218,124 @@ fn moving_a_repo_carries_its_usage_along() {
         .move_repo(repo.id, &orch_store::RepoRoot::resolve(&new_path).unwrap())
         .unwrap();
     assert_eq!(
-        fx.store.usage_per_repo().unwrap(),
-        vec![(moved.path, totals(1, 1, 0.5))]
+        fx.store.usage_per_repo_and_agent().unwrap(),
+        vec![claude(&moved.path, totals(1, 1, 0.5))]
+    );
+}
+
+#[test]
+fn usage_is_split_per_agent_and_an_unreported_cost_stays_unknown() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let claude_session = fx.session(&repo, "c");
+    let mut agy = new_session(&repo, "agy");
+    agy.agent = "antigravity".into();
+    let agy_session = fx.store.create_session(agy).unwrap();
+    fx.store
+        .record_usage(&claude_session.id, &sample(Some("c1"), 100, 10, 0.5))
+        .unwrap();
+    let without_cost = UsageSample {
+        conversation: Some(ConversationId("a1".into())),
+        input_tokens: Some(40),
+        output_tokens: Some(4),
+        ..UsageSample::default()
+    };
+    fx.store
+        .record_usage(&agy_session.id, &without_cost)
+        .unwrap();
+    fx.store
+        .record_usage(&agy_session.id, &without_cost)
+        .unwrap();
+
+    let unknown_cost = UsageTotals {
+        input_tokens: 40,
+        output_tokens: 4,
+        cost_usd: None,
+    };
+    assert_eq!(
+        fx.store.session_usage(&agy_session.id).unwrap(),
+        unknown_cost
+    );
+    let expected = vec![
+        RepoAgentUsage {
+            repo: repo.path.clone(),
+            agent: "antigravity".into(),
+            totals: unknown_cost,
+        },
+        claude(&repo.path, totals(100, 10, 0.5)),
+    ];
+    assert_eq!(fx.store.usage_per_repo_and_agent().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent_today().unwrap(), expected);
+}
+
+#[test]
+fn a_total_that_mixes_known_and_unknown_cost_has_an_unknown_cost() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let first = fx.session(&repo, "first");
+    let second = fx.session(&repo, "second");
+    fx.store
+        .record_usage(&first.id, &sample(Some("c1"), 100, 10, 0.5))
+        .unwrap();
+    let without_cost = UsageSample {
+        conversation: Some(ConversationId("c2".into())),
+        input_tokens: Some(40),
+        output_tokens: Some(4),
+        ..UsageSample::default()
+    };
+    fx.store.record_usage(&second.id, &without_cost).unwrap();
+    fx.store
+        .record_usage(&second.id, &sample(Some("c3"), 1, 1, 0.25))
+        .unwrap();
+
+    let unknown_cost = |input_tokens, output_tokens| UsageTotals {
+        input_tokens,
+        output_tokens,
+        cost_usd: None,
+    };
+    assert_eq!(
+        fx.store.session_usage(&second.id).unwrap(),
+        unknown_cost(41, 5)
+    );
+    let expected = vec![claude(&repo.path, unknown_cost(141, 15))];
+    assert_eq!(fx.store.usage_per_repo_and_agent().unwrap(), expected);
+    assert_eq!(fx.store.usage_per_repo_and_agent_today().unwrap(), expected);
+}
+
+#[test]
+fn usage_counted_before_agents_were_recorded_belongs_to_claude() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let session = fx.session(&repo, "s");
+    fx.store
+        .record_usage(&session.id, &sample(Some("c1"), 100, 10, 0.5))
+        .unwrap();
+    let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
+    let version: usize = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    conn.execute_batch(
+        "ALTER TABLE usage_daily RENAME TO newer_daily;
+         CREATE TABLE usage_daily (
+             repo_path TEXT NOT NULL,
+             day TEXT NOT NULL,
+             input_tokens INTEGER NOT NULL,
+             output_tokens INTEGER NOT NULL,
+             cost_usd REAL NOT NULL,
+             PRIMARY KEY (repo_path, day)
+         );
+         INSERT INTO usage_daily
+             SELECT repo_path, day, input_tokens, output_tokens, cost_usd FROM newer_daily;
+         DROP TABLE newer_daily;",
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", version - 1)
+        .unwrap();
+    drop(conn);
+
+    fx.reopen();
+    assert_eq!(
+        fx.store.usage_per_repo_and_agent().unwrap(),
+        vec![claude(&repo.path, totals(100, 10, 0.5))]
     );
 }

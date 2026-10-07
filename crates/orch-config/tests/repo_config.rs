@@ -12,9 +12,9 @@ fn repo_without_any_config_uses_built_in_defaults() {
     assert_eq!(config.base_branch(), None);
     assert_eq!(config.default_preset(), None);
     assert_eq!(config.review_command(), None);
-    assert_eq!(config.agent().unwrap().name, "claude");
-    assert_eq!(config.agent().unwrap().binary, None);
-    assert!(config.agent().unwrap().args.is_empty());
+    assert_eq!(config.default_agent(), "claude");
+    assert_eq!(config.agent("claude").unwrap().binary, None);
+    assert!(config.agent("claude").unwrap().args.is_empty());
 }
 
 #[test]
@@ -34,20 +34,67 @@ fn repo_file_wins_over_global_default_and_personal_override_wins_over_both() {
 }
 
 #[test]
-fn agent_binary_and_args_come_from_the_highest_layer_that_sets_them() {
+fn the_default_agent_is_layered_like_other_repo_settings() {
+    let fx = Fixture::new();
+    fx.global("[defaults]\nagent = \"global\"\n");
+    assert_eq!(fx.approved().default_agent(), "global");
+    fx.repo_file("agent = \"committed\"\n");
+    assert_eq!(fx.approved().default_agent(), "committed");
+    fx.global(&format!(
+        "[defaults]\nagent = \"global\"\n{}",
+        fx.personal("agent = \"personal\"\n")
+    ));
+    assert_eq!(fx.approved().default_agent(), "personal");
+}
+
+#[test]
+fn agent_binary_and_args_come_from_the_highest_layer_that_sets_them_per_agent() {
     let fx = Fixture::new();
     fx.global(&format!(
-        "[repos.{}.agent]\nbinary = \"/opt/claude/bin/claude\"\n",
+        "[defaults.agents.antigravity]\nbinary = \"/usr/bin/agy\"\n\n[repos.{}.agents.claude]\nbinary = \"/opt/claude/bin/claude\"\n",
         fx.repo_key()
     ));
-    fx.repo_file("[agent]\nname = \"claude\"\nargs = [\"--verbose\"]\n");
+    fx.repo_file("[agents.claude]\nbinary = \"./claude\"\nargs = [\"--verbose\"]\n");
 
     let config = fx.approved();
-    assert_eq!(
-        config.agent().unwrap().binary.as_deref(),
-        Some("/opt/claude/bin/claude")
-    );
-    assert_eq!(config.agent().unwrap().args, vec!["--verbose".to_string()]);
+    let claude = config.agent("claude").unwrap();
+    assert_eq!(claude.binary.as_deref(), Some("/opt/claude/bin/claude"));
+    assert_eq!(claude.args, vec!["--verbose".to_string()]);
+    let antigravity = config.agent("antigravity").unwrap();
+    assert_eq!(antigravity.binary.as_deref(), Some("/usr/bin/agy"));
+    assert!(antigravity.args.is_empty());
+}
+
+#[test]
+fn the_old_agent_table_is_an_error_that_shows_the_new_form() {
+    let fx = Fixture::new();
+    fx.repo_file("[agent]\nname = \"claude\"\nbinary = \"./bin/claude\"\n");
+    let err = fx
+        .loader
+        .repo(fx.repo_path(), None)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains(REPO_FILE), "{err}");
+    assert!(err.contains("agent = \"claude\""), "{err}");
+    assert!(err.contains("[agents.claude]"), "{err}");
+
+    for odd in [
+        "[agent]\nname = \"gemini\"\nmodel = \"pro\"\n",
+        "[agent]\nname = 5\n",
+    ] {
+        fx.repo_file(odd);
+        let err = fx
+            .loader
+            .repo(fx.repo_path(), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("the [agent] table was replaced"), "{err}");
+    }
+
+    fx.repo_file("");
+    fx.global("[defaults.agent]\nbinary = \"/opt/claude\"\n");
+    let err = fx.loader.global().unwrap_err().to_string();
+    assert!(err.contains("[agents.claude]"), "{err}");
 }
 
 #[test]

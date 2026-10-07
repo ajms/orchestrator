@@ -8,15 +8,11 @@ use base64::engine::general_purpose::STANDARD;
 use nix::sys::signal::{SigHandler, Signal, signal};
 use nix::sys::termios::{LocalFlags, SetArg, cfmakeraw, tcgetattr, tcsetattr};
 use orch_holder::SESSION_ENV;
+use serde_json::{Value, json};
 
 use crate::subprocess::run_with_input;
 
 pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
-    if agent_args.iter().any(|arg| arg == "-p") {
-        return draft(agent_args);
-    }
-    disable_echo();
-    announce(agent_args);
     let scripted = match script.map(std::fs::read_to_string).transpose() {
         Ok(text) => text.unwrap_or_default(),
         Err(err) => {
@@ -24,6 +20,11 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Some(request) = DraftRequest::find(&scripted, agent_args) {
+        return request.answer(agent_args);
+    }
+    disable_echo();
+    announce(agent_args);
     for line in scripted.lines() {
         if let Some(code) = execute(line) {
             return code;
@@ -40,39 +41,104 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn draft(agent_args: &[String]) -> ExitCode {
-    let mut instruction = String::new();
-    let _ = std::io::stdin().read_to_string(&mut instruction);
-    let conversation = agent_args
-        .iter()
-        .skip_while(|arg| *arg != "--resume")
-        .nth(1)
-        .map_or("nothing", String::as_str);
-    print!(
-        "Drafted from {conversation}\n\nargs: {}\n{}\n",
-        agent_args.join(" "),
-        instruction.trim()
-    );
-    ExitCode::SUCCESS
+struct DraftRequest<'a> {
+    conversation_flag: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+impl<'a> DraftRequest<'a> {
+    fn find(script: &'a str, agent_args: &[String]) -> Option<Self> {
+        script.lines().find_map(|line| {
+            let mut words = line.strip_prefix("draft ")?.split_whitespace();
+            let flag = words.next()?;
+            agent_args.iter().any(|arg| arg == flag).then(|| Self {
+                conversation_flag: words.next(),
+                error: script
+                    .lines()
+                    .find_map(|line| line.strip_prefix("draft-error ")),
+            })
+        })
+    }
+
+    fn answer(&self, agent_args: &[String]) -> ExitCode {
+        let mut input = String::new();
+        let _ = std::io::stdin().read_to_string(&mut input);
+        let stream_json = |flag: &str| {
+            agent_args
+                .windows(2)
+                .any(|pair| pair[0] == flag && pair[1] == "stream-json")
+        };
+        let instruction = match stream_json("--input-format") {
+            true => user_text(&input),
+            false => input,
+        };
+        let conversation = agent_args
+            .iter()
+            .skip_while(|arg| Some(arg.as_str()) != self.conversation_flag)
+            .nth(1)
+            .map_or("nothing", String::as_str);
+        let session = std::env::var(SESSION_ENV).unwrap_or_else(|_| "<unset>".into());
+        let drafted = format!(
+            "Drafted from {conversation}\n\nargs: {}\n{SESSION_ENV}={session}\n{}\n",
+            agent_args.join(" "),
+            instruction.trim()
+        );
+        if !stream_json("--output-format") {
+            print!("{drafted}");
+            return ExitCode::SUCCESS;
+        }
+        let (result, exit) = match self.error {
+            Some(error) => {
+                eprintln!("fake-agent: the draft failed");
+                (
+                    json!({ "status": "ERROR", "error": error }),
+                    ExitCode::FAILURE,
+                )
+            }
+            None => (
+                json!({ "status": "SUCCESS", "response": drafted }),
+                ExitCode::SUCCESS,
+            ),
+        };
+        println!("{}", json!({ "event": "init", "conversation_id": "draft" }));
+        println!("{}", json!({ "event": "result", "result": result }));
+        exit
+    }
+}
+
+fn user_text(input: &str) -> String {
+    input
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|event| event["event"] == "user")
+        .flat_map(|event| event["message"]["content"].as_array().cloned())
+        .flatten()
+        .filter_map(|part| part["text"].as_str().map(String::from))
+        .collect()
 }
 
 fn announce(agent_args: &[String]) {
     let mut args = agent_args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--settings" => {
-                args.next();
-            }
             "--" => {
                 let prompt: Vec<&str> = args.by_ref().map(String::as_str).collect();
                 say(&format!("prompt> {}", prompt.join(" ")));
             }
-            flag if flag.starts_with("--") => {
-                let value = args.next().map_or("", String::as_str);
-                say(&format!("{}> {value}", &flag[2..]));
+            flag if flag.len() > 1 && flag.starts_with('-') => {
+                let value = elide_json(args.next().map_or("", String::as_str));
+                say(&format!("{}> {value}", flag.trim_start_matches('-')));
             }
             other => say(&format!("arg> {other}")),
         }
+    }
+}
+
+fn elide_json(value: &str) -> &str {
+    if value.starts_with('{') {
+        "{…}"
+    } else {
+        value
     }
 }
 
@@ -88,7 +154,7 @@ fn execute(line: &str) -> Option<ExitCode> {
     let line = line.trim_end_matches('\r');
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     match command {
-        "" => {}
+        "" | "draft" | "draft-error" => {}
         "print" => say(&unescape(rest)),
         "lines" => {
             let (count, prefix) = rest.split_once(' ').unwrap_or((rest, "line"));
@@ -189,11 +255,18 @@ fn unescape(text: &str) -> String {
     text.replace("\\e", "\x1b")
 }
 
-fn run_orch_subcommand(subcommand: &str, payload: &str) -> String {
+fn run_orch_subcommand(subcommand: &str, rest: &str) -> String {
     let session = std::env::var(SESSION_ENV).unwrap_or_default();
     let orch = std::env::current_exe().unwrap_or_else(|_| "orch".into());
     let mut command = Command::new(orch);
     command.args([subcommand, "--session", &session]);
+    let mut payload = rest;
+    while let Some(flagged) = payload.strip_prefix("--") {
+        let (flag, after) = flagged.split_once(' ').unwrap_or((flagged, ""));
+        let (value, after) = after.split_once(' ').unwrap_or((after, ""));
+        command.arg(format!("--{flag}")).arg(value);
+        payload = after;
+    }
     run_with_input(&mut command, payload.as_bytes(), None)
         .map(|output| String::from_utf8_lossy(&output).into_owned())
         .unwrap_or_else(|| "<failed>".into())

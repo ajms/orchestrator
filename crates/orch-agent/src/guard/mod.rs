@@ -1,14 +1,19 @@
 mod gh;
 mod git;
-mod paths;
-mod shell;
+pub(crate) mod invocations;
+pub(crate) mod paths;
+pub(crate) mod shell;
 
 use std::path::{Path, PathBuf};
 
+use orch_core::GuardedAction;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use shell::{SimpleCommand, Word};
+use crate::RuleVerdict;
+
+use shell::{DirectoryChange, SimpleCommand, Word};
+
+pub const GUARD_WAIT_SECS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GuardKind {
@@ -16,6 +21,7 @@ pub enum GuardKind {
     OtherRef,
     WorktreeManagement,
     WriteOutsideWorktree,
+    ExternalTool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,14 +34,43 @@ pub struct GuardHit {
 pub enum GuardDecision {
     Allow,
     Ask(GuardHit),
+    Unreadable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum GuardAnswer {
     Proceed,
+    PresetAllow,
     Ask,
     Deny { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuardOutcome {
+    Answer(GuardAnswer),
+    Prompt {
+        hit: GuardHit,
+        on_allow: GuardAnswer,
+    },
+}
+
+pub fn guard_outcome(decision: GuardDecision, verdict: Option<RuleVerdict>) -> GuardOutcome {
+    let on_allow = match verdict {
+        Some(RuleVerdict::Deny { rule }) => {
+            return GuardOutcome::Answer(GuardAnswer::Deny {
+                reason: format!("The Preset rule {rule} denies this (Orchestrator)."),
+            });
+        }
+        Some(RuleVerdict::Unverifiable) => return GuardOutcome::Answer(GuardAnswer::Ask),
+        Some(RuleVerdict::Allow { .. }) => GuardAnswer::PresetAllow,
+        None => GuardAnswer::Proceed,
+    };
+    match decision {
+        GuardDecision::Allow => GuardOutcome::Answer(on_allow),
+        GuardDecision::Ask(hit) => GuardOutcome::Prompt { hit, on_allow },
+        GuardDecision::Unreadable => GuardOutcome::Answer(GuardAnswer::Ask),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,36 +84,26 @@ pub struct GuardContext<'a> {
 }
 
 pub fn evaluate_guard(
-    tool: &str,
-    input_json: &str,
+    action: &GuardedAction,
     cwd: Option<&Path>,
     context: &GuardContext,
 ) -> GuardDecision {
     if !context.enabled {
         return GuardDecision::Allow;
     }
-    let Ok(input) = serde_json::from_str::<Value>(input_json) else {
-        return GuardDecision::Allow;
-    };
     let scope = GuardScope::new(context);
     let cwd = cwd.map_or_else(
         || scope.worktree.clone(),
         |cwd| paths::resolve(Path::new("/"), &cwd.to_string_lossy()),
     );
-    let field = |key: &str| input.get(key).and_then(Value::as_str);
-    let hits = match tool {
-        "Write" | "Edit" | "MultiEdit" => field("file_path")
-            .and_then(|path| scope.write(&cwd, path))
-            .into_iter()
-            .collect(),
-        "NotebookEdit" => field("notebook_path")
-            .and_then(|path| scope.write(&cwd, path))
-            .into_iter()
-            .collect(),
-        "Bash" => field("command")
-            .map(|command| scope.bash(&cwd, command))
-            .unwrap_or_default(),
-        _ => Vec::new(),
+    let hits = match action {
+        GuardedAction::WriteFile { path } => scope.write(&cwd, path).into_iter().collect(),
+        GuardedAction::Shell { command } => scope.bash(&cwd, command),
+        GuardedAction::ExternalTool { name } => vec![GuardHit {
+            kind: GuardKind::ExternalTool,
+            target: name.clone(),
+        }],
+        GuardedAction::Unreadable => return GuardDecision::Unreadable,
     };
     hits.into_iter()
         .find(|hit| !context.allowed.contains(hit))
@@ -131,9 +156,21 @@ impl<'a> GuardScope<'a> {
     fn written(&self, cwd: &Path, words: &[&Word]) -> Vec<GuardHit> {
         words
             .iter()
-            .filter(|word| !word.dynamic)
-            .filter_map(|word| self.write(cwd, &word.text))
+            .filter(|word| !word.expanded)
+            .filter_map(|word| self.operand(cwd, word))
             .collect()
+    }
+
+    fn operand(&self, cwd: &Path, word: &Word) -> Option<GuardHit> {
+        let Some(candidates) = word.candidates() else {
+            return Some(GuardHit {
+                kind: GuardKind::WriteOutsideWorktree,
+                target: word.text.clone(),
+            });
+        };
+        candidates
+            .iter()
+            .find_map(|candidate| self.write(cwd, &paths::widest(candidate)))
     }
 
     fn ref_hit(&self, name: &str) -> Option<GuardHit> {
@@ -155,22 +192,42 @@ impl<'a> GuardScope<'a> {
 
     fn bash(&self, cwd: &Path, script: &str) -> Vec<GuardHit> {
         let mut cwd = cwd.to_path_buf();
+        let mut cwds = vec![cwd.clone()];
+        let mut lost = false;
         let mut hits = Vec::new();
         for command in shell::parse(script) {
-            let written: Vec<&Word> = command.written.iter().collect();
-            hits.extend(self.written(&cwd, &written));
-            hits.extend(self.simple_command(&mut cwd, &command));
+            for target in &command.written {
+                hits.extend(self.redirect(&cwds, lost, target));
+            }
+            for nested in &command.nested {
+                hits.extend(self.bash(&cwd, nested));
+            }
+            hits.extend(self.simple_command(&cwd, &command));
+            match command.directory_change() {
+                Some(DirectoryChange::Into(dir)) => cwd = paths::resolve(&cwd, &dir.text),
+                Some(DirectoryChange::Unknown) => lost = true,
+                None => {}
+            }
+            if !cwds.contains(&cwd) {
+                cwds.push(cwd.clone());
+            }
         }
         hits
     }
 
-    fn simple_command(&self, cwd: &mut PathBuf, command: &SimpleCommand) -> Vec<GuardHit> {
-        const WRAPPERS: [&str; 6] = ["env", "sudo", "command", "exec", "nohup", "time"];
-        let words: Vec<&Word> = command
-            .words
-            .iter()
-            .skip_while(|word| word.text.contains('=') || WRAPPERS.contains(&word.text.as_str()))
-            .collect();
+    fn redirect(&self, cwds: &[PathBuf], lost: bool, target: &Word) -> Option<GuardHit> {
+        let unknown = target.dynamic || lost && !Path::new(&target.text).is_absolute();
+        if unknown {
+            return Some(GuardHit {
+                kind: GuardKind::WriteOutsideWorktree,
+                target: target.text.clone(),
+            });
+        }
+        cwds.iter().find_map(|cwd| self.write(cwd, &target.text))
+    }
+
+    fn simple_command(&self, cwd: &Path, command: &SimpleCommand) -> Vec<GuardHit> {
+        let words = command.invocation();
         let Some((program, args)) = words.split_first() else {
             return Vec::new();
         };
@@ -180,12 +237,6 @@ impl<'a> GuardScope<'a> {
             .filter(|word| !word.text.starts_with('-'))
             .collect();
         match program.text.rsplit('/').next().unwrap_or_default() {
-            "cd" | "pushd" => {
-                if let Some(dir) = operands.first().filter(|dir| !dir.dynamic) {
-                    *cwd = paths::resolve(cwd, &dir.text);
-                }
-                Vec::new()
-            }
             "touch" | "mkdir" | "rm" | "rmdir" | "tee" | "mv" | "truncate" => {
                 self.written(cwd, &operands)
             }

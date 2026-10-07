@@ -98,6 +98,40 @@ async fn allowing_once_asks_again_but_allowing_for_the_session_does_not() {
 }
 
 #[tokio::test]
+async fn an_mcp_tool_asks_on_first_use_and_allowing_it_for_the_session_covers_that_tool() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = running_session(&env, &mut client, "External").await;
+    let mut pane = env.pane(&id, PANE).await;
+    let mcp = |tool: &str| {
+        hook(
+            "PreToolUse",
+            &format!(r#""tool_name":"{tool}","tool_input":{{}}"#),
+        )
+    };
+
+    pane.hook(&mcp("mcp__github__create_issue")).await;
+    let prompt = prompted(&mut client, &id).await.guard_prompts[0].clone();
+    assert_eq!(prompt.kind, orch_protocol::GuardKindView::ExternalTool);
+    assert_eq!(prompt.target, "mcp__github__create_issue");
+    answer(&mut client, &id, prompt.id, GuardChoice::AllowForSession).await;
+    settle(&mut client, &mut pane, &id, "allowed").await;
+
+    client.history.clear();
+    pane.hook(&mcp("mcp__github__create_issue")).await;
+    settle(&mut client, &mut pane, &id, "still-allowed").await;
+    assert!(
+        client
+            .history
+            .iter()
+            .all(|view| view.guard_prompts.is_empty())
+    );
+    pane.hook(&mcp("mcp__github__merge_pull_request")).await;
+    prompted(&mut client, &id).await;
+}
+
+#[tokio::test]
 async fn guards_switched_off_let_the_agent_act_outside_its_session() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;

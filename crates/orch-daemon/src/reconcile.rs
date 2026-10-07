@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use orch_agent::{ClaudeCode, by_name};
 use orch_config::{GlobalConfig, RepoConfig};
 use orch_core::{Phase, PhaseEvent, SessionId};
 use orch_git::{InUse, Leftover, Script, SessionName, slugify};
@@ -42,6 +43,7 @@ struct NewRecord {
     base: String,
     phase: Phase,
     preset: String,
+    agent: String,
     port_block: Option<PortBlock>,
 }
 
@@ -250,6 +252,7 @@ impl Daemon {
                     worktree: new.worktree,
                     phase: new.phase,
                     preset: new.preset,
+                    agent: new.agent,
                 })?;
                 match new.port_block {
                     Some(block) => drop(store.hold_port_block(&created.id, block)?),
@@ -261,7 +264,7 @@ impl Daemon {
             })
             .await?
             .map_err(refused)?;
-        let adapter = self.repo_adapter(&repo).await;
+        let adapter = by_name(&record.agent);
         self.lock().insert(Live::new(record.clone(), repo, adapter));
         Ok(record)
     }
@@ -329,7 +332,7 @@ impl Daemon {
                 Some(base) => base.clone(),
                 None => self.default_base(&repo, &config).await.ok()?,
             };
-            let preset = select_preset(&repo, &config, None)
+            let preset = select_preset(&repo, &config, None, config.default_agent())
                 .map_or_else(|_| FALLBACK_PRESET.into(), |preset| preset.name);
             self.create_record(NewRecord {
                 id: id.clone(),
@@ -339,6 +342,10 @@ impl Daemon {
                 base,
                 phase: Phase::Active,
                 preset,
+                agent: hello
+                    .agent_name
+                    .clone()
+                    .unwrap_or_else(|| ClaudeCode::NAME.into()),
                 port_block: hello.port_block,
             })
             .await
@@ -924,7 +931,7 @@ impl Daemon {
         let _guard = self.repo_guard(&repo).await;
         let leftover = self.current_leftover(&repo, leftover).await?;
         let config = self.repo_config(&repo).await?;
-        let preset = select_preset(&repo, &config, None)?;
+        let preset = select_preset(&repo, &config, None, config.default_agent())?;
         let base = self.default_base(&repo, &config).await?;
         let prefix = self.branch_prefix().await;
         let (name, worktree) = with_git(repo.clone(), move |git| {
@@ -967,6 +974,7 @@ impl Daemon {
                 base,
                 phase: Phase::Suspended,
                 preset: preset.name,
+                agent: config.default_agent().into(),
                 port_block: None,
             })
             .await?;

@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use orch_core::{
-    AgentEvent, ConversationId, PermissionMode, SessionId, SessionStatus, SubagentId,
-    TranscriptEntry,
+    AgentEvent, ConversationId, GuardedAction, PermissionMode, SessionId, SessionStatus,
+    SubagentId, TranscriptEntry,
 };
 
-use crate::{GuardAnswer, Preset};
+use crate::hookup::AgentHookup;
+use crate::{GuardAnswer, Preset, RuleVerdict};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Capabilities {
@@ -47,6 +48,25 @@ pub struct Argv {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftInput {
+    Instruction,
+    InstructionAndBaseDiff,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DraftOutcome {
+    Drafted(String),
+    NoResult,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Draft {
+    pub argv: Argv,
+    pub input: DraftInput,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchSpec {
     pub session: SessionId,
@@ -65,6 +85,10 @@ impl LaunchSpec {
         }
     }
 
+    pub fn resume_mode(&self, observed: Option<PermissionMode>) -> Option<PermissionMode> {
+        self.preset.mode.and(observed.or(self.preset.mode))
+    }
+
     pub fn with_prompt(self, prompt: impl Into<String>) -> Self {
         Self {
             prompt: Some(prompt.into()),
@@ -75,6 +99,12 @@ impl LaunchSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayloadError(pub String);
+
+pub struct RuleScope<'a> {
+    pub cwd: Option<&'a Path>,
+    pub worktree: &'a Path,
+    pub lookup: &'a dyn Fn(&str) -> Option<String>,
+}
 
 pub trait TitleWatch: Send {
     fn follow(&mut self, payload: &str);
@@ -97,10 +127,20 @@ pub trait TranscriptReader: Send {
     fn read(&mut self, path: &Path) -> TranscriptRead;
 }
 
+pub trait ConversationTree: Send {
+    fn restart(&mut self, conversation: Option<&ConversationId>);
+    fn hook(&mut self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError>;
+    fn tap(&mut self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError>;
+}
+
 pub trait AgentAdapter {
     fn capabilities(&self) -> Capabilities;
 
     fn launch(&self, spec: &LaunchSpec) -> Argv;
+
+    fn modes(&self) -> &'static [PermissionMode] {
+        &[]
+    }
 
     fn resume(
         &self,
@@ -122,8 +162,16 @@ pub trait AgentAdapter {
             .unwrap_or_else(|| self.launch(spec))
     }
 
-    fn draft(&self, _conversation: &ConversationId) -> Option<Argv> {
+    fn draft(&self, _conversation: Option<&ConversationId>) -> Option<Draft> {
         None
+    }
+
+    fn encode_draft(&self, prompt: &str) -> String {
+        prompt.into()
+    }
+
+    fn decode_draft(&self, stdout: &str) -> DraftOutcome {
+        DraftOutcome::Drafted(stdout.into())
     }
 
     fn map_hook(&self, _payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
@@ -142,6 +190,10 @@ pub trait AgentAdapter {
         None
     }
 
+    fn conversation_tree(&self) -> Option<Box<dyn ConversationTree>> {
+        None
+    }
+
     fn is_guard_payload(&self, _payload: &str) -> bool {
         false
     }
@@ -150,7 +202,54 @@ pub trait AgentAdapter {
         None
     }
 
+    fn enforces_rules(&self) -> bool {
+        false
+    }
+
+    fn rule_verdict(
+        &self,
+        _preset: &Preset,
+        _action: &GuardedAction,
+        _scope: &RuleScope,
+    ) -> Option<RuleVerdict> {
+        None
+    }
+
+    fn fallback_hook_reply(&self) -> Option<String> {
+        None
+    }
+
+    fn fallback_statusline(&self, payload: &str) -> String {
+        minimal_statusline(&self.map_tap(payload).unwrap_or_default())
+    }
+
+    fn hookup(&self) -> Option<Box<dyn AgentHookup>> {
+        None
+    }
+
     fn agent_dirs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
         Vec::new()
     }
+
+    fn user_statusline_command(
+        &self,
+        _cwd: &Path,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        None
+    }
+}
+
+fn minimal_statusline(events: &[AgentEvent]) -> String {
+    let sample = events.iter().find_map(|event| match event {
+        AgentEvent::UsageSample(sample) => Some(sample),
+        _ => None,
+    });
+    let model = sample
+        .and_then(|sample| sample.model.clone())
+        .unwrap_or_else(|| "?".into());
+    let context = sample
+        .and_then(|sample| sample.context_used_percent)
+        .map_or_else(|| "?".into(), |percent| format!("{percent:.0}"));
+    format!("{model} · {context}%\n")
 }

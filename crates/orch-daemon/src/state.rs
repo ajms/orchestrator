@@ -1,10 +1,16 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use orch_agent::{GuardHit, GuardKind, SubagentTranscripts, mode_name};
-use orch_core::{AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus};
+use orch_agent::{
+    Adapter, Capabilities, ConversationTree, GuardAnswer, GuardHit, GuardKind, PayloadError,
+    Preset, RuleScope, RuleVerdict, SubagentTranscripts, TitleWatch, mode_name,
+};
+use orch_core::{
+    AgentEvent, AgentState, Effect, GateRefusal, GuardedAction, Observation, Phase, PhaseEvent,
+    PrStatus, SessionId, SessionStatus,
+};
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
 use orch_notify::{AttentionEvent, ClientView};
@@ -17,13 +23,12 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{Notify, watch};
 
 use crate::DaemonConfig;
-use crate::agents::Adapter;
 use crate::notify::Notifier;
 use crate::outbox::Outbox;
-use crate::rate_limits::RateLimits;
 use crate::recency::{LastUsed, UseClock};
 use crate::store::StoreHandle;
 use crate::transcript::Following;
+use crate::usage_windows::UsageWindows;
 
 const IDLE_CHECK: Duration = Duration::from_millis(100);
 const STALL_CHECK: Duration = Duration::from_secs(1);
@@ -50,7 +55,7 @@ pub(crate) struct State {
     pub(crate) passes: Passes,
     pub(crate) display: DisplayVars,
     notifier: Notifier,
-    rate_limits: RateLimits,
+    usage_windows: UsageWindows,
     use_clock: UseClock,
 }
 
@@ -85,7 +90,8 @@ pub(crate) struct Live {
     pub(crate) record: SessionRecord,
     pub(crate) repo: PathBuf,
     pub(crate) status: SessionStatus,
-    pub(crate) adapter: Adapter,
+    pub(crate) adapter: Option<Adapter>,
+    pub(crate) preset: Option<Preset>,
     pub(crate) prompts: Vec<PendingGuard>,
     pub(crate) setup_output: Option<String>,
     pub(crate) last_error: Option<String>,
@@ -96,6 +102,7 @@ pub(crate) struct Live {
     pub(crate) launching: bool,
     pub(crate) repo_missing: bool,
     pub(crate) transcripts: Option<Box<dyn SubagentTranscripts>>,
+    tree: Option<Box<dyn ConversationTree>>,
     end_noticed: bool,
     holder: Option<HolderLink>,
     generation: u64,
@@ -146,10 +153,14 @@ pub(crate) struct HolderLink {
     pub(crate) closed: watch::Receiver<bool>,
 }
 
+#[derive(Debug)]
+pub(crate) struct RulesUnavailable;
+
 pub(crate) struct PendingGuard {
     pub(crate) id: u64,
     pub(crate) tool: String,
     pub(crate) hit: GuardHit,
+    pub(crate) on_allow: GuardAnswer,
 }
 
 #[derive(Default)]
@@ -183,20 +194,33 @@ impl PaneSizes {
     }
 }
 
+fn capabilities_of(adapter: Option<&Adapter>) -> Capabilities {
+    adapter
+        .map(|adapter| adapter.capabilities())
+        .unwrap_or_default()
+}
+
 impl Live {
-    pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Adapter) -> Self {
-        let capabilities = adapter.capabilities();
+    pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Option<Adapter>) -> Self {
+        let capabilities = capabilities_of(adapter.as_ref());
         let mut status = capabilities.session_status();
         status.restore(record.phase, record.flags.clone());
         let transcripts = capabilities
             .transcripts
-            .then(|| adapter.subagent_transcripts())
+            .then(|| adapter.as_ref()?.subagent_transcripts())
             .flatten();
+        let mut tree = adapter
+            .as_ref()
+            .and_then(|adapter| adapter.conversation_tree());
+        if let Some(tree) = &mut tree {
+            tree.restart(record.latest_conversation());
+        }
         Self {
             record,
             repo,
             status,
             adapter,
+            preset: None,
             prompts: Vec::new(),
             setup_output: None,
             last_error: None,
@@ -207,10 +231,82 @@ impl Live {
             launching: false,
             repo_missing: false,
             transcripts,
+            tree,
             end_noticed: false,
             holder: None,
             generation: 0,
         }
+    }
+
+    pub(crate) fn capabilities(&self) -> Capabilities {
+        capabilities_of(self.adapter.as_ref())
+    }
+
+    pub(crate) fn agent_dirs(&self) -> Vec<PathBuf> {
+        self.adapter
+            .as_ref()
+            .map(|adapter| adapter.agent_dirs(&orch_config::xdg::process_env))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn rule_verdict(
+        &self,
+        action: &GuardedAction,
+        cwd: Option<&Path>,
+    ) -> Result<Option<RuleVerdict>, RulesUnavailable> {
+        let Some(adapter) = self.adapter.as_ref() else {
+            return Ok(None);
+        };
+        let Some(preset) = self.preset.as_ref() else {
+            return match adapter.enforces_rules() {
+                true => Err(RulesUnavailable),
+                false => Ok(None),
+            };
+        };
+        let scope = RuleScope {
+            cwd,
+            worktree: &self.record.worktree,
+            lookup: &orch_config::xdg::process_env,
+        };
+        Ok(adapter.rule_verdict(preset, action, &scope))
+    }
+
+    pub(crate) fn hook_events(&mut self, payload: &str) -> Vec<AgentEvent> {
+        self.mapped(
+            |tree| tree.hook(payload),
+            |adapter| adapter.map_hook(payload),
+        )
+    }
+
+    pub(crate) fn tap_events(&mut self, payload: &str) -> Vec<AgentEvent> {
+        self.mapped(|tree| tree.tap(payload), |adapter| adapter.map_tap(payload))
+    }
+
+    fn mapped(
+        &mut self,
+        by_tree: impl FnOnce(&mut dyn ConversationTree) -> Result<Vec<AgentEvent>, PayloadError>,
+        by_adapter: impl FnOnce(&Adapter) -> Result<Vec<AgentEvent>, PayloadError>,
+    ) -> Vec<AgentEvent> {
+        let mapped = match (&mut self.tree, &self.adapter) {
+            (Some(tree), _) => by_tree(tree.as_mut()),
+            (None, Some(adapter)) => by_adapter(adapter),
+            (None, None) => return Vec::new(),
+        };
+        mapped.unwrap_or_default()
+    }
+
+    pub(crate) fn agent_spawned(&mut self, now: Instant) -> Vec<Effect> {
+        if let Some(tree) = &mut self.tree {
+            tree.restart(None);
+        }
+        self.status.observe(Observation::Spawned, now)
+    }
+
+    pub(crate) fn title_watch(&self) -> Option<Box<dyn TitleWatch>> {
+        self.adapter
+            .as_ref()
+            .filter(|adapter| adapter.capabilities().titles)?
+            .title_watch()
     }
 
     pub(crate) fn transition(&mut self, event: PhaseEvent) -> Result<(), String> {
@@ -388,6 +484,7 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::OtherRef => GuardKindView::OtherRef,
         GuardKind::WorktreeManagement => GuardKindView::WorktreeManagement,
         GuardKind::WriteOutsideWorktree => GuardKindView::WriteOutsideWorktree,
+        GuardKind::ExternalTool => GuardKindView::ExternalTool,
     }
 }
 
@@ -466,7 +563,7 @@ impl Daemon {
                 passes: Passes::default(),
                 display: DisplayVars::default(),
                 notifier,
-                rate_limits: RateLimits::default(),
+                usage_windows: UsageWindows::default(),
                 use_clock: UseClock::default(),
             }),
             store,
@@ -594,8 +691,8 @@ impl State {
         let id = self.next_id();
         let sessions = self.sessions.values().map(Live::view).collect();
         outbox.send(FromDaemon::Sessions { sessions });
-        if self.rate_limits.is_known() {
-            outbox.send(self.rate_limits.into());
+        if self.usage_windows.is_known() {
+            outbox.send(self.usage_windows.message());
         }
         if let Some(report) = &self.report {
             outbox.send(FromDaemon::Reconciled {
@@ -679,14 +776,12 @@ impl State {
         }
     }
 
-    pub(crate) fn note_rate_limits(&mut self, sample: &orch_core::UsageSample) {
-        let latest = self.rate_limits.after(sample);
-        if latest == self.rate_limits {
+    pub(crate) fn note_usage_windows(&mut self, agent: &str, sample: &orch_core::UsageSample) {
+        if !self.usage_windows.note(agent, sample) {
             return;
         }
-        self.rate_limits = latest;
         for client in self.clients.values() {
-            client.outbox.send(latest.into());
+            client.outbox.send(self.usage_windows.message());
         }
     }
 

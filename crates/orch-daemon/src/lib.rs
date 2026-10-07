@@ -10,7 +10,6 @@ mod notify;
 mod outbox;
 mod pane;
 mod pr;
-mod rate_limits;
 mod recency;
 mod reconcile;
 mod repos;
@@ -20,6 +19,7 @@ mod store;
 mod subprocess;
 mod transcript;
 mod usage;
+mod usage_windows;
 
 use std::fs::File;
 use std::io::{self, Write};

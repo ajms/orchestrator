@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset};
+use orch_agent::{Adapter, AgentAdapter, Argv, LaunchSpec, Preset, by_name};
 use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
@@ -13,7 +13,7 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{Adapter, adapter_for, default_adapter, default_program};
+use crate::agents::{default_program, hooked_up, installed_adapter, known_adapter, modes};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
 
@@ -78,9 +78,9 @@ fn describe(item: &TrustItem) -> String {
     match item {
         TrustItem::SetupScript(script) => format!("Setup script: {script}"),
         TrustItem::TeardownScript(script) => format!("Teardown script: {script}"),
-        TrustItem::Agent { binary, args } => {
-            let program = binary.clone().unwrap_or_else(default_program);
-            format!("Agent: {program} {}", args.join(" "))
+        TrustItem::Agent { name, binary, args } => {
+            let program = binary.clone().unwrap_or_else(|| default_program(name));
+            format!("Agent {name}: {program} {}", args.join(" "))
         }
         TrustItem::Preset(preset) => format!("Preset {}", preset.name),
         TrustItem::DefaultPreset(preset) => format!("default Preset {}", preset.name),
@@ -217,14 +217,19 @@ impl Daemon {
             .loader
             .repo(root.path(), approval.as_ref())
             .map_err(refused)?;
-        let preset = select_preset(root.path(), &config, create.preset.as_deref())?;
+        let agent_name = create
+            .agent
+            .clone()
+            .unwrap_or_else(|| config.default_agent().into());
+        let agent = config
+            .agent(&agent_name)
+            .map_err(|_| untrusted(root.path(), &config))?;
+        let adapter = known_adapter(&agent).map_err(refused)?;
+        hooked_up(&adapter, &agent_name, &self.config.orch_program).map_err(refused)?;
+        let preset = select_preset(root.path(), &config, create.preset.as_deref(), &agent_name)?;
         if config.setup_script().is_err() {
             return Err(untrusted(root.path(), &config));
         }
-        let agent = config
-            .agent()
-            .map_err(|_| untrusted(root.path(), &config))?;
-        let adapter = adapter_for(agent).map_err(refused)?;
         let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
         let base = match create.base {
@@ -257,6 +262,7 @@ impl Daemon {
             worktree: worktree.path.clone(),
             phase: Phase::SettingUp,
             preset: preset.name,
+            agent: agent_name,
         };
         let ports = global.ports;
         let stored = self.store.call_blocking(move |store| {
@@ -288,13 +294,19 @@ impl Daemon {
         if let Err(err) = written {
             eprintln!("orch daemon: storing the prompt of {}: {err}", id.as_str());
         }
-        Ok(Live::new(record, repo.path, adapter))
+        Ok(Live::new(record, repo.path, Some(adapter)))
     }
 
-    pub(crate) async fn check_launch(&self, repo: &Path, preset: &str) -> Result<(), RequestError> {
+    pub(crate) async fn check_launch(
+        &self,
+        repo: &Path,
+        record: &SessionRecord,
+    ) -> Result<(), RequestError> {
         let config = self.repo_config(repo).await?;
-        config.agent().map_err(|_| untrusted(repo, &config))?;
-        select_preset(repo, &config, Some(preset)).map(drop)
+        config
+            .agent(&record.agent)
+            .map_err(|_| untrusted(repo, &config))?;
+        select_preset(repo, &config, Some(&record.preset), &record.agent).map(drop)
     }
 
     pub(crate) async fn check_teardown(&self, repo: &Path) -> Result<(), RequestError> {
@@ -332,7 +344,7 @@ impl Daemon {
         id: &SessionId,
     ) -> Result<Reply, RequestError> {
         let (record, repo) = self.session_repo(id)?;
-        self.check_launch(&repo, &record.preset).await?;
+        self.check_launch(&repo, &record).await?;
         self.update(id, |live| {
             live.transition(PhaseEvent::SetupSkipped)?;
             live.launching = true;
@@ -347,7 +359,7 @@ impl Daemon {
     pub(crate) async fn resume(self: &Arc<Self>, id: &SessionId) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
         let (record, repo) = self.session_repo(id)?;
-        self.check_launch(&repo, &record.preset).await?;
+        self.check_launch(&repo, &record).await?;
         let mut replaced = None;
         self.update(id, |live| {
             if live.status.flags().worktree_missing {
@@ -383,14 +395,17 @@ impl Daemon {
         name: String,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
-        let (_claim, _, repo) = self.claim(id, |live| {
+        let (_claim, record, repo) = self.claim(id, |live| {
             live.status
                 .check_preset_change()
                 .map_err(|refusal| gate_message("Changing the Preset", refusal))
         })?;
         let config = self.repo_config(&repo).await?;
-        let preset = select_preset(&repo, &config, Some(&name))?;
-        config.agent().map_err(|_| untrusted(&repo, &config))?;
+        let agent = config
+            .agent(&record.agent)
+            .map_err(|_| untrusted(&repo, &config))?;
+        known_adapter(&agent).map_err(refused)?;
+        let preset = select_preset(&repo, &config, Some(&name), &record.agent)?;
         let mut restart = false;
         let mut replaced = None;
         self.update(id, |live| {
@@ -452,9 +467,10 @@ impl Daemon {
             Err(err) => Err(err.to_string()),
         };
         let spawned = match launch {
-            Ok((adapter, argv)) => {
+            Ok((adapter, preset, argv)) => {
                 let _ = self.update(id, |live| {
-                    live.adapter = adapter;
+                    live.adapter = Some(adapter);
+                    live.preset = Some(preset);
                     Ok(())
                 });
                 self.spawn_holder(&record, argv).await
@@ -491,15 +507,15 @@ impl Daemon {
         record: &SessionRecord,
         prompt: Option<String>,
         resume: bool,
-    ) -> Result<(Adapter, Vec<String>), String> {
-        let agent = config.agent().map_err(|err| err.to_string())?;
-        let adapter = adapter_for(agent)?;
-        let preset =
-            select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
+    ) -> Result<(Adapter, Preset, Vec<String>), String> {
+        let agent = config.agent(&record.agent).map_err(|err| err.to_string())?;
+        let adapter = installed_adapter(&agent, repo)?;
+        let preset = select_preset(repo, config, Some(&record.preset), &record.agent)
+            .map_err(|err| err.to_string())?;
         let mut spec = LaunchSpec::new(
             record.id.clone(),
             self.config.orch_program.to_string_lossy(),
-            preset,
+            preset.clone(),
         );
         if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
             spec = spec.with_prompt(prompt);
@@ -509,7 +525,7 @@ impl Daemon {
             _ => None,
         };
         let argv = agent_command(adapter.as_ref(), &agent.args, spec, resume);
-        Ok((adapter, argv))
+        Ok((adapter, preset, argv))
     }
 
     async fn spawn_holder(&self, record: &SessionRecord, argv: Vec<String>) -> Result<(), String> {
@@ -523,7 +539,9 @@ impl Daemon {
             .arg("--cwd")
             .arg(&record.worktree)
             .arg("--base")
-            .arg(&record.base);
+            .arg(&record.base)
+            .arg("--agent")
+            .arg(&record.agent);
         if let Some(block) = record.port_block {
             command
                 .arg("--port-base")
@@ -605,17 +623,6 @@ impl Daemon {
         suspended
     }
 
-    pub(crate) async fn repo_adapter(&self, repo: &Path) -> Adapter {
-        match self.repo_config(repo).await {
-            Ok(config) => config
-                .agent()
-                .ok()
-                .and_then(|agent| adapter_for(agent).ok())
-                .unwrap_or_else(default_adapter),
-            Err(_) => default_adapter(),
-        }
-    }
-
     async fn load_sessions(&self) -> Vec<(SessionId, Phase)> {
         let listed = self
             .store
@@ -634,9 +641,16 @@ impl Daemon {
             let Some(repo) = repos.iter().find(|repo| repo.id == record.repo) else {
                 continue;
             };
-            let adapter = self.repo_adapter(&repo.path).await;
+            let adapter = by_name(&record.agent);
             let id = record.id.clone();
+            let preset = match self.repo_config(&repo.path).await {
+                Ok(config) => {
+                    select_preset(&repo.path, &config, Some(&record.preset), &record.agent).ok()
+                }
+                Err(_) => None,
+            };
             let mut live = Live::new(record, repo.path.clone(), adapter);
+            live.preset = preset;
             live.setup_output = self.read_setup_log(&id).await;
             known.push((id, live.status.phase()));
             self.lock().insert(live);
@@ -649,11 +663,17 @@ pub(crate) fn select_preset(
     repo: &Path,
     config: &RepoConfig,
     name: Option<&str>,
+    agent: &str,
 ) -> Result<Preset, RequestError> {
-    config.select_preset(name).map_err(|err| match err {
-        PresetError::Unknown(name) => refused(format!("unknown Preset {name}")),
-        PresetError::Untrusted(_) => untrusted(repo, config),
-    })
+    config
+        .select_preset(name, modes(agent))
+        .map_err(|err| match err {
+            PresetError::Unknown(name) => refused(format!("unknown Preset {name}")),
+            PresetError::Untrusted(_) => untrusted(repo, config),
+            PresetError::Unsupported(name) => refused(format!(
+                "the {agent} Agent can't run Preset {name}'s permission mode"
+            )),
+        })
 }
 
 pub(crate) fn agent_command(

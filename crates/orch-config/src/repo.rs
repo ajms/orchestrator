@@ -1,6 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use orch_agent::{INHERIT, Preset, Presets, mode_from_name};
+use orch_agent::{
+    ClaudeCode, EDITS, INHERIT, Preset, Presets, Rules, built_in_names, mode_from_name,
+};
+use orch_core::PermissionMode;
 use serde::Deserialize;
 
 use crate::error::ConfigProblem;
@@ -34,26 +37,87 @@ pub(crate) struct RepoLayer {
     base: Option<String>,
     preset: Option<String>,
     review_command: Option<String>,
+    agent: Option<AgentSetting>,
     #[serde(default)]
-    agent: AgentLayer,
+    agents: BTreeMap<String, AgentLayer>,
     #[serde(default)]
     pub(crate) notifications: NotificationsLayer,
     #[serde(default)]
     presets: BTreeMap<String, PresetLayer>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AgentLayer {
-    name: Option<String>,
-    binary: Option<String>,
-    args: Option<Vec<String>>,
+#[derive(Debug)]
+enum AgentSetting {
+    Name(String),
+    OldTable(toml::Table),
+}
+
+impl<'de> Deserialize<'de> for AgentSetting {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match toml::Value::deserialize(deserializer)? {
+            toml::Value::String(name) => Ok(AgentSetting::Name(name)),
+            toml::Value::Table(table) => Ok(AgentSetting::OldTable(table)),
+            other => Err(serde::de::Error::custom(format!(
+                "agent must be an Agent name, not a {}",
+                other.type_str()
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct AgentLayer {
+    binary: Option<String>,
+    args: Option<Vec<String>>,
+}
+
+impl RepoLayer {
+    pub(crate) fn check(&self) -> Result<(), ConfigProblem> {
+        match &self.agent {
+            Some(AgentSetting::OldTable(old)) => {
+                let text = |key| old.get(key).and_then(toml::Value::as_str).map(String::from);
+                let args = old.get("args").and_then(toml::Value::as_array).map(|args| {
+                    args.iter()
+                        .filter_map(toml::Value::as_str)
+                        .map(String::from)
+                        .collect()
+                });
+                Err(ConfigProblem::OldAgentTable {
+                    name: text("name").unwrap_or_else(|| DEFAULT_AGENT.into()),
+                    binary: text("binary"),
+                    args,
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn agent_name(&self) -> Option<&str> {
+        match &self.agent {
+            Some(AgentSetting::Name(name)) => Some(name),
+            _ => None,
+        }
+    }
+}
+
+pub const DEFAULT_AGENT: &str = ClaudeCode::NAME;
+pub(crate) const TOP_LEVEL_RULES_AGENT: &str = ClaudeCode::NAME;
+
+#[derive(Debug, Default, Deserialize)]
 struct PresetLayer {
     mode: Option<String>,
+    #[serde(default)]
+    allow: Vec<String>,
+    #[serde(default)]
+    deny: Vec<String>,
+    #[serde(flatten)]
+    agents: BTreeMap<String, RulesLayer>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RulesLayer {
     #[serde(default)]
     allow: Vec<String>,
     #[serde(default)]
@@ -72,11 +136,41 @@ impl PresetLayer {
                     }
                 })?),
             };
+        if self.agents.contains_key(TOP_LEVEL_RULES_AGENT) {
+            return Err(ConfigProblem::ClaudeRuleTable {
+                preset: name.into(),
+            });
+        }
+        if let Some(agent) = self
+            .agents
+            .keys()
+            .find(|agent| !built_in_names().any(|known| known == agent.as_str()))
+        {
+            return Err(ConfigProblem::UnknownRuleAgent {
+                preset: name.into(),
+                agent: agent.clone(),
+            });
+        }
+        let top_level = (TOP_LEVEL_RULES_AGENT, &self.allow, &self.deny);
+        let agents = self
+            .agents
+            .iter()
+            .map(|(agent, rules)| (agent.as_str(), &rules.allow, &rules.deny));
+        let rules = std::iter::once(top_level)
+            .chain(agents)
+            .map(|(agent, allow, deny)| {
+                let rules = Rules {
+                    allow: allow.clone(),
+                    deny: deny.clone(),
+                };
+                (agent.to_string(), rules)
+            })
+            .filter(|(_, rules)| !rules.is_empty())
+            .collect();
         Ok(Preset {
             name: name.into(),
             mode,
-            allow: self.allow.clone(),
-            deny: self.deny.clone(),
+            rules,
         })
     }
 }
@@ -88,10 +182,17 @@ pub struct AgentConfig {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct LayeredAgent {
+    config: AgentConfig,
+    committed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresetError {
     Unknown(String),
     Untrusted(String),
+    Unsupported(String),
 }
 
 #[derive(Debug, Clone)]
@@ -101,8 +202,8 @@ pub struct RepoConfig {
     base: Option<String>,
     preset: Option<Sourced<String>>,
     review_command: Option<String>,
-    agent: AgentConfig,
-    agent_committed: bool,
+    default_agent: String,
+    agents: BTreeMap<String, LayeredAgent>,
     notifications: Notifications,
     presets: BTreeMap<String, Sourced<Preset>>,
     trust_request: Option<TrustRequest>,
@@ -116,6 +217,7 @@ impl RepoConfig {
         approved: Option<&TrustHash>,
     ) -> Result<Self, (Source, ConfigProblem)> {
         for (source, layer) in &layers {
+            layer.check().map_err(|problem| (*source, problem))?;
             if *source == Source::RepoFile && layer.review_command.is_some() {
                 let key = "review_command";
                 return Err((*source, ConfigProblem::Misplaced { key }));
@@ -129,21 +231,36 @@ impl RepoConfig {
                 })
             })
         };
-        let binary = pick(&|layer| layer.agent.binary.as_ref());
-        let args = layers.iter().rev().find_map(|(source, layer)| {
-            layer.agent.args.clone().map(|value| Sourced {
-                value,
-                source: *source,
+        let names = layers
+            .iter()
+            .flat_map(|(_, layer)| layer.agents.keys())
+            .collect::<BTreeSet<_>>();
+        let agents = names
+            .into_iter()
+            .map(|name| {
+                let binary = pick(&|layer| {
+                    layer
+                        .agents
+                        .get(name)
+                        .and_then(|agent| agent.binary.as_ref())
+                });
+                let args = layers.iter().rev().find_map(|(source, layer)| {
+                    let args = layer.agents.get(name)?.args.clone()?;
+                    Some(Sourced {
+                        value: args,
+                        source: *source,
+                    })
+                });
+                let committed = binary.as_ref().is_some_and(Sourced::committed)
+                    || args.as_ref().is_some_and(Sourced::committed);
+                let config = AgentConfig {
+                    name: name.clone(),
+                    binary: binary.map(|binary| binary.value),
+                    args: args.map(|args| args.value).unwrap_or_default(),
+                };
+                (name.clone(), LayeredAgent { config, committed })
             })
-        });
-        let agent_committed = binary.as_ref().is_some_and(Sourced::committed)
-            || args.as_ref().is_some_and(Sourced::committed);
-        let agent = AgentConfig {
-            name: pick(&|layer| layer.agent.name.as_ref())
-                .map_or_else(|| "claude".into(), |name| name.value),
-            binary: binary.map(|binary| binary.value),
-            args: args.map(|args| args.value).unwrap_or_default(),
-        };
+            .collect();
 
         let mut presets = BTreeMap::new();
         for (source, layer) in &layers {
@@ -169,8 +286,13 @@ impl RepoConfig {
             preset: pick(&|layer| layer.preset.as_ref()),
             review_command: pick(&|layer| layer.review_command.as_ref())
                 .map(|sourced| sourced.value),
-            agent,
-            agent_committed,
+            default_agent: layers
+                .iter()
+                .rev()
+                .find_map(|(_, layer)| layer.agent_name())
+                .unwrap_or(DEFAULT_AGENT)
+                .into(),
+            agents,
             notifications: Notifications::layered(
                 std::iter::once(global_notifications)
                     .chain(layers.iter().map(|(_, layer)| &layer.notifications)),
@@ -197,12 +319,16 @@ impl RepoConfig {
         let mut items = Vec::new();
         items.extend(committed(&self.setup).map(TrustItem::SetupScript));
         items.extend(committed(&self.teardown).map(TrustItem::TeardownScript));
-        if self.agent_committed {
-            items.push(TrustItem::Agent {
-                binary: self.agent.binary.clone(),
-                args: self.agent.args.clone(),
-            });
-        }
+        items.extend(
+            self.agents
+                .values()
+                .filter(|agent| agent.committed)
+                .map(|agent| TrustItem::Agent {
+                    name: agent.config.name.clone(),
+                    binary: agent.config.binary.clone(),
+                    args: agent.config.args.clone(),
+                }),
+        );
         items.extend(
             self.presets
                 .values()
@@ -262,10 +388,19 @@ impl RepoConfig {
         self.review_command.as_deref()
     }
 
-    pub fn agent(&self) -> Result<&AgentConfig, Untrusted> {
-        match self.agent_committed && !self.trusted {
-            true => Err(Untrusted),
-            false => Ok(&self.agent),
+    pub fn default_agent(&self) -> &str {
+        &self.default_agent
+    }
+
+    pub fn agent(&self, name: &str) -> Result<AgentConfig, Untrusted> {
+        match self.agents.get(name) {
+            Some(agent) if agent.committed && !self.trusted => Err(Untrusted),
+            Some(agent) => Ok(agent.config.clone()),
+            None => Ok(AgentConfig {
+                name: name.into(),
+                binary: None,
+                args: Vec::new(),
+            }),
         }
     }
 
@@ -291,7 +426,30 @@ impl RepoConfig {
         Presets::new(usable).expect("reserved preset names are rejected at load")
     }
 
-    pub fn select_preset(&self, new: Option<&str>) -> Result<Preset, PresetError> {
+    pub fn select_preset(
+        &self,
+        new: Option<&str>,
+        modes: &[PermissionMode],
+    ) -> Result<Preset, PresetError> {
+        let name = new.or(self.default_preset()).unwrap_or(INHERIT);
+        let expressible = self
+            .all_presets()
+            .get(name)
+            .is_none_or(|preset| preset.expressible(modes));
+        match (expressible, new) {
+            (true, _) => self.select_any(new),
+            (false, Some(name)) => Err(PresetError::Unsupported(name.into())),
+            (false, None) => {
+                let edits = self.select_any(Some(EDITS))?;
+                match edits.expressible(modes) {
+                    true => Ok(edits),
+                    false => Ok(Preset::inherit()),
+                }
+            }
+        }
+    }
+
+    fn select_any(&self, new: Option<&str>) -> Result<Preset, PresetError> {
         let name = new.or(self.default_preset()).unwrap_or(INHERIT);
         let untrusted_definition = self
             .presets

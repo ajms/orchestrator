@@ -66,8 +66,10 @@ pub enum FailureKind {
     Other(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RateLimit {
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageWindow {
+    pub name: String,
+    pub label: String,
     pub used_percent: f64,
     pub resets_at_unix: Option<i64>,
 }
@@ -81,13 +83,13 @@ pub struct UsageSample {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cost_usd: Option<f64>,
-    pub five_hour: Option<RateLimit>,
-    pub seven_day: Option<RateLimit>,
+    pub windows: Vec<UsageWindow>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
     SessionStarted,
+    AwaitingPrompt,
     PromptSubmitted,
     ToolStarted {
         tool: String,
@@ -98,6 +100,7 @@ pub enum AgentEvent {
         subagent: Option<SubagentId>,
     },
     PermissionRequested,
+    PermissionCleared,
     PermissionDenied,
     QuestionAsked,
     TurnEnded,
@@ -124,9 +127,31 @@ pub enum AgentEvent {
     },
     GuardCheck {
         tool: String,
-        input_json: String,
+        action: GuardedAction,
         cwd: Option<String>,
     },
+}
+
+impl AgentEvent {
+    pub fn is_turn_activity(&self) -> bool {
+        matches!(
+            self,
+            AgentEvent::PromptSubmitted
+                | AgentEvent::ToolStarted { .. }
+                | AgentEvent::ToolFinished { .. }
+                | AgentEvent::QuestionAsked
+                | AgentEvent::TurnEnded
+                | AgentEvent::Failed { .. }
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuardedAction {
+    WriteFile { path: String },
+    Shell { command: String },
+    ExternalTool { name: String },
+    Unreadable,
 }
 
 #[derive(Debug, Clone, PartialEq)]

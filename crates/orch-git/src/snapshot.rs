@@ -28,6 +28,11 @@ impl Repo {
         self.git(["diff", "--no-color", "--no-ext-diff", from, to])
             .run()
     }
+
+    pub fn diff_stat(&self, from: &str, to: &str) -> Result<String, Error> {
+        self.git(["diff", "--no-color", "--stat=1000", from, to])
+            .run()
+    }
 }
 
 pub(crate) fn snapshot_commit(worktree: &Path) -> Result<String, Error> {

@@ -47,6 +47,7 @@ impl Sandbox {
         let mut command = Command::new(env!("CARGO_BIN_EXE_orch"));
         command
             .env("HOME", self.path("home"))
+            .env("XDG_STATE_HOME", self.path("state"))
             .env("ORCH_RUNTIME_DIR", self.runtime_dir())
             .env(
                 "ORCH_CLAUDE_MANAGED_SETTINGS",
@@ -55,6 +56,7 @@ impl Sandbox {
             .current_dir(self.path("work"))
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ORCH_HOLDER_SOCKET")
+            .env_remove("ORCH_SESSION")
             .env_remove("XDG_RUNTIME_DIR")
             .stdin(Stdio::null());
         command

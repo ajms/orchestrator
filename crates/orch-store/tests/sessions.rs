@@ -241,6 +241,10 @@ fn agent_state_guard_switch_and_allowances_persist_across_reopening() {
             kind: GuardKind::BaseBranch,
             target: "main".into(),
         },
+        GuardHit {
+            kind: GuardKind::ExternalTool,
+            target: "mcp__github__create_issue".into(),
+        },
     ];
     for state in [
         AgentState::Starting,
@@ -299,4 +303,41 @@ fn a_deleted_session_is_gone_with_its_conversations_and_port_block() {
             .base,
         20000
     );
+}
+
+#[test]
+fn a_session_keeps_the_agent_it_was_created_with() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut new = new_session(&repo, "agy-task");
+    new.agent = "antigravity".into();
+    let mut created = fx.store.create_session(new).unwrap();
+    assert_eq!(created.agent, "antigravity");
+
+    created.agent = "claude".into();
+    fx.store.save_session(&created).unwrap();
+    fx.reopen();
+    assert_eq!(
+        fx.store.session(&created.id).unwrap().unwrap().agent,
+        "antigravity"
+    );
+}
+
+#[test]
+fn sessions_stored_before_agents_were_recorded_belong_to_claude() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let id = fx.session(&repo, "old").id;
+    let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
+    let version: usize = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    conn.execute_batch("ALTER TABLE sessions DROP COLUMN agent")
+        .unwrap();
+    conn.pragma_update(None, "user_version", version - 2)
+        .unwrap();
+    drop(conn);
+
+    fx.reopen();
+    assert_eq!(fx.store.session(&id).unwrap().unwrap().agent, "claude");
 }

@@ -37,7 +37,7 @@ What a live Session's Agent is doing right now: Starting, Working, Needs input, 
 _Avoid_: Activity, run state
 
 **Needs input**:
-The Agent state in which the Agent is blocked on the user: a permission prompt or a question it asked.
+The Agent state in which the Agent is blocked on the user: a permission prompt or a question it asked. An Agent that gives no signal for a blocking start-up screen (agy's workspace-trust screen) shows Starting there instead.
 _Avoid_: Waiting, blocked, paused
 
 **Unseen**:
@@ -63,7 +63,7 @@ _Avoid_: Project settings, repo file
 
 **Trust**:
 The user's approval to run the scripts a Repo config brings from the Repo itself; it lapses when those scripts change.
-_Avoid_: Allow-list, permission
+_Avoid_: Allow-list, permission, workspace trust (agy's screen asking whether to trust a folder)
 
 **Session**:
 One Agent working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent, or starting a new Conversation, keeps the same Session.
@@ -84,6 +84,10 @@ _Avoid_: Driver, plugin, integration
 **Agent hookup**:
 The Orchestrator's hooks and statusline installed into an Agent's own global configuration, for Agents that cannot take them per Session; that Agent's Sessions cannot start without it.
 _Avoid_: Integration, setup, plugin
+
+**Usage window**:
+A named limit on how much of an Agent's quota is used in a period (Claude's `5h` and `7d`, Antigravity's `gemini-wk` and `3p-wk`), as a percentage that resets at a set time; the latest value per Agent and window is shown until it resets.
+_Avoid_: Rate limit, quota, usage limit
 
 **Conversation**:
 The Agent's own chat history within a Session; a Session can move through several (e.g. after the Agent's history is cleared), and only the latest is resumed.
@@ -109,6 +113,10 @@ _Avoid_: Parent, target, trunk
 Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch or pushing the Branch and opening a pull request.
 _Avoid_: Shipping, completing, finishing
 
+**Draft**:
+The commit message or pull request text that Landing proposes, written by a headless one-shot of the Session's Agent without adding turns to the live Conversation.
+_Avoid_: Suggestion, autocomplete
+
 **Setup script**:
 A per-Repo command run in a new Worktree before its Agent starts.
 _Avoid_: Init hook, bootstrap
@@ -118,7 +126,7 @@ A per-Repo command run in a Worktree just before it is removed.
 _Avoid_: Cleanup hook, archive script
 
 **Preset**:
-A named level of Agent autonomy: a permission mode plus allow and deny rules, chosen per Session.
+A named level of Agent autonomy, chosen per Session: a permission mode from a shared vocabulary, plus allow and deny rules per Agent, each in that Agent's own syntax. Not every mode works for every Agent, so a Session is only offered the Presets its Agent can express.
 _Avoid_: Profile, policy, autonomy level
 
 **Guard**:
