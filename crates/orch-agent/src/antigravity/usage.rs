@@ -9,9 +9,9 @@ const POOL_LABELS: [(&str, &str); 2] = [("gemini-weekly", "gemini-wk"), ("3p-wee
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub(super) struct Usage {
-    model: Model,
-    context_window: ContextWindow,
-    quota: Map<String, Value>,
+    model: Option<Model>,
+    context_window: Option<ContextWindow>,
+    quota: Option<Map<String, Value>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -38,15 +38,21 @@ struct Pool {
 
 impl Usage {
     pub(super) fn sample(self, conversation: Option<ConversationId>) -> UsageSample {
+        let context = self.context_window.unwrap_or_default();
         UsageSample {
             conversation,
-            model: self.model.display_name,
-            context_used_percent: self.context_window.used_percentage,
-            context_window_tokens: self.context_window.context_window_size,
-            input_tokens: self.context_window.total_input_tokens,
-            output_tokens: self.context_window.total_output_tokens,
+            model: self.model.and_then(|model| model.display_name),
+            context_used_percent: context.used_percentage,
+            context_window_tokens: context.context_window_size,
+            input_tokens: context.total_input_tokens,
+            output_tokens: context.total_output_tokens,
             cost_usd: None,
-            windows: self.quota.into_iter().filter_map(window).collect(),
+            windows: self
+                .quota
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(window)
+                .collect(),
         }
     }
 }
