@@ -16,7 +16,7 @@ struct HookPayload {
     event: Option<String>,
     tool_call: Option<ToolCall>,
     termination_reason: Option<String>,
-    error: Option<String>,
+    error: Option<Value>,
     fully_idle: bool,
 }
 
@@ -47,7 +47,7 @@ pub(super) fn is_guard_payload(payload: &str) -> bool {
     };
     parse(&value).is_ok_and(|hook| match hook.event.as_deref() {
         Some(event) => event == GUARD_EVENT,
-        None => hook.tool_call.is_some() && value.get("error").is_none(),
+        None => hook.tool_call.is_some() && hook.error.is_none(),
     })
 }
 
@@ -95,7 +95,11 @@ fn stop(hook: &HookPayload) -> Vec<AgentEvent> {
         .unwrap_or_default()
         .to_ascii_lowercase();
     if FAILED_REASONS.contains(&reason.as_str()) {
-        let error = hook.error.as_deref().filter(|error| !error.is_empty());
+        let error = hook
+            .error
+            .as_ref()
+            .and_then(Value::as_str)
+            .filter(|error| !error.is_empty());
         let kind = FailureKind::Other(error.unwrap_or(&reason).into());
         vec![AgentEvent::Failed { kind }]
     } else if hook.fully_idle {

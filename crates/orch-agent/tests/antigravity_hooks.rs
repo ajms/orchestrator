@@ -116,7 +116,9 @@ fn only_pre_tool_use_blocks_on_a_guard() {
 fn a_pre_tool_use_from_a_hook_without_an_event_name_still_blocks() {
     let agy = Antigravity::default();
     assert!(agy.is_guard_payload(&fixture("pre_tool_use_run_command")));
+    assert!(agy.is_guard_payload(&fixture("pre_tool_use_invoke_subagent")));
     assert!(!agy.is_guard_payload(&fixture("post_tool_use")));
+    assert!(!agy.is_guard_payload(&fixture("subagent_post_tool_use")));
 }
 
 #[test]
