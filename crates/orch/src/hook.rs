@@ -6,6 +6,8 @@ use orch_agent::{GuardAnswer, by_name};
 use orch_core::SessionId;
 use orch_holder::{ToHolder, locate_socket, report, request_guard};
 
+const UNTAGGED_TOOL_CALL: &str = "toolCall";
+
 pub fn run(agent: &str, session: Option<&str>, event: Option<&str>) -> ExitCode {
     let adapter = by_name(agent);
     let fallback = || {
@@ -42,8 +44,14 @@ pub fn run(agent: &str, session: Option<&str>, event: Option<&str>) -> ExitCode 
                 None => fallback(),
             }
         }
-        None if serde_json::from_str::<serde_json::Value>(&payload).is_err() => fallback(),
         None => {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&payload) else {
+                fallback();
+                return ExitCode::SUCCESS;
+            };
+            if event.is_none() && value.get(UNTAGGED_TOOL_CALL).is_some() {
+                fallback();
+            }
             if let Some(socket) = socket {
                 let agent = agent.into();
                 let _ = report(&socket, &ToHolder::Hook { agent, payload });
