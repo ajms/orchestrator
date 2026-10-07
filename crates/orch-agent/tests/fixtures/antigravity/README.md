@@ -14,7 +14,7 @@ Live findings these record, against the agy 1.2.17 probe: `PostToolUse` carries 
 - `hooks/pre_tool_use_run_command.json` and the other `pre_tool_use_*.json` tool calls, apart from `invoke_subagent`. Guesses: the `ask_question` arguments, `send_command_input`'s `Input`, `open_browser_url`'s `Url`, the MCP tool name `mcp_chrome_devtools_take_memory_snapshot` (agy names MCP tools `mcp_<server>_<tool>`, with `-` turned into `_`), and the path fields of the file-writing tools other than `write_to_file`'s `TargetFile`.
 - `hooks/stop_error.json`, `hooks/stop_max_steps_exceeded.json` (guessed `MAX_STEPS_EXCEEDED` spelling), `hooks/stop_waiting_on_subagent.json`, `hooks/subagent_pre_tool_use_run_command.json` and `hooks/subagent_stop_error.json`.
 - `hooks/pre_tool_use_invoke_two_subagents.json` and `transcripts/subagent_every_step_kind.jsonl`: two Subagents and every transcript step kind (thinking, a system notice, an error result, a second prompt), which one live Subagent doesn't cover.
-- `statusline/idle.json`, `statusline/working_plan.json` and `statusline/quota_exhausted.json`. Guesses: an RFC 3339 `reset_time`, and that a missing `remaining_fraction` means 100% used (from agy's `omitempty` JSON tag).
+- `statusline/idle.json`, `statusline/working_plan.json` and `statusline/quota_exhausted.json`. Guesses: an RFC 3339 `reset_time`, and that a missing `remaining_fraction` means 100% used (from agy's `omitempty` JSON tag). These three still carry `"version":"1.2.17"`.
 
 `hooks/` holds raw hook stdin. agy names no event in the payload; orch's hookup passes it as `orch hook --event <name>`, so the tests tag each fixture with its event.
 
