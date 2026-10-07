@@ -114,3 +114,13 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
 6. **Register the adapter** in `crates/orch-agent/src/built_in.rs` (`BUILT_IN`) under its config name, so that `agent = "<agent>"` or the `:new` form selects it, `[agents.<agent>]` configures its `binary` and `args`, and `orch hook` / `orch tap --agent <agent>` reach it.
 7. **Run it end to end** with the scriptable fake Agent (`orch fake-agent`) through the Daemon tests, if the new adapter changes launch or event routing. The fake knows no Agent: configure it as `[agents.<agent>] binary` with `args = ["fake-agent", "--"]`; it echoes each `-flag value` of its argv as `flag> value`, replays `hook`/`tap` lines (with any leading `--flag value` pairs, e.g. `hook --agent antigravity --event Stop {…}`) through `orch hook` / `orch tap`, and a `draft <flag> [<conversation flag>]` line in its `--script` makes it answer as a one-shot Draft whenever its argv contains `<flag>` (the Claude tests use `draft -p --resume`).
 8. **Update this document** and `CONTEXT.md` if the Agent brings a concept the glossary lacks.
+
+## Testing against a real agy
+
+Adapter and Daemon tests never start a real Agent. For Antigravity there is an opt-in suite, `crates/orch/tests/real_agy/`, that drives a signed-in `agy` through the Daemon and Holder in a cached template HOME (onboarded with data sharing off, Agent hookup installed by `orch agent install`), so your `~/.gemini` is never touched:
+
+```sh
+ORCH_REAL_AGY=1 cargo test -p orch --test real_agy -- --ignored --test-threads=1
+```
+
+It covers launch with `-i`, hooks through the hookup, Needs input on the trust screen and a permission prompt, Idle on `fullyIdle`, resume with `--mode`, one Subagent, a Draft (including whether `agy -p` reads its prompt from stdin) and whether agy's OSC 11 query stalls its start in the Holder. Adding `ORCH_REAL_AGY_RECORD=1` re-records the scrubbed fixtures in `crates/orch-agent/tests/fixtures/antigravity/`. Its README lists the prerequisites and what each test checks. Without `ORCH_REAL_AGY=1` the tests are no-ops, and CI never runs them.

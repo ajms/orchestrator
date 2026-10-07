@@ -478,7 +478,15 @@ impl TestClient {
     }
 
     pub async fn request(&mut self, request: Request) -> Result<Reply, RequestError> {
-        tokio::time::timeout(WAIT, self.client.request(request))
+        self.request_within(request, WAIT).await
+    }
+
+    pub async fn request_within(
+        &mut self,
+        request: Request,
+        wait: Duration,
+    ) -> Result<Reply, RequestError> {
+        tokio::time::timeout(wait, self.client.request(request))
             .await
             .expect("no response in time")
             .unwrap()
@@ -603,7 +611,17 @@ impl TestClient {
         what: &str,
         predicate: impl Fn(&SessionView) -> bool,
     ) -> SessionView {
-        let deadline = Instant::now() + WAIT;
+        self.until_within(session, what, WAIT, predicate).await
+    }
+
+    pub async fn until_within(
+        &mut self,
+        session: &SessionId,
+        what: &str,
+        wait: Duration,
+        predicate: impl Fn(&SessionView) -> bool,
+    ) -> SessionView {
+        let deadline = Instant::now() + wait;
         loop {
             if let Some(view) = self.sessions.get(session)
                 && predicate(view)
@@ -672,7 +690,16 @@ impl PaneView {
     }
 
     pub async fn wait_for(&mut self, what: &str, predicate: impl Fn(&Self) -> bool) {
-        let deadline = Instant::now() + WAIT;
+        self.wait_for_within(what, WAIT, predicate).await
+    }
+
+    pub async fn wait_for_within(
+        &mut self,
+        what: &str,
+        wait: Duration,
+        predicate: impl Fn(&Self) -> bool,
+    ) {
+        let deadline = Instant::now() + wait;
         while !predicate(self) {
             assert!(
                 self.closed.is_none(),
