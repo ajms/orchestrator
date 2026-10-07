@@ -23,7 +23,7 @@ fn fixture(name: &str) -> Value {
 
 fn child(name: &str) -> Value {
     let mut payload = fixture(name);
-    payload["transcriptPath"] = fixture_path("transcripts/subagent_full.jsonl").into();
+    payload["transcriptPath"] = fixture_path("transcripts/subagent_every_step_kind.jsonl").into();
     payload
 }
 
@@ -62,6 +62,29 @@ fn finished() -> AgentEvent {
 }
 
 #[test]
+fn a_recorded_subagent_is_labelled_by_its_recorded_invoke_subagent_spec() {
+    let mut tree = tree();
+    tap(&mut tree, ROOT);
+    hook(
+        &mut tree,
+        "PreToolUse",
+        &fixture("pre_tool_use_invoke_subagent"),
+    );
+
+    assert_eq!(
+        hook(
+            &mut tree,
+            "PreInvocation",
+            &child_at(
+                "subagent_pre_invocation",
+                std::path::Path::new(&fixture_path("transcripts/subagent_full.jsonl"))
+            )
+        ),
+        [started("self", "Ping Responder")]
+    );
+}
+
+#[test]
 fn another_conversation_is_a_subagent_labelled_by_the_matching_invoke_subagent_spec() {
     let mut tree = tree();
     tap(&mut tree, ROOT);
@@ -69,7 +92,7 @@ fn another_conversation_is_a_subagent_labelled_by_the_matching_invoke_subagent_s
         hook(
             &mut tree,
             "PreToolUse",
-            &fixture("pre_tool_use_invoke_subagent")
+            &fixture("pre_tool_use_invoke_two_subagents")
         ),
         [AgentEvent::ToolStarted {
             tool: "invoke_subagent".into(),
@@ -133,7 +156,7 @@ fn a_subagents_tools_are_its_own_and_guarded() {
     assert_eq!(
         hook(&mut tree, "PostToolUse", &child("subagent_post_tool_use")),
         [AgentEvent::ToolFinished {
-            tool: String::new(),
+            tool: "send_message".into(),
             subagent: subagent(),
         }]
     );
@@ -146,7 +169,7 @@ fn a_subagents_stop_finishes_it_and_a_later_hook_reopens_the_same_row() {
     hook(
         &mut tree,
         "PreToolUse",
-        &fixture("pre_tool_use_invoke_subagent"),
+        &fixture("pre_tool_use_invoke_two_subagents"),
     );
     hook(
         &mut tree,
@@ -242,7 +265,7 @@ fn a_nested_subagent_is_flattened_under_the_session() {
         "PreInvocation",
         &child("subagent_pre_invocation"),
     );
-    let mut invoke = fixture("pre_tool_use_invoke_subagent");
+    let mut invoke = fixture("pre_tool_use_invoke_two_subagents");
     invoke["conversationId"] = CHILD.into();
     hook(&mut tree, "PreToolUse", &invoke);
 
@@ -296,7 +319,7 @@ fn a_subagent_whose_transcript_appears_after_its_first_hook_is_relabelled_by_its
     hook(
         &mut tree,
         "PreToolUse",
-        &fixture("pre_tool_use_invoke_subagent"),
+        &fixture("pre_tool_use_invoke_two_subagents"),
     );
     assert_eq!(
         hook(
@@ -307,7 +330,11 @@ fn a_subagent_whose_transcript_appears_after_its_first_hook_is_relabelled_by_its
         [started("subagent", "")]
     );
 
-    std::fs::copy(fixture_path("transcripts/subagent_full.jsonl"), &transcript).unwrap();
+    std::fs::copy(
+        fixture_path("transcripts/subagent_every_step_kind.jsonl"),
+        &transcript,
+    )
+    .unwrap();
     assert_eq!(
         hook(
             &mut tree,
@@ -317,7 +344,7 @@ fn a_subagent_whose_transcript_appears_after_its_first_hook_is_relabelled_by_its
         [
             started("general", "Test Runner"),
             AgentEvent::ToolFinished {
-                tool: String::new(),
+                tool: "send_message".into(),
                 subagent: subagent(),
             }
         ]
@@ -328,7 +355,7 @@ fn a_subagent_whose_transcript_appears_after_its_first_hook_is_relabelled_by_its
 fn a_subagent_hook_naming_the_plain_transcript_is_labelled_from_the_full_one() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::copy(
-        fixture_path("transcripts/subagent_full.jsonl"),
+        fixture_path("transcripts/subagent_every_step_kind.jsonl"),
         dir.path().join("transcript_full.jsonl"),
     )
     .unwrap();
@@ -337,7 +364,7 @@ fn a_subagent_hook_naming_the_plain_transcript_is_labelled_from_the_full_one() {
     hook(
         &mut tree,
         "PreToolUse",
-        &fixture("pre_tool_use_invoke_subagent"),
+        &fixture("pre_tool_use_invoke_two_subagents"),
     );
     assert_eq!(
         hook(
