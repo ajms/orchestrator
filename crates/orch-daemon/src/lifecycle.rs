@@ -500,7 +500,8 @@ impl Daemon {
             record.id.clone(),
             self.config.orch_program.to_string_lossy(),
             preset,
-        );
+        )
+        .with_worktree(&record.worktree);
         if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
             spec = spec.with_prompt(prompt);
         }

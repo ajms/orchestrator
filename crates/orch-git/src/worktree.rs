@@ -172,6 +172,7 @@ impl Repo {
             });
         }
         let mut outcome = None;
+        self.remove_subagent_worktrees(path)?;
         if path.is_dir() {
             outcome = teardown.map(|script| script.run(path));
             if self.worktree_exists(path) {

@@ -61,7 +61,9 @@ fn announce(agent_args: &[String]) {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--settings" => {
-                args.next();
+                if let Some(command) = args.next().and_then(|json| worktree_hook(json)) {
+                    say(&format!("worktree-hook> {command}"));
+                }
             }
             "--" => {
                 let prompt: Vec<&str> = args.by_ref().map(String::as_str).collect();
@@ -74,6 +76,12 @@ fn announce(agent_args: &[String]) {
             other => say(&format!("arg> {other}")),
         }
     }
+}
+
+fn worktree_hook(settings: &str) -> Option<String> {
+    let settings: serde_json::Value = serde_json::from_str(settings).ok()?;
+    let command = &settings["hooks"]["WorktreeCreate"][0]["hooks"][0]["command"];
+    command.as_str().map(String::from)
 }
 
 fn disable_echo() {

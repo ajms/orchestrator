@@ -86,8 +86,12 @@ The Agent's own chat history within a Session; a Session can move through severa
 _Avoid_: Chat, thread, transcript
 
 **Subagent**:
-A helper the Agent spawns inside its own Session; it shares the Session's Worktree and is not a Session itself.
+A helper the Agent spawns inside its own Session; it shares the Session's Worktree, or works in a Subagent worktree, and is not a Session itself.
 _Avoid_: Child session, worker, sub-session
+
+**Subagent worktree**:
+A git worktree the Agent asks for to isolate one Subagent. It branches from the Session's HEAD, lives under `.orchestrator/subagents/<slug>/`, counts as inside the Session for Guards, and is removed with the Session.
+_Avoid_: Agent worktree, child worktree
 
 **Subagent transcript**:
 A read-only, live record of what a Subagent was asked and did (its prompt, its text, and its tool calls with their results), followed from the Agent's own files and shown when the Subagent is selected.

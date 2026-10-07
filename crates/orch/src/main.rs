@@ -10,6 +10,7 @@ mod systemd;
 mod tap;
 mod trust;
 mod tui;
+mod worktree_hook;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -45,6 +46,11 @@ enum Command {
     },
     Trust(trust::TrustArgs),
     #[command(hide = true)]
+    WorktreeHook {
+        #[arg(long)]
+        worktree: PathBuf,
+    },
+    #[command(hide = true)]
     FakeAgent {
         #[arg(long)]
         script: Option<PathBuf>,
@@ -63,6 +69,7 @@ fn main() -> ExitCode {
         Some(Command::Repo(command)) => repo::run(command),
         Some(Command::Tap { session }) => tap::run(&session),
         Some(Command::Trust(args)) => trust::run(args),
+        Some(Command::WorktreeHook { worktree }) => worktree_hook::run(&worktree),
         Some(Command::FakeAgent { script, agent_args }) => {
             fake_agent::run(script.as_deref(), &agent_args)
         }

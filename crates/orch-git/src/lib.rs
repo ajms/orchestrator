@@ -9,6 +9,7 @@ mod script;
 mod slug;
 mod snapshot;
 mod stacking;
+mod subagent;
 mod worktree;
 
 pub use cleanup::{Cleaned, CleanupCheckpoint, InUse};
@@ -21,4 +22,5 @@ pub use repo::Repo;
 pub use script::{Script, ScriptOutcome};
 pub use slug::slugify;
 pub use snapshot::ReviewSnapshot;
+pub use subagent::subagent_worktrees_dir;
 pub use worktree::{DEFAULT_BRANCH_PREFIX, SessionName, SessionWorktree};

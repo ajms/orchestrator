@@ -50,6 +50,8 @@ async fn a_new_session_runs_its_setup_script_then_starts_the_agent_with_its_prom
     pane.wait_for_text("prompt> Fix the login bug").await;
     pane.wait_for_text(&format!("session-id> {}", id.as_str()))
         .await;
+    pane.wait_for_text(&format!("worktree-hook --worktree '{worktree}'"))
+        .await;
     pane.type_line("env ORCH_PORT_BASE").await;
     pane.wait_for_text("ORCH_PORT_BASE=20000").await;
     pane.type_line("env ORCH_WORKTREE").await;

@@ -219,3 +219,20 @@ fn resume_never_repeats_the_initial_prompt() {
         .unwrap();
     assert!(!argv.args.iter().any(|arg| arg.contains("flaky")));
 }
+
+#[test]
+fn launch_routes_subagent_worktrees_into_the_sessions_worktree_hook() {
+    let spec = spec(Preset::inherit()).with_worktree("/repo/.orchestrator/worktrees/work");
+    let settings = settings(&ClaudeCode::default().launch(&spec).args);
+    let shim = "'/opt/orch/bin/orch' worktree-hook --worktree '/repo/.orchestrator/worktrees/work'";
+    for event in ["WorktreeCreate", "WorktreeRemove"] {
+        assert_eq!(hook_commands(&settings, event), vec![shim], "{event}");
+    }
+}
+
+#[test]
+fn launch_without_a_worktree_leaves_subagent_worktrees_to_claude() {
+    let settings = settings(&ClaudeCode::default().launch(&spec(Preset::inherit())).args);
+    assert!(hook_commands(&settings, "WorktreeCreate").is_empty());
+    assert!(hook_commands(&settings, "WorktreeRemove").is_empty());
+}

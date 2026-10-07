@@ -1,9 +1,11 @@
+use std::path::PathBuf;
+
 use orch_core::{AgentEvent, ConversationId, FailureKind, SubagentId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::mode_from_name;
-use crate::PayloadError;
+use crate::{PayloadError, WorktreeRequest};
 
 const QUESTION_TOOL: &str = "AskUserQuestion";
 
@@ -21,6 +23,8 @@ pub(super) enum HookEvent {
     StopFailure,
     SubagentStart,
     SubagentStop,
+    WorktreeCreate,
+    WorktreeRemove,
     #[serde(other)]
     Other,
 }
@@ -73,6 +77,24 @@ pub(super) fn event_name(payload: &str) -> Option<HookEvent> {
     serde_json::from_str::<HookName>(payload)
         .ok()
         .map(|hook| hook.hook_event_name)
+}
+
+#[derive(Deserialize)]
+struct WorktreePayload {
+    hook_event_name: HookEvent,
+    name: Option<String>,
+    worktree_path: Option<PathBuf>,
+}
+
+pub(super) fn worktree_request(payload: &str) -> Option<WorktreeRequest> {
+    let hook: WorktreePayload = serde_json::from_str(payload).ok()?;
+    match hook.hook_event_name {
+        HookEvent::WorktreeCreate => hook.name.map(|name| WorktreeRequest::Create { name }),
+        HookEvent::WorktreeRemove => hook
+            .worktree_path
+            .map(|path| WorktreeRequest::Remove { path }),
+        _ => None,
+    }
 }
 
 pub(super) fn map_hook(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
@@ -130,7 +152,7 @@ impl HookPayload {
                 _ => vec![],
             },
             H::Stop if subagent.is_none() => vec![AgentEvent::TurnEnded],
-            H::Stop | H::Other => vec![],
+            H::Stop | H::WorktreeCreate | H::WorktreeRemove | H::Other => vec![],
             H::StopFailure => vec![AgentEvent::Failed {
                 kind: failure_kind(self.error.as_deref().unwrap_or("unknown")),
             }],
