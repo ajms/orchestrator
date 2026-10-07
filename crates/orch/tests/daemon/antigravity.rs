@@ -148,6 +148,99 @@ async fn only_a_fully_idle_stop_makes_the_session_idle() {
 }
 
 #[tokio::test]
+async fn another_conversation_under_the_session_is_a_subagent_whose_row_reopens() {
+    const CHILD: &str = "8d2f61b7-4a09-4c3e-9b15-e07a3c5d9f28";
+    const PROMPT: &str = "Run the login tests and report the failures.";
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = antigravity_session(&env, &mut client, "edits").await;
+    tap(&mut pane, json!({ "agent_state": "working" })).await;
+    let spec = json!({ "TypeName": "general", "Role": "Test Runner", "Prompt": PROMPT });
+    hook(
+        &mut pane,
+        "PreToolUse",
+        json!({ "toolCall": { "name": "invoke_subagent", "args": { "Subagents": [spec] } } }),
+    )
+    .await;
+
+    let transcript = env.path("brain/child/transcript_full.jsonl");
+    std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    let message = format!(
+        "<SYSTEM_MESSAGE>\n[Message] timestamp=2026-10-07T08:00:05Z sender={CONVERSATION} priority=MESSAGE_PRIORITY_HIGH content={PROMPT}\n</SYSTEM_MESSAGE>"
+    );
+    let step =
+        json!({ "step_index": 0, "type": "SYSTEM_MESSAGE", "status": "DONE", "content": message });
+    std::fs::write(&transcript, format!("{step}\n")).unwrap();
+    let child = |fields: Value| {
+        let mut payload = json!({ "conversationId": CHILD, "transcriptPath": transcript });
+        payload
+            .as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        payload
+    };
+    let row = |view: &orch_protocol::SessionView| view.subagents.first().cloned();
+
+    hook(&mut pane, "PreInvocation", child(json!({}))).await;
+    hook(
+        &mut pane,
+        "PreToolUse",
+        child(json!({ "toolCall": { "name": "run_command", "args": { "CommandLine": "cargo test" } } })),
+    )
+    .await;
+    let running = client
+        .until(&id, "the Subagent's tool", |view| {
+            row(view).is_some_and(|row| row.tool_count == 1)
+        })
+        .await;
+    let started = row(&running).unwrap();
+    assert_eq!(
+        (started.id.as_str(), started.agent_type.as_str()),
+        (CHILD, "general")
+    );
+    assert_eq!(started.description, "Test Runner");
+
+    hook(
+        &mut pane,
+        "Stop",
+        child(json!({ "terminationReason": "NO_TOOL_CALL", "fullyIdle": false })),
+    )
+    .await;
+    client
+        .until(&id, "the Subagent done", |view| {
+            row(view).is_some_and(|row| row.done)
+        })
+        .await;
+
+    hook(&mut pane, "PreInvocation", child(json!({}))).await;
+    let reopened = client
+        .until(&id, "the Subagent running again", |view| {
+            row(view).is_some_and(|row| !row.done)
+        })
+        .await;
+    assert_eq!(reopened.subagents.len(), 1);
+    assert_eq!(reopened.conversation.as_deref(), Some(CONVERSATION));
+
+    let subscribe = Request::SubscribeSubagent {
+        session: id.clone(),
+        subagent: CHILD.into(),
+    };
+    client.request(subscribe).await.unwrap();
+    client
+        .until_received("the Subagent transcript", |client| {
+            !client.transcripts.is_empty()
+        })
+        .await;
+    assert_eq!(
+        client.transcripts[0].entries,
+        [orch_core::TranscriptEntry::Prompt {
+            text: PROMPT.into()
+        }]
+    );
+}
+
+#[tokio::test]
 async fn a_mode_cycled_in_agy_is_kept_when_the_session_resumes() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;

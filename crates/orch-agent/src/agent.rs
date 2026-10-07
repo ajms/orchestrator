@@ -114,6 +114,12 @@ pub trait TranscriptReader: Send {
     fn read(&mut self, path: &Path) -> TranscriptRead;
 }
 
+pub trait ConversationTree: Send {
+    fn restart(&mut self, conversation: Option<&ConversationId>);
+    fn hook(&mut self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError>;
+    fn tap(&mut self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError>;
+}
+
 pub trait AgentAdapter {
     fn capabilities(&self) -> Capabilities;
 
@@ -160,6 +166,10 @@ pub trait AgentAdapter {
     }
 
     fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>> {
+        None
+    }
+
+    fn conversation_tree(&self) -> Option<Box<dyn ConversationTree>> {
         None
     }
 

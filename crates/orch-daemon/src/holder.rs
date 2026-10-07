@@ -67,7 +67,7 @@ impl Daemon {
                             live.status.restore_agent(persisted, running)
                         }
                         _ => {
-                            live.status.observe(Observation::Spawned, now);
+                            live.agent_spawned(now);
                         }
                     }
                     if let AgentStatus::Exited(exit) = &hello.agent
@@ -261,7 +261,7 @@ impl Daemon {
         let mut conversations = Vec::new();
         let mut usage = Vec::new();
         let effects = match event {
-            HolderEvent::Spawned { .. } => live.status.observe(Observation::Spawned, now),
+            HolderEvent::Spawned { .. } => live.agent_spawned(now),
             HolderEvent::Exited(exit) => {
                 live.prompts.clear();
                 live.status.observe(exit_observation(&exit), now)

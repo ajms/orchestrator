@@ -5,7 +5,7 @@ use orch_core::{SubagentId, TranscriptEntry};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::lines::FollowedLines;
+use crate::lines::FollowedLines;
 use crate::{SubagentTranscripts, TranscriptRead, TranscriptReader};
 
 const KEY_ARGUMENTS: [&str; 9] = [

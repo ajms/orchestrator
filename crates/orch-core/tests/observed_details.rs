@@ -1,7 +1,9 @@
 mod common;
 
 use common::*;
-use orch_core::{AgentEvent, ConversationId, PermissionMode, Subagent, SubagentId, UsageSample};
+use orch_core::{
+    AgentEvent, ConversationId, Observation, PermissionMode, Subagent, SubagentId, UsageSample,
+};
 
 fn subagent_started(id: &str) -> AgentEvent {
     AgentEvent::SubagentStarted {
@@ -102,4 +104,15 @@ fn a_resumed_subagent_runs_again_in_its_own_row() {
             done: false,
         }]
     );
+}
+
+#[test]
+fn a_restarted_agent_finishes_every_open_subagent() {
+    let mut status = working_session();
+    status.feed_event(subagent_started("a1"));
+    status.feed_event(subagent_started("a2"));
+    status.feed(Observation::Spawned);
+
+    assert_eq!(status.subagents().len(), 2);
+    assert!(status.subagents().iter().all(|subagent| subagent.done));
 }

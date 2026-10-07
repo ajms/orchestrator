@@ -137,7 +137,12 @@ impl SessionStatus {
             return Vec::new();
         }
         match observation {
-            Observation::Spawned => self.agent_process_alive = true,
+            Observation::Spawned => {
+                self.agent_process_alive = true;
+                for subagent in &mut self.subagents {
+                    subagent.done = true;
+                }
+            }
             Observation::Exited { .. } => self.agent_process_alive = false,
             _ if !self.agent_process_alive => return Vec::new(),
             _ => {}

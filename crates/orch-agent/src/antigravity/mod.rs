@@ -1,6 +1,8 @@
 mod hooks;
 mod hookup;
 mod statusline;
+mod subagents;
+mod transcript;
 mod usage;
 
 use std::path::Path;
@@ -10,9 +12,12 @@ use serde_json::json;
 
 use crate::hookup::AgentHookup;
 use crate::{
-    AgentAdapter, Argv, Capabilities, Draft, DraftInput, GuardAnswer, LaunchSpec, PayloadError,
+    AgentAdapter, Argv, Capabilities, ConversationTree, Draft, DraftInput, GuardAnswer, LaunchSpec,
+    PayloadError, SubagentTranscripts,
 };
 use hookup::AntigravityHookup;
+use subagents::AntigravityTree;
+use transcript::AntigravitySubagentTranscripts;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Antigravity {
@@ -71,6 +76,8 @@ impl AgentAdapter for Antigravity {
             resume: true,
             usage: true,
             modes: true,
+            subagents: true,
+            transcripts: true,
             ..Capabilities::default()
         }
     }
@@ -115,6 +122,14 @@ impl AgentAdapter for Antigravity {
 
     fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         statusline::map_tap(payload)
+    }
+
+    fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>> {
+        Some(Box::new(AntigravitySubagentTranscripts::default()))
+    }
+
+    fn conversation_tree(&self) -> Option<Box<dyn ConversationTree>> {
+        Some(Box::new(AntigravityTree::new(self.clone())))
     }
 
     fn is_guard_payload(&self, payload: &str) -> bool {
