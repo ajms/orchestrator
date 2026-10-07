@@ -47,8 +47,17 @@ fn planned(index: usize, content: &str, calls: serde_json::Value) -> String {
     json!({"step_index": index, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "content": content, "tool_calls": calls}).to_string()
 }
 
-fn result(index: usize, content: &str) -> String {
+fn generic(index: usize, content: &str) -> String {
     json!({"step_index": index, "source": "MODEL", "type": "GENERIC", "status": "DONE", "content": content}).to_string()
+}
+
+fn result(index: usize, content: &str) -> String {
+    generic(
+        index,
+        &format!(
+            "Created At: 2026-10-07T10:00:07+02:00\nCompleted At: 2026-10-07T10:00:07+02:00\n{content}"
+        ),
+    )
 }
 
 fn text(text: &str) -> TranscriptEntry {
@@ -68,6 +77,18 @@ fn a_subagents_transcript_is_the_one_its_hooks_name() {
     assert_eq!(
         locate(transcripts.as_ref(), "5b7e0c94-1f3a-4d62-8a08-c4e9f2b17d35"),
         None
+    );
+}
+
+#[test]
+fn a_hook_naming_the_plain_transcript_follows_the_full_one() {
+    let mut transcripts = transcripts();
+    let payload =
+        json!({ "conversationId": CHILD, "transcriptPath": "/brain/logs/transcript.jsonl" });
+    transcripts.follow(&payload.to_string());
+    assert_eq!(
+        locate(transcripts.as_ref(), CHILD),
+        Some(PathBuf::from("/brain/logs/transcript_full.jsonl"))
     );
 }
 
@@ -159,4 +180,64 @@ fn a_result_written_after_its_call_still_pairs_with_it() {
             error: false,
         }]
     );
+}
+
+fn call(id: &str) -> TranscriptEntry {
+    TranscriptEntry::ToolCall {
+        id: id.into(),
+        tool: "list_dir".into(),
+        argument: None,
+    }
+}
+
+fn answer(id: &str, text: &str) -> TranscriptEntry {
+    TranscriptEntry::ToolResult {
+        id: id.into(),
+        text: text.into(),
+        error: false,
+    }
+}
+
+#[test]
+fn a_generic_step_that_is_no_tool_result_leaves_the_open_call_alone() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let calls = json!([{"name": "list_dir", "args": {}}]);
+    append(
+        file.path(),
+        &[
+            generic(0, "Checkpoint saved."),
+            planned(1, "", calls),
+            generic(2, "Checkpoint saved."),
+            result(3, "src"),
+        ],
+    );
+    assert_eq!(
+        reader().read(file.path()).entries,
+        [call("1.0"), answer("1.0", "src")]
+    );
+}
+
+#[test]
+fn calls_of_steps_without_an_index_keep_distinct_ids() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let call =
+        json!({"type": "PLANNER_RESPONSE", "tool_calls": [{"name": "list_dir", "args": {}}]})
+            .to_string();
+    let result = |content: &str| {
+        json!({"type": "GENERIC", "status": "DONE", "content": format!("Created At: 2026-10-07T10:00:07+02:00\n{content}")}).to_string()
+    };
+    append(file.path(), &[call.clone(), result("a"), call, result("b")]);
+    let entries = reader().read(file.path()).entries;
+    let ids: Vec<_> = entries
+        .iter()
+        .map(|entry| match entry {
+            TranscriptEntry::ToolCall { id, .. } | TranscriptEntry::ToolResult { id, .. } => {
+                id.clone()
+            }
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(ids[0], ids[1]);
+    assert_eq!(ids[2], ids[3]);
+    assert_ne!(ids[0], ids[2]);
 }

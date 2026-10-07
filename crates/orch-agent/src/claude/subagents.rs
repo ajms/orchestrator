@@ -5,7 +5,7 @@ use orch_core::{SubagentId, TranscriptEntry};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::lines::FollowedLines;
+use crate::lines::{FollowedLines, first_str};
 use crate::{SubagentTranscripts, TranscriptRead, TranscriptReader};
 
 const KEY_ARGUMENTS: [&str; 9] = [
@@ -150,7 +150,7 @@ fn entries(line: &[u8]) -> Vec<TranscriptEntry> {
             Block::Text { text } => Some(TranscriptEntry::Text { text }),
             Block::ToolUse { id, name, input } => Some(TranscriptEntry::ToolCall {
                 id,
-                argument: key_argument(&input),
+                argument: first_str(&input, &KEY_ARGUMENTS),
                 tool: name,
             }),
             Block::ToolResult {
@@ -181,11 +181,4 @@ impl Content {
                 .join("\n"),
         }
     }
-}
-
-fn key_argument(input: &Value) -> Option<String> {
-    KEY_ARGUMENTS
-        .iter()
-        .find_map(|key| input.get(key)?.as_str())
-        .map(String::from)
 }

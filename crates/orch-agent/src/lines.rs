@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
+
 #[derive(Debug, Default)]
 pub(crate) struct FollowedLines {
     path: PathBuf,
@@ -35,4 +37,10 @@ impl FollowedLines {
         }
         Some(NewLines { reset, lines })
     }
+}
+
+pub(crate) fn first_str(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key)?.as_str())
+        .map(String::from)
 }

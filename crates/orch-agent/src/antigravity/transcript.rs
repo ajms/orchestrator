@@ -1,16 +1,19 @@
 use std::collections::{HashMap, VecDeque};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use orch_core::{SubagentId, TranscriptEntry};
 use serde::Deserialize;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
-use crate::lines::FollowedLines;
+use crate::lines::{FollowedLines, first_str};
 use crate::{SubagentTranscripts, TranscriptRead, TranscriptReader};
 
 const SYSTEM_SENDER: &str = "system";
+const PLAIN_TRANSCRIPT: &str = "transcript.jsonl";
+const FULL_TRANSCRIPT: &str = "transcript_full.jsonl";
 const TIMESTAMPS: [&str; 2] = ["Created At: ", "Completed At: "];
 const KEY_ARGUMENTS: [&str; 10] = [
     "CommandLine",
@@ -41,7 +44,7 @@ impl SubagentTranscripts for AntigravitySubagentTranscripts {
     fn follow(&mut self, payload: &str) {
         if let Ok(hook) = serde_json::from_str::<HookPaths>(payload) {
             self.paths
-                .insert(hook.conversation_id, hook.transcript_path);
+                .insert(hook.conversation_id, full_transcript(&hook.transcript_path));
         }
     }
 
@@ -57,6 +60,7 @@ impl SubagentTranscripts for AntigravitySubagentTranscripts {
 #[derive(Debug, Default)]
 struct StepReader {
     lines: FollowedLines,
+    steps: u64,
     calls: VecDeque<String>,
 }
 
@@ -66,6 +70,7 @@ impl TranscriptReader for StepReader {
             return TranscriptRead::default();
         };
         if read.reset {
+            self.steps = 0;
             self.calls.clear();
         }
         let entries = read
@@ -84,7 +89,7 @@ impl TranscriptReader for StepReader {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct Step {
-    step_index: u64,
+    step_index: Option<u64>,
     #[serde(rename = "type")]
     kind: String,
     status: String,
@@ -96,28 +101,33 @@ struct Step {
 #[serde(default)]
 struct ToolCall {
     name: String,
-    args: Map<String, Value>,
+    args: Value,
 }
 
 impl StepReader {
     fn entries(&mut self, step: Step) -> Vec<TranscriptEntry> {
+        self.steps += 1;
+        let index = match step.step_index {
+            Some(index) => index.to_string(),
+            None => format!("#{}", self.steps),
+        };
         match step.kind.as_str() {
             "PLANNER_RESPONSE" => {
                 let text = Some(step.content.trim())
                     .filter(|text| !text.is_empty())
                     .map(|text| TranscriptEntry::Text { text: text.into() });
                 let calls = step.tool_calls.into_iter().enumerate().map(|(at, call)| {
-                    let id = format!("{}.{at}", step.step_index);
+                    let id = format!("{index}.{at}");
                     self.calls.push_back(id.clone());
                     TranscriptEntry::ToolCall {
                         id,
-                        argument: key_argument(&call.args),
+                        argument: first_str(&call.args, &KEY_ARGUMENTS),
                         tool: call.name,
                     }
                 });
                 text.into_iter().chain(calls).collect()
             }
-            "GENERIC" => self
+            "GENERIC" if is_result(&step.content) => self
                 .calls
                 .pop_front()
                 .map(|id| TranscriptEntry::ToolResult {
@@ -127,6 +137,7 @@ impl StepReader {
                 })
                 .into_iter()
                 .collect(),
+            "GENERIC" => Vec::new(),
             _ => prompt(&step.kind, &step.content)
                 .map(|text| TranscriptEntry::Prompt { text })
                 .into_iter()
@@ -185,9 +196,16 @@ fn without_timestamps(content: &str) -> String {
         .into()
 }
 
-fn key_argument(args: &Map<String, Value>) -> Option<String> {
-    KEY_ARGUMENTS
-        .iter()
-        .find_map(|key| args.get(*key)?.as_str())
-        .map(String::from)
+fn is_result(content: &str) -> bool {
+    content
+        .lines()
+        .next()
+        .is_some_and(|line| TIMESTAMPS.iter().any(|stamp| line.starts_with(stamp)))
+}
+
+pub(super) fn full_transcript(path: &Path) -> PathBuf {
+    match path.file_name() == Some(OsStr::new(PLAIN_TRANSCRIPT)) {
+        true => path.with_file_name(FULL_TRANSCRIPT),
+        false => path.to_path_buf(),
+    }
 }

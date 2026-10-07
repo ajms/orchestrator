@@ -301,7 +301,11 @@ impl SessionStatus {
                 agent_type,
                 description,
             } => match self.subagent_mut(id) {
-                Some(resumed) => resumed.done = false,
+                Some(resumed) => {
+                    resumed.done = false;
+                    resumed.agent_type.clone_from(agent_type);
+                    resumed.description.clone_from(description);
+                }
                 None => self.subagents.push(Subagent {
                     id: id.clone(),
                     agent_type: agent_type.clone(),

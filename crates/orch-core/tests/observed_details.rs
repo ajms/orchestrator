@@ -116,3 +116,26 @@ fn a_restarted_agent_finishes_every_open_subagent() {
     assert_eq!(status.subagents().len(), 2);
     assert!(status.subagents().iter().all(|subagent| subagent.done));
 }
+
+#[test]
+fn a_subagent_started_again_takes_its_new_label() {
+    let mut status = working_session();
+    status.feed_event(subagent_started("a1"));
+    status.feed_event(tool_in("a1"));
+    status.feed_event(AgentEvent::SubagentStarted {
+        id: SubagentId("a1".into()),
+        agent_type: "general".into(),
+        description: "Test Runner".into(),
+    });
+
+    assert_eq!(
+        status.subagents(),
+        [Subagent {
+            id: SubagentId("a1".into()),
+            agent_type: "general".into(),
+            description: "Test Runner".into(),
+            tool_count: 1,
+            done: false,
+        }]
+    );
+}
