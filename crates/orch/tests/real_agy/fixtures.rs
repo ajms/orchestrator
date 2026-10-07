@@ -269,7 +269,7 @@ const RULES: [Rule; 14] = [
         Recording::Trust,
         STATUSLINE,
         Source::Line,
-        |p| p["tool_confirmation_pending"] == true && p["agent_state"] == "initializing",
+        |p| p["agent_state"] == "initializing",
     ),
 ];
 
@@ -485,7 +485,7 @@ mod tests {
             capture(
                 STATUSLINE,
                 8,
-                r#"{"conversation_id":"","agent_state":"initializing","tool_confirmation_pending":true}"#,
+                r#"{"conversation_id":"","agent_state":"initializing"}"#,
             ),
         ];
         let conversations = Conversations {

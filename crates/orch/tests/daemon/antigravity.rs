@@ -110,7 +110,7 @@ async fn working(client: &mut TestClient, id: &SessionId, pane: &mut PaneView) {
 }
 
 #[tokio::test]
-async fn agy_launches_with_its_prompt_and_waits_on_the_trust_screen_until_it_is_ready() {
+async fn agy_launches_with_its_prompt_and_stays_starting_on_the_trust_screen_until_it_is_ready() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
@@ -120,10 +120,26 @@ async fn agy_launches_with_its_prompt_and_waits_on_the_trust_screen_until_it_is_
 
     tap(
         &mut pane,
-        json!({ "conversation_id": "", "agent_state": "initializing", "tool_confirmation_pending": true }),
+        json!({ "conversation_id": "", "agent_state": "initializing" }),
     )
     .await;
-    until_state(&mut client, &id, State::NeedsInput).await;
+    tap(
+        &mut pane,
+        json!({ "conversation_id": "", "agent_state": "idle", "cycle_mode": "accept-edits" }),
+    )
+    .await;
+    let trusting = client
+        .until(&id, "the mode agy reports", |view| {
+            view.mode.as_deref() == Some("acceptEdits")
+        })
+        .await;
+    assert_eq!(trusting.agent, Some(State::Starting));
+    assert!(
+        client
+            .history
+            .iter()
+            .all(|view| view.agent != Some(State::NeedsInput))
+    );
 
     tap(&mut pane, json!({ "agent_state": "idle" })).await;
     until_state(&mut client, &id, State::Idle).await;

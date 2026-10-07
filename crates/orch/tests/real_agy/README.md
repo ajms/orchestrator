@@ -35,7 +35,7 @@ Each test also adds a named hook, `orch-real-agy-capture`, to its own hooks file
 
 | Test | Checks |
 |---|---|
-| `each_fresh_worktree_needs_input_on_agys_trust_screen` | Two Sessions in one Repo each show Needs input on agy's trust screen. Enter answers it, and the prompt runs to Idle. |
+| `each_fresh_worktree_shows_agys_trust_screen_while_the_session_is_starting` | Two Sessions in one Repo each show agy's trust screen in the pane. While it shows, the Session is Starting and never Needs input (agy gives no signal for it). Enter answers it, and the prompt runs to Idle. The other tests answer the trust screen the same way: they watch the pane for it, not the Agent state. |
 | `the_initial_prompt_reaches_orch_through_the_hookup_until_a_fully_idle_stop` | agy runs with `-i <prompt>`. Its `PreToolUse` reaches orch through the installed hookup as a WriteOutsideWorktree Guard prompt, and the denial holds. The Session goes Idle, and a `Stop` with `fullyIdle: true` from the Session's Conversation was captured. Idle alone wouldn't prove the Stop: an idle statusline also leads to Idle. |
 | `a_permission_prompt_needs_input_until_the_user_answers_it` | agy's own `run_command` prompt shows as Needs input. Enter approves it, the command runs, and the Session goes Idle. |
 | `resume_reopens_the_conversation_in_the_mode_cycled_with_shift_tab` | Shift+Tab moves agy from accept-edits to plan. After the Holder dies, Resume runs `agy --conversation <id> --mode plan` without `-i`, in the same Conversation. |

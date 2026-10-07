@@ -327,18 +327,22 @@ pub async fn until_state(client: &mut TestClient, id: &SessionId, state: State, 
         .await;
 }
 
-pub async fn answer_trust(client: &mut TestClient, id: &SessionId, pane: &mut PaneView) {
-    until_state(client, id, State::NeedsInput, STARTUP).await;
-    pane.wait_for_within("agy's trust screen", STARTUP, |pane| {
-        is_trust_screen(&pane.text().to_lowercase())
+fn shows_trust_screen(pane: &PaneView) -> bool {
+    is_trust_screen(&pane.text().to_lowercase())
+}
+
+pub async fn wait_for_trust_screen(pane: &mut PaneView) {
+    pane.wait_for_within("agy's trust screen", STARTUP, shows_trust_screen)
+        .await;
+}
+
+pub async fn answer_trust(pane: &mut PaneView) {
+    wait_for_trust_screen(pane).await;
+    pane.pane.input(TRUST_ANSWER.to_vec()).await.unwrap();
+    pane.wait_for_within("past agy's trust screen", STARTUP, |pane| {
+        !shows_trust_screen(pane)
     })
     .await;
-    pane.pane.input(TRUST_ANSWER.to_vec()).await.unwrap();
-    client
-        .until_within(id, "past the trust screen", STARTUP, |view| {
-            view.agent != Some(State::NeedsInput)
-        })
-        .await;
 }
 
 pub async fn deny_guards_until_idle(client: &mut TestClient, id: &SessionId) -> Vec<GuardPrompt> {
