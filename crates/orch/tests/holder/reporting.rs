@@ -150,6 +150,31 @@ async fn a_global_hook_reports_to_the_session_named_by_orch_session() {
     );
 }
 
+#[tokio::test]
+async fn an_untagged_agy_tool_call_that_is_not_a_guard_still_gets_a_decision_and_is_reported() {
+    let sandbox = Sandbox::new();
+    let held = sandbox.hold("s1", "");
+    let (mut client, _) = held.attach().await;
+    let tool_call =
+        r#"{"conversationId":"c1","error":"","toolCall":{"name":"run_command","args":{}}}"#;
+
+    let mut hook = sandbox.orch();
+    hook.args(["hook", "--agent", "antigravity", "--session", "s1"]);
+    let output = run_with_stdin(&mut hook, tool_call);
+
+    assert!(output.status.success());
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer, serde_json::json!({ "decision": "ask" }));
+    assert_eq!(
+        next_hook_or_tap(&mut client).await,
+        HolderEvent::Hook {
+            agent: Some("antigravity".into()),
+            payload: tool_call.into(),
+            guard: None,
+        }
+    );
+}
+
 #[test]
 fn tap_prefers_the_worktrees_local_project_statusline() {
     let sandbox = Sandbox::new();
