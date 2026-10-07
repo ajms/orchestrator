@@ -1,7 +1,8 @@
 use std::path::Path;
 
-use orch_agent::{Adapter, built_in_names, with_binary};
+use orch_agent::{Adapter, built_in_names, by_name, with_binary};
 use orch_config::AgentConfig;
+use orch_core::PermissionMode;
 
 fn unknown(name: &str) -> String {
     let names = built_in_names().collect::<Vec<_>>();
@@ -15,6 +16,10 @@ pub(crate) fn known_adapter(agent: &AgentConfig) -> Result<Adapter, String> {
     with_binary(&agent.name, agent.binary.clone())
         .map(|(adapter, _)| adapter)
         .ok_or_else(|| unknown(&agent.name))
+}
+
+pub(crate) fn modes(name: &str) -> &'static [PermissionMode] {
+    by_name(name).map_or(&[], |adapter| adapter.modes())
 }
 
 pub(crate) fn default_program(name: &str) -> String {

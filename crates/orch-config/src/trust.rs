@@ -1,6 +1,6 @@
 use std::fmt;
 
-use orch_agent::{Preset, mode_name};
+use orch_agent::{ClaudeCode, Preset, mode_name};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -98,8 +98,21 @@ fn fields(item: &TrustItem) -> Vec<String> {
             };
             let mode = preset.mode.map_or("inherit", mode_name);
             let mut fields = vec![tag.into(), preset.name.clone(), mode.into()];
-            fields.extend(list("allow", &preset.allow));
-            fields.extend(list("deny", &preset.deny));
+            let claude = preset
+                .rules_for(ClaudeCode::NAME)
+                .cloned()
+                .unwrap_or_default();
+            let others = preset
+                .rules
+                .iter()
+                .filter(|(agent, _)| *agent != ClaudeCode::NAME);
+            fields.extend(list("allow", &claude.allow));
+            fields.extend(list("deny", &claude.deny));
+            for (agent, rules) in others {
+                fields.extend(["agent".into(), agent.clone()]);
+                fields.extend(list("allow", &rules.allow));
+                fields.extend(list("deny", &rules.deny));
+            }
             fields
         }
     }

@@ -1,4 +1,4 @@
-use orch_agent::{AgentAdapter, ClaudeCode, LaunchSpec, Preset, Presets};
+use orch_agent::{AgentAdapter, ClaudeCode, LaunchSpec, Preset, Presets, Rules};
 use orch_core::{ConversationId, PermissionMode, SessionId};
 use serde_json::Value;
 
@@ -119,12 +119,25 @@ fn inherit_leaves_the_users_own_default_mode_alone() {
 }
 
 #[test]
-fn launch_adds_the_presets_rules_to_the_users_permissions() {
+fn launch_adds_the_presets_claude_rules_to_the_users_permissions() {
+    let agy_rules = Rules {
+        allow: vec!["command(ls)".into()],
+        deny: vec!["command(rm)".into()],
+    };
     let preset = Preset {
         name: "locked".into(),
         mode: Some(PermissionMode::DontAsk),
-        allow: vec!["Bash(cargo test *)".into()],
-        deny: vec!["WebFetch".into(), "Bash(rm *)".into()],
+        rules: [
+            ("antigravity".to_string(), agy_rules),
+            (
+                "claude".to_string(),
+                Rules {
+                    allow: vec!["Bash(cargo test *)".into()],
+                    deny: vec!["WebFetch".into(), "Bash(rm *)".into()],
+                },
+            ),
+        ]
+        .into(),
     };
     let argv = ClaudeCode::default().launch(&spec(preset));
     assert_eq!(flag(&argv.args, "--permission-mode"), Some("dontAsk"));

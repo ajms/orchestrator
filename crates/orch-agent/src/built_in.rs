@@ -8,6 +8,8 @@ type Build = fn(Option<String>) -> (Adapter, String);
 
 const BUILT_IN: [(&str, Build); 1] = [(ClaudeCode::NAME, claude)];
 
+const PLANNED: [&str; 1] = ["antigravity"];
+
 fn claude(binary: Option<String>) -> (Adapter, String) {
     let mut claude = ClaudeCode::default();
     if let Some(binary) = binary {
@@ -19,6 +21,10 @@ fn claude(binary: Option<String>) -> (Adapter, String) {
 
 pub fn built_in_names() -> impl Iterator<Item = &'static str> {
     BUILT_IN.iter().map(|(name, _)| *name)
+}
+
+pub fn known_agents() -> impl Iterator<Item = &'static str> {
+    built_in_names().chain(PLANNED)
 }
 
 pub fn by_name(name: &str) -> Option<Adapter> {

@@ -106,6 +106,57 @@ async fn creating_a_session_for_an_unknown_agent_is_refused() {
 }
 
 #[tokio::test]
+async fn an_unknown_agent_is_reported_before_the_preset_it_cannot_run() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let mut create = CreateSession::new(&repo, "Other agent");
+    create.agent = Some("nonesuch".into());
+    create.preset = Some("plan".into());
+
+    let refused = client.request(Request::CreateSession(create)).await;
+
+    assert!(
+        matches!(&refused, Err(RequestError::Refused { message }) if message.contains("unknown Agent \"nonesuch\"")),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn changing_the_preset_of_a_session_whose_agent_is_unknown_names_the_agent() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    env.write_config_with_agent("", "/nonexistent/agent");
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = client.create(CreateSession::new(&repo, "Lost agent")).await;
+    client
+        .until(&id, "a failed launch", |view| view.error.is_some())
+        .await;
+    daemon.kill();
+    let db = rusqlite::Connection::open(env.path("state/orchestrator/state.db")).unwrap();
+    db.execute("UPDATE sessions SET agent = 'nonesuch'", [])
+        .unwrap();
+    drop(db);
+
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    client.session_list().await;
+    let refused = client
+        .request(Request::SetPreset {
+            session: id.clone(),
+            preset: "plan".into(),
+        })
+        .await;
+
+    assert!(
+        matches!(&refused, Err(RequestError::Refused { message }) if message.contains("unknown Agent \"nonesuch\"")),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_relative_agent_binary_resolves_against_the_repo_root_for_the_form_and_the_launch() {
     let env = Env::new();
     let repo = env.repo("app");

@@ -332,7 +332,7 @@ impl Daemon {
                 Some(base) => base.clone(),
                 None => self.default_base(&repo, &config).await.ok()?,
             };
-            let preset = select_preset(&repo, &config, None)
+            let preset = select_preset(&repo, &config, None, config.default_agent())
                 .map_or_else(|_| FALLBACK_PRESET.into(), |preset| preset.name);
             self.create_record(NewRecord {
                 id: id.clone(),
@@ -931,7 +931,7 @@ impl Daemon {
         let _guard = self.repo_guard(&repo).await;
         let leftover = self.current_leftover(&repo, leftover).await?;
         let config = self.repo_config(&repo).await?;
-        let preset = select_preset(&repo, &config, None)?;
+        let preset = select_preset(&repo, &config, None, config.default_agent())?;
         let base = self.default_base(&repo, &config).await?;
         let prefix = self.branch_prefix().await;
         let (name, worktree) = with_git(repo.clone(), move |git| {

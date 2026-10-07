@@ -11,6 +11,13 @@ pub enum ConfigProblem {
         mode: String,
     },
     ReservedPresetName,
+    ClaudeRuleTable {
+        preset: String,
+    },
+    UnknownRuleAgent {
+        preset: String,
+        agent: String,
+    },
     EmptyPortRange(PortRange),
     Misplaced {
         key: &'static str,
@@ -31,6 +38,15 @@ impl fmt::Display for ConfigProblem {
             ConfigProblem::ReservedPresetName => {
                 write!(f, "preset name {:?} is reserved", orch_agent::INHERIT)
             }
+            ConfigProblem::ClaudeRuleTable { preset } => write!(
+                f,
+                "preset {preset}: write Claude rules as allow/deny in [presets.{preset}], not in [presets.{preset}.claude]"
+            ),
+            ConfigProblem::UnknownRuleAgent { preset, agent } => write!(
+                f,
+                "preset {preset}: [presets.{preset}.{agent}] names no known Agent ({})",
+                orch_agent::known_agents().collect::<Vec<_>>().join(", ")
+            ),
             ConfigProblem::EmptyPortRange(range) => write!(
                 f,
                 "port range {}..={} has no room for a block of {}",
