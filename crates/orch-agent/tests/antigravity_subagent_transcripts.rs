@@ -93,8 +93,35 @@ fn a_hook_naming_the_plain_transcript_follows_the_full_one() {
 }
 
 #[test]
-fn every_step_kind_is_mapped_and_thinking_and_system_notices_are_dropped() {
+fn a_recorded_subagent_transcript_reads_as_its_task_tool_call_and_reply() {
     let read = reader().read(&fixture_path("transcripts/subagent_full.jsonl"));
+    assert!(read.reset);
+    assert_eq!(
+        read.entries,
+        [
+            TranscriptEntry::Prompt {
+                text: "Reply with the single word pong and nothing else.".into()
+            },
+            TranscriptEntry::ToolCall {
+                id: "1.0".into(),
+                tool: "send_message".into(),
+                argument: Some("pong".into())
+            },
+            TranscriptEntry::ToolResult {
+                id: "1.0".into(),
+                text: "Message sent to \"3c1e9a40-7d52-4b8e-a6f1-2d9b0c4e7a13\".".into(),
+                error: false
+            },
+            TranscriptEntry::Text {
+                text: "pong".into()
+            },
+        ]
+    );
+}
+
+#[test]
+fn every_step_kind_is_mapped_and_thinking_and_system_notices_are_dropped() {
+    let read = reader().read(&fixture_path("transcripts/subagent_every_step_kind.jsonl"));
     assert!(read.reset);
     assert_eq!(
         read.entries,

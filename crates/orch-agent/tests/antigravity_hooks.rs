@@ -72,7 +72,7 @@ fn tool_hooks_start_and_finish_tools() {
     assert_eq!(
         events("PostToolUse", "post_tool_use"),
         [AgentEvent::ToolFinished {
-            tool: String::new(),
+            tool: "run_command".into(),
             subagent: None,
         }]
     );
