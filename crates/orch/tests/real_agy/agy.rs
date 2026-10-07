@@ -261,6 +261,19 @@ impl RealAgy {
         fixtures::read_captures(&self.captures.join(id.as_str()))
     }
 
+    pub async fn saw_fully_idle_stop(&self, id: &SessionId, root: &str) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if fixtures::fully_idle_stop(&self.captures(id), root) {
+                return true;
+            }
+            if Instant::now() > deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+
     pub fn transcript(&self, conversation: &str) -> String {
         let path = self
             .env
