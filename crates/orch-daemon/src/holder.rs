@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use orch_agent::{
-    Capabilities, GuardAnswer, GuardContext, GuardDecision, TitleWatch, evaluate_guard,
+    Capabilities, GuardAnswer, GuardContext, GuardOutcome, TitleWatch, evaluate_guard,
+    guard_outcome,
 };
 use orch_core::{
     AgentEvent, AgentState, ConversationId, Effect, GuardedAction, Observation, PhaseEvent,
@@ -351,10 +352,10 @@ impl Daemon {
                 .ok_or("no such Guard prompt is pending")?;
             let pending = live.prompts.remove(at);
             let answer = match choice {
-                GuardChoice::AllowOnce => GuardAnswer::Proceed,
+                GuardChoice::AllowOnce => pending.allowed,
                 GuardChoice::AllowForSession => {
                     live.record.guard_allowances.push(pending.hit);
-                    GuardAnswer::Proceed
+                    pending.allowed
                 }
                 GuardChoice::Deny => GuardAnswer::Deny {
                     reason: DENIED_BY_USER.into(),
@@ -410,7 +411,7 @@ fn retitle(live: &mut Live, title: &str) {
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
     let check = guard_check(live.capabilities(), events);
     let agent_dirs = live.agent_dirs();
-    let decision = check.map(|check| {
+    let outcome = check.map(|check| {
         let context = GuardContext {
             worktree: &live.record.worktree,
             branch: &live.record.branch,
@@ -420,19 +421,24 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
             agent_dirs: &agent_dirs,
         };
         let decision = evaluate_guard(check.action, check.cwd, &context);
-        (check.tool.to_owned(), decision)
+        let verdict = live.rule_verdict(check.action, check.cwd);
+        (check.tool.to_owned(), guard_outcome(decision, verdict))
     });
-    match decision {
-        Some((tool, GuardDecision::Ask(hit))) => {
+    match outcome {
+        Some((tool, GuardOutcome::Prompt { hit, allowed })) => {
             live.send_to_holder(ToHolder::GuardHeld { id: guard });
             live.prompts.push(PendingGuard {
                 id: guard,
                 tool,
                 hit,
+                allowed,
             });
             live.status.observe(Observation::GuardPrompted, now);
         }
-        _ => {
+        Some((_, GuardOutcome::Answer(answer))) => {
+            live.send_to_holder(ToHolder::GuardAnswer { id: guard, answer });
+        }
+        None => {
             live.send_to_holder(ToHolder::GuardAnswer {
                 id: guard,
                 answer: GuardAnswer::Proceed,

@@ -467,9 +467,10 @@ impl Daemon {
             Err(err) => Err(err.to_string()),
         };
         let spawned = match launch {
-            Ok((adapter, argv)) => {
+            Ok((adapter, preset, argv)) => {
                 let _ = self.update(id, |live| {
                     live.adapter = Some(adapter);
+                    live.preset = Some(preset);
                     Ok(())
                 });
                 self.spawn_holder(&record, argv).await
@@ -506,7 +507,7 @@ impl Daemon {
         record: &SessionRecord,
         prompt: Option<String>,
         resume: bool,
-    ) -> Result<(Adapter, Vec<String>), String> {
+    ) -> Result<(Adapter, Preset, Vec<String>), String> {
         let agent = config.agent(&record.agent).map_err(|err| err.to_string())?;
         let adapter = installed_adapter(&agent, repo)?;
         let preset = select_preset(repo, config, Some(&record.preset), &record.agent)
@@ -514,7 +515,7 @@ impl Daemon {
         let mut spec = LaunchSpec::new(
             record.id.clone(),
             self.config.orch_program.to_string_lossy(),
-            preset,
+            preset.clone(),
         );
         if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
             spec = spec.with_prompt(prompt);
@@ -524,7 +525,7 @@ impl Daemon {
             _ => None,
         };
         let argv = agent_command(adapter.as_ref(), &agent.args, spec, resume);
-        Ok((adapter, argv))
+        Ok((adapter, preset, argv))
     }
 
     async fn spawn_holder(&self, record: &SessionRecord, argv: Vec<String>) -> Result<(), String> {
@@ -642,7 +643,14 @@ impl Daemon {
             };
             let adapter = by_name(&record.agent);
             let id = record.id.clone();
+            let preset = match self.repo_config(&repo.path).await {
+                Ok(config) => {
+                    select_preset(&repo.path, &config, Some(&record.preset), &record.agent).ok()
+                }
+                Err(_) => None,
+            };
             let mut live = Live::new(record, repo.path.clone(), adapter);
+            live.preset = preset;
             live.setup_output = self.read_setup_log(&id).await;
             known.push((id, live.status.phase()));
             self.lock().insert(live);

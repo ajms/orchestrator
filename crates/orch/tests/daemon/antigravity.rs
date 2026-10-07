@@ -5,8 +5,8 @@ use orch_agent::Antigravity;
 use orch_core::SessionId;
 use orch_holder::SESSION_ENV;
 use orch_protocol::{
-    AgentStateView as State, AgentUsageWindows, CreateSession, LandingMode, PhaseView, Reply,
-    Request, UsageWindowView,
+    AgentStateView as State, AgentUsageWindows, CreateSession, GuardChoice, LandingMode, PhaseView,
+    Reply, Request, UsageWindowView,
 };
 use serde_json::{Value, json};
 
@@ -20,10 +20,19 @@ async fn antigravity_session(
     client: &mut TestClient,
     preset: &str,
 ) -> (SessionId, PaneView) {
+    antigravity_session_with(env, client, preset, "").await
+}
+
+async fn antigravity_session_with(
+    env: &Env,
+    client: &mut TestClient,
+    preset: &str,
+    config: &str,
+) -> (SessionId, PaneView) {
     let script = env.path("agy.script");
     std::fs::write(&script, "draft -p\n").unwrap();
     env.write_config(&format!(
-        "[defaults.agents.antigravity]\nbinary = {:?}\nargs = [\"fake-agent\", \"--script\", {script:?}, \"--\"]\n",
+        "[defaults.agents.antigravity]\nbinary = {:?}\nargs = [\"fake-agent\", \"--script\", {script:?}, \"--\"]\n{config}",
         env!("CARGO_BIN_EXE_orch")
     ));
     let installed = orch(env, &["agent", "install", "antigravity", "--yes"]).await;
@@ -391,4 +400,116 @@ async fn agy_drafts_in_a_fresh_headless_run_fed_the_whole_diff_against_the_base(
         assert!(body.contains(change), "{change} missing from {body}");
     }
     assert!(!pane.text().contains("Drafted"));
+}
+
+async fn tool_call(pane: &mut PaneView, name: &str, args: Value) {
+    hook(
+        pane,
+        "PreToolUse",
+        json!({ "toolCall": { "name": name, "args": args }, "stepIdx": 9 }),
+    )
+    .await;
+}
+
+async fn guard_prompt(client: &mut TestClient, id: &SessionId) -> u64 {
+    client
+        .until(id, "a Guard prompt", |view| !view.guard_prompts.is_empty())
+        .await
+        .guard_prompts[0]
+        .id
+}
+
+async fn answer_guard(client: &mut TestClient, id: &SessionId, guard: u64, choice: GuardChoice) {
+    let reply = client
+        .request(Request::AnswerGuard {
+            session: id.clone(),
+            guard,
+            choice,
+        })
+        .await;
+    assert_eq!(reply, Ok(Reply::Done));
+}
+
+const TIGHT: &str = "[defaults.presets.tight]\nmode = \"default\"\n[defaults.presets.tight.antigravity]\nallow = [\"command(npm test)\"]\ndeny = [\"command(rm)\"]\n";
+
+#[tokio::test]
+async fn a_guard_hit_waits_for_the_user_and_answers_agy_with_ask_or_deny() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = antigravity_session(&env, &mut client, "edits").await;
+    let outside = || json!({ "TargetFile": "/etc/hosts", "CodeContent": "x" });
+
+    tool_call(&mut pane, "write_to_file", outside()).await;
+    let guard = guard_prompt(&mut client, &id).await;
+    answer_guard(&mut client, &id, guard, GuardChoice::AllowOnce).await;
+    pane.wait_for_text(r#"hook> {"decision":"ask"}"#).await;
+    client
+        .until(&id, "no Guard prompt", |view| view.guard_prompts.is_empty())
+        .await;
+
+    tool_call(&mut pane, "write_to_file", outside()).await;
+    let guard = guard_prompt(&mut client, &id).await;
+    answer_guard(&mut client, &id, guard, GuardChoice::Deny).await;
+    pane.wait_for_text(r#"hook> {"decision":"deny""#).await;
+}
+
+#[tokio::test]
+async fn preset_rules_deny_and_allow_agys_tool_calls() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = antigravity_session_with(&env, &mut client, "tight", TIGHT).await;
+    let worktree = client.sessions[&id].worktree.clone();
+    let command = |line: &str| json!({ "CommandLine": line, "Cwd": worktree });
+
+    tool_call(&mut pane, "run_command", command("rm -rf build")).await;
+    pane.wait_for_text(r#"hook> {"decision":"deny""#).await;
+
+    tool_call(&mut pane, "run_command", command("npm test")).await;
+    pane.wait_for_text(r#"hook> {"decision":"allow"}"#).await;
+
+    tool_call(&mut pane, "run_command", command("make")).await;
+    pane.wait_for_text(r#"hook> {"decision":"ask"}"#).await;
+
+    let subagent_rm = json!({
+        "conversationId": "8d2f61b7-4a09-4c3e-9b15-e07a3c5d9f28",
+        "toolCall": { "name": "run_command", "args": command("rm -rf dist") },
+        "stepIdx": 2,
+    });
+    pane.type_line(&format!(
+        "hook --agent antigravity --event PreToolUse {subagent_rm}"
+    ))
+    .await;
+    client
+        .until(&id, "the Subagent", |view| !view.subagents.is_empty())
+        .await;
+    pane.type_line("print subagent-answered").await;
+    pane.wait_for_text("subagent-answered").await;
+    assert_eq!(pane.text().matches(r#"{"decision":"deny""#).count(), 2);
+    assert!(
+        client
+            .history
+            .iter()
+            .all(|view| view.guard_prompts.is_empty())
+    );
+}
+
+#[tokio::test]
+async fn preset_rules_still_apply_to_a_running_agy_after_a_daemon_restart() {
+    let env = Env::new();
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _) = antigravity_session_with(&env, &mut client, "tight", TIGHT).await;
+
+    daemon.kill();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    client
+        .until(&id, "the Agent again", |view| view.agent.is_some())
+        .await;
+    let mut pane = env.pane(&id, PANE).await;
+    let rm = json!({ "CommandLine": "rm -rf build" });
+    tool_call(&mut pane, "run_command", rm).await;
+    pane.wait_for_text(r#"hook> {"decision":"deny""#).await;
 }

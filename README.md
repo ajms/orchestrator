@@ -157,7 +157,7 @@ mode = "plan"
 deny = ["Bash(rm *)"]                  # top-level rules are Claude's
 
 [presets.tight.antigravity]            # Antigravity's rules, in agy's syntax
-allow = ["command(cargo test)"]
+allow = ["command(cargo test)", "mcp(github/*)"]
 deny = ["command(rm)", "write_file(.env)"]
 ```
 
@@ -178,6 +178,7 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `[agents.<name>]` | `binary` (default: the Agent's own, e.g. `claude` on `PATH`; a path with a `/` is relative to the Repo root) and `args` for that Agent, read at every launch, resume and Draft |
 | `[presets.<name>]` | `mode` (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions` or `inherit`) and Claude's `allow`/`deny` rules. Only Presets whose mode the Session's Agent can express are offered; a default Preset it can't express falls back to `edits` (or `inherit`, if the Agent can't express `edits` either), and the `:new` form says so. |
 | `[presets.<name>.<agent>]` | `allow`/`deny` in that Agent's own syntax, e.g. `[presets.tight.antigravity]`. Each Agent reads only its own rules; a Preset without rules for the chosen Agent is still offered with its mode only, marked "no <agent> rules". `<agent>` must be a known Agent (`claude` or `antigravity`), and `[presets.<name>.claude]` is a config error, since Claude's rules are the top-level `allow`/`deny`. |
+| `[presets.<name>.antigravity]` | agy's settings are global, so `orch` enforces these rules itself in its `PreToolUse` hook, after the Guards: a matching `deny` blocks the tool call, a matching `allow` lets it run without agy asking, and anything else is left to agy's own permissions. The forms: `command(<words>)` matches a command line whose every part (split on `;`, `&&`, `\|\|`, `\|` and newlines, after `VAR=` assignments and `env`/`sudo`/`command`/`exec`/`nohup`/`time`) starts with those words, so `command(git)` covers `git status` but not `gitk`; a `deny` matches if any one part matches, and an `allow` never covers a part with `$` or backtick expansions. `write_file(<path>)` covers that path and everything under it, relative to the Worktree unless absolute. `mcp(<server>/<tool>)` or `mcp(<server>/*)` matches agy's MCP tools. `*` alone matches everything of its kind (`command(*)`, `write_file(*)`, `mcp(*)`). Other forms, like `read_file(…)` and `read_url(…)`, are ignored. |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
 
 **Setup and Teardown scripts** run with `sh -c` in the Worktree, with stdin closed. Setup output streams into the TUI; a non-zero exit puts the Session in *Setup failed*. Both scripts get these variables:

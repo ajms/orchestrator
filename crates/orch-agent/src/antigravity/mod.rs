@@ -1,19 +1,21 @@
+mod guards;
 mod hooks;
 mod hookup;
+mod rules;
 mod statusline;
 mod subagents;
 mod transcript;
 mod usage;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use orch_core::{AgentEvent, ConversationId, PermissionMode};
+use orch_core::{AgentEvent, ConversationId, GuardedAction, PermissionMode};
 use serde_json::json;
 
 use crate::hookup::AgentHookup;
 use crate::{
     AgentAdapter, Argv, Capabilities, ConversationTree, Draft, DraftInput, GuardAnswer, LaunchSpec,
-    PayloadError, SubagentTranscripts,
+    PayloadError, Preset, RuleVerdict, SubagentTranscripts,
 };
 use hookup::AntigravityHookup;
 use subagents::AntigravityTree;
@@ -44,6 +46,7 @@ impl Antigravity {
 }
 
 const GUARD_EVENT: &str = "PreToolUse";
+const BRAIN_DIR: &str = ".gemini/antigravity-cli/brain";
 const NAMED_MODES: [PermissionMode; 2] = [PermissionMode::AcceptEdits, PermissionMode::Plan];
 
 fn mode_name(mode: PermissionMode) -> Option<&'static str> {
@@ -76,6 +79,7 @@ impl AgentAdapter for Antigravity {
             resume: true,
             usage: true,
             modes: true,
+            guards: true,
             subagents: true,
             transcripts: true,
             ..Capabilities::default()
@@ -139,10 +143,21 @@ impl AgentAdapter for Antigravity {
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String> {
         let answer = match answer {
             GuardAnswer::Proceed => json!({ "decision": "ask" }),
+            GuardAnswer::Allow => json!({ "decision": "allow" }),
             GuardAnswer::Ask => json!({ "decision": "force_ask" }),
             GuardAnswer::Deny { reason } => json!({ "decision": "deny", "reason": reason }),
         };
         Some(answer.to_string())
+    }
+
+    fn rule_verdict(
+        &self,
+        preset: &Preset,
+        action: &GuardedAction,
+        cwd: Option<&Path>,
+        worktree: &Path,
+    ) -> Option<RuleVerdict> {
+        rules::verdict(preset.rules_for(Self::NAME)?, action, cwd, worktree)
     }
 
     fn fallback_hook_reply(&self) -> Option<String> {
@@ -151,6 +166,12 @@ impl AgentAdapter for Antigravity {
 
     fn fallback_statusline(&self, _payload: &str) -> String {
         String::new()
+    }
+
+    fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+        lookup("HOME")
+            .map(|home| vec![Path::new(&home).join(BRAIN_DIR)])
+            .unwrap_or_default()
     }
 
     fn hookup(&self) -> Option<Box<dyn AgentHookup>> {

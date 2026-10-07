@@ -156,7 +156,7 @@ impl AgentAdapter for ClaudeCode {
 
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String> {
         let (decision, reason) = match answer {
-            GuardAnswer::Proceed => return None,
+            GuardAnswer::Proceed | GuardAnswer::Allow => return None,
             GuardAnswer::Ask => ("ask", None),
             GuardAnswer::Deny { reason } => ("deny", Some(reason)),
         };

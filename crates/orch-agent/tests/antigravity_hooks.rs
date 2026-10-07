@@ -62,11 +62,11 @@ fn a_finished_invocation_leaves_errored_and_needs_input_alone() {
 #[test]
 fn tool_hooks_start_and_finish_tools() {
     assert_eq!(
-        events("PreToolUse", "pre_tool_use_run_command"),
-        [AgentEvent::ToolStarted {
+        events("PreToolUse", "pre_tool_use_run_command").first(),
+        Some(&AgentEvent::ToolStarted {
             tool: "run_command".into(),
             subagent: None,
-        }]
+        })
     );
     assert_eq!(
         events("PostToolUse", "post_tool_use"),

@@ -2,7 +2,7 @@ use orch_core::{AgentEvent, FailureKind};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::GUARD_EVENT;
+use super::{GUARD_EVENT, guards};
 use crate::PayloadError;
 use crate::hook_event::HOOK_EVENT_FIELD;
 
@@ -24,6 +24,7 @@ struct HookPayload {
 #[serde(default)]
 struct ToolCall {
     name: String,
+    args: Value,
 }
 
 fn parse(payload: &str) -> Result<HookPayload, PayloadError> {
@@ -52,10 +53,18 @@ pub(super) fn map_hook(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
     let events = match hook.event.as_deref() {
         Some("PreInvocation") => vec![AgentEvent::PromptSubmitted],
         Some(GUARD_EVENT) if tool() == QUESTION_TOOL => vec![AgentEvent::QuestionAsked],
-        Some(GUARD_EVENT) => vec![AgentEvent::ToolStarted {
-            tool: tool(),
-            subagent: None,
-        }],
+        Some(GUARD_EVENT) => {
+            let check = hook
+                .tool_call
+                .as_ref()
+                .and_then(|call| guards::guard_check(&call.name, &call.args));
+            std::iter::once(AgentEvent::ToolStarted {
+                tool: tool(),
+                subagent: None,
+            })
+            .chain(check)
+            .collect()
+        }
         Some("PostToolUse") => vec![AgentEvent::ToolFinished {
             tool: tool(),
             subagent: None,

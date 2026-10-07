@@ -1,15 +1,15 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use orch_agent::{
-    Adapter, Capabilities, ConversationTree, GuardHit, GuardKind, SubagentTranscripts, TitleWatch,
-    mode_name,
+    Adapter, Capabilities, ConversationTree, GuardAnswer, GuardHit, GuardKind, Preset, RuleVerdict,
+    SubagentTranscripts, TitleWatch, mode_name,
 };
 use orch_core::{
-    AgentEvent, AgentState, Effect, GateRefusal, Observation, Phase, PhaseEvent, PrStatus,
-    SessionId, SessionStatus,
+    AgentEvent, AgentState, Effect, GateRefusal, GuardedAction, Observation, Phase, PhaseEvent,
+    PrStatus, SessionId, SessionStatus,
 };
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
@@ -91,6 +91,7 @@ pub(crate) struct Live {
     pub(crate) repo: PathBuf,
     pub(crate) status: SessionStatus,
     pub(crate) adapter: Option<Adapter>,
+    pub(crate) preset: Option<Preset>,
     pub(crate) prompts: Vec<PendingGuard>,
     pub(crate) setup_output: Option<String>,
     pub(crate) last_error: Option<String>,
@@ -156,6 +157,7 @@ pub(crate) struct PendingGuard {
     pub(crate) id: u64,
     pub(crate) tool: String,
     pub(crate) hit: GuardHit,
+    pub(crate) allowed: GuardAnswer,
 }
 
 #[derive(Default)]
@@ -215,6 +217,7 @@ impl Live {
             repo,
             status,
             adapter,
+            preset: None,
             prompts: Vec::new(),
             setup_output: None,
             last_error: None,
@@ -241,6 +244,19 @@ impl Live {
             .as_ref()
             .map(|adapter| adapter.agent_dirs(&orch_config::xdg::process_env))
             .unwrap_or_default()
+    }
+
+    pub(crate) fn rule_verdict(
+        &self,
+        action: &GuardedAction,
+        cwd: Option<&Path>,
+    ) -> Option<RuleVerdict> {
+        self.adapter.as_ref()?.rule_verdict(
+            self.preset.as_ref()?,
+            action,
+            cwd,
+            &self.record.worktree,
+        )
     }
 
     pub(crate) fn hook_events(&mut self, payload: &str) -> Vec<AgentEvent> {

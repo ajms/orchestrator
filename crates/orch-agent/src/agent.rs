@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use orch_core::{
-    AgentEvent, ConversationId, PermissionMode, SessionId, SessionStatus, SubagentId,
-    TranscriptEntry,
+    AgentEvent, ConversationId, GuardedAction, PermissionMode, SessionId, SessionStatus,
+    SubagentId, TranscriptEntry,
 };
 
 use crate::hookup::AgentHookup;
-use crate::{GuardAnswer, Preset};
+use crate::{GuardAnswer, Preset, RuleVerdict};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Capabilities {
@@ -178,6 +178,16 @@ pub trait AgentAdapter {
     }
 
     fn guard_answer(&self, _answer: &GuardAnswer) -> Option<String> {
+        None
+    }
+
+    fn rule_verdict(
+        &self,
+        _preset: &Preset,
+        _action: &GuardedAction,
+        _cwd: Option<&Path>,
+        _worktree: &Path,
+    ) -> Option<RuleVerdict> {
         None
     }
 
