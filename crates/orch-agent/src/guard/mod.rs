@@ -33,13 +33,14 @@ pub struct GuardHit {
 pub enum GuardDecision {
     Allow,
     Ask(GuardHit),
+    Unreadable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum GuardAnswer {
     Proceed,
-    Allow,
+    PresetAllow,
     Ask,
     Deny { reason: String },
 }
@@ -47,22 +48,26 @@ pub enum GuardAnswer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuardOutcome {
     Answer(GuardAnswer),
-    Prompt { hit: GuardHit, allowed: GuardAnswer },
+    Prompt {
+        hit: GuardHit,
+        on_allow: GuardAnswer,
+    },
 }
 
 pub fn guard_outcome(decision: GuardDecision, verdict: Option<RuleVerdict>) -> GuardOutcome {
-    let allowed = match verdict {
+    let on_allow = match verdict {
         Some(RuleVerdict::Deny { rule }) => {
             return GuardOutcome::Answer(GuardAnswer::Deny {
                 reason: format!("The Preset rule {rule} denies this (Orchestrator)."),
             });
         }
-        Some(RuleVerdict::Allow { .. }) => GuardAnswer::Allow,
+        Some(RuleVerdict::Allow { .. }) => GuardAnswer::PresetAllow,
         None => GuardAnswer::Proceed,
     };
     match decision {
-        GuardDecision::Allow => GuardOutcome::Answer(allowed),
-        GuardDecision::Ask(hit) => GuardOutcome::Prompt { hit, allowed },
+        GuardDecision::Allow => GuardOutcome::Answer(on_allow),
+        GuardDecision::Ask(hit) => GuardOutcome::Prompt { hit, on_allow },
+        GuardDecision::Unreadable => GuardOutcome::Answer(GuardAnswer::Ask),
     }
 }
 
@@ -81,6 +86,9 @@ pub fn evaluate_guard(
     cwd: Option<&Path>,
     context: &GuardContext,
 ) -> GuardDecision {
+    if *action == GuardedAction::Unreadable {
+        return GuardDecision::Unreadable;
+    }
     if !context.enabled {
         return GuardDecision::Allow;
     }
@@ -96,6 +104,7 @@ pub fn evaluate_guard(
             kind: GuardKind::ExternalTool,
             target: name.clone(),
         }],
+        GuardedAction::Unreadable => Vec::new(),
     };
     hits.into_iter()
         .find(|hit| !context.allowed.contains(hit))
@@ -176,6 +185,9 @@ impl<'a> GuardScope<'a> {
         for command in shell::parse(script) {
             let written: Vec<&Word> = command.written.iter().collect();
             hits.extend(self.written(&cwd, &written));
+            for nested in &command.nested {
+                hits.extend(self.bash(&cwd, nested));
+            }
             hits.extend(self.simple_command(&mut cwd, &command));
         }
         hits

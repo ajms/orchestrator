@@ -15,7 +15,7 @@ use serde_json::json;
 use crate::hookup::AgentHookup;
 use crate::{
     AgentAdapter, Argv, Capabilities, ConversationTree, Draft, DraftInput, GuardAnswer, LaunchSpec,
-    PayloadError, Preset, RuleVerdict, SubagentTranscripts,
+    PayloadError, Preset, RuleScope, RuleVerdict, SubagentTranscripts,
 };
 use hookup::AntigravityHookup;
 use subagents::AntigravityTree;
@@ -143,21 +143,24 @@ impl AgentAdapter for Antigravity {
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String> {
         let answer = match answer {
             GuardAnswer::Proceed => json!({ "decision": "ask" }),
-            GuardAnswer::Allow => json!({ "decision": "allow" }),
+            GuardAnswer::PresetAllow => json!({ "decision": "allow" }),
             GuardAnswer::Ask => json!({ "decision": "force_ask" }),
             GuardAnswer::Deny { reason } => json!({ "decision": "deny", "reason": reason }),
         };
         Some(answer.to_string())
     }
 
+    fn enforces_rules(&self) -> bool {
+        true
+    }
+
     fn rule_verdict(
         &self,
         preset: &Preset,
         action: &GuardedAction,
-        cwd: Option<&Path>,
-        worktree: &Path,
+        scope: &RuleScope,
     ) -> Option<RuleVerdict> {
-        rules::verdict(preset.rules_for(Self::NAME)?, action, cwd, worktree)
+        rules::verdict(preset.rules_for(Self::NAME)?, action, scope)
     }
 
     fn fallback_hook_reply(&self) -> Option<String> {

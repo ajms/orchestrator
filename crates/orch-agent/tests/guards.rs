@@ -547,3 +547,22 @@ fn symlinks_are_resolved_before_judging_a_write() {
         GuardDecision::Allow
     );
 }
+
+#[test]
+fn dotdot_after_a_symlink_climbs_from_where_the_link_points() {
+    let scratch = Scratch::new("dotdot");
+    let worktree = scratch.0.join("repo/.orchestrator/worktrees/wt");
+    std::fs::create_dir_all(scratch.0.join("elsewhere/deep")).unwrap();
+    std::os::unix::fs::symlink(scratch.0.join("elsewhere/deep"), worktree.join("link")).unwrap();
+
+    let decision = evaluate_guard(
+        &write_file(worktree.join("link/../secret").to_string_lossy()),
+        None,
+        &context(&worktree),
+    );
+    let escaped = scratch.0.canonicalize().unwrap().join("elsewhere/secret");
+    assert_eq!(
+        decision,
+        ask(GuardKind::WriteOutsideWorktree, escaped.to_str().unwrap())
+    );
+}

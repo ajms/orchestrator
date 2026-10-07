@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use orch_agent::{
-    AgentAdapter, Antigravity, GuardAnswer, GuardDecision, GuardHit, GuardKind, GuardOutcome,
-    RuleVerdict, guard_outcome, tag_hook_event,
+    AgentAdapter, Antigravity, GuardAnswer, GuardContext, GuardDecision, GuardHit, GuardKind,
+    GuardOutcome, RuleVerdict, evaluate_guard, guard_outcome, tag_hook_event,
 };
 use orch_core::{AgentEvent, GuardedAction};
 use serde_json::{Value, json};
@@ -120,6 +120,47 @@ fn reading_and_asking_are_not_guarded() {
     assert_eq!(guard_check(&fixture("pre_tool_use_ask_question")), None);
 }
 
+fn without_arg(name: &str, arg: &str) -> String {
+    let mut payload: Value = serde_json::from_str(&fixture(name)).unwrap();
+    payload["toolCall"]["args"]
+        .as_object_mut()
+        .unwrap()
+        .remove(arg);
+    payload.to_string()
+}
+
+#[test]
+fn a_guarded_tool_whose_target_orch_cannot_read_is_still_checked() {
+    for (name, arg) in [
+        ("pre_tool_use_write_to_file", "TargetFile"),
+        ("pre_tool_use_run_command", "CommandLine"),
+        ("pre_tool_use_send_command_input", "Input"),
+    ] {
+        let (_, action, _) = guard_check(&without_arg(name, arg))
+            .unwrap_or_else(|| panic!("{name} without {arg} is not guarded"));
+        assert_eq!(action, GuardedAction::Unreadable, "{name}");
+    }
+}
+
+#[test]
+fn an_unreadable_tool_call_makes_agy_ask_the_user_even_with_guards_off() {
+    for enabled in [true, false] {
+        let context = GuardContext {
+            worktree: Path::new(WORKTREE),
+            branch: "orch/fix-login",
+            base_branch: "main",
+            enabled,
+            allowed: &[],
+            agent_dirs: &[],
+        };
+        let decision = evaluate_guard(&GuardedAction::Unreadable, None, &context);
+        assert_eq!(
+            answered(guard_outcome(decision, None)),
+            json!({ "decision": "force_ask" })
+        );
+    }
+}
+
 fn reply(answer: &GuardAnswer) -> Value {
     serde_json::from_str(&Antigravity::default().guard_answer(answer).unwrap()).unwrap()
 }
@@ -128,7 +169,10 @@ fn reply(answer: &GuardAnswer) -> Value {
 fn every_guard_answer_carries_an_explicit_decision() {
     assert_eq!(reply(&GuardAnswer::Proceed), json!({ "decision": "ask" }));
     assert_eq!(reply(&GuardAnswer::Ask), json!({ "decision": "force_ask" }));
-    assert_eq!(reply(&GuardAnswer::Allow), json!({ "decision": "allow" }));
+    assert_eq!(
+        reply(&GuardAnswer::PresetAllow),
+        json!({ "decision": "allow" })
+    );
     assert_eq!(
         reply(&GuardAnswer::Deny {
             reason: "touches main".into()
@@ -198,7 +242,7 @@ fn a_guard_hit_asks_the_user_before_any_preset_allow() {
         match guard_outcome(GuardDecision::Ask(hit()), verdict) {
             GuardOutcome::Prompt {
                 hit: prompted,
-                allowed: answer,
+                on_allow: answer,
             } => {
                 assert_eq!(prompted, hit());
                 assert_eq!(reply(&answer), allowed);

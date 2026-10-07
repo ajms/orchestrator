@@ -30,6 +30,7 @@ fn normalize(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::ParentDir => {
+                normal = resolve_symlinks(&normal);
                 normal.pop();
             }
             Component::CurDir => {}

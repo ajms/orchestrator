@@ -11,7 +11,7 @@ mod shell;
 
 pub use agent::{
     AgentAdapter, Argv, Capabilities, ConversationTree, Draft, DraftInput, LaunchSpec,
-    PayloadError, SubagentTranscripts, TitleWatch, TranscriptRead, TranscriptReader,
+    PayloadError, RuleScope, SubagentTranscripts, TitleWatch, TranscriptRead, TranscriptReader,
     WorktreeRequest,
 };
 pub use antigravity::Antigravity;
