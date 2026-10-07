@@ -209,7 +209,9 @@ fn a_cd_other_than_into_one_static_directory_ends_the_allowed_line() {
         "cd && echo x > notes/a",
         "cd $DIR && echo x > notes/a",
         "cd -P /etc && echo x > notes/a",
+        "cd -P src && echo x > notes/a",
         "pushd /etc && echo x > notes/a",
+        "pushd src && echo x > notes/a",
         "popd && echo x > notes/a",
     ] {
         assert_eq!(verdict(&rules, shell(line)), None, "{line}");

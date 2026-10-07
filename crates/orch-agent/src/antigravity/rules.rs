@@ -154,9 +154,12 @@ impl<'r> Checker<'_, 'r> {
         let mut cwds = vec![cwd.clone()];
         let mut first = None;
         for command in shell::parse(line) {
+            let plain_cd = matches!(command.words.as_slice(), [cd, _] if cd.text == "cd");
             let into = match command.directory_change() {
-                Some(DirectoryChange::Into(dir)) => Some(paths::resolve(&cwd, &dir.text)),
-                Some(DirectoryChange::Unknown) => return None,
+                Some(DirectoryChange::Into(dir)) if plain_cd => {
+                    Some(paths::resolve(&cwd, &dir.text))
+                }
+                Some(_) => return None,
                 None => None,
             };
             let rule = self.allowed_command(&cwds, &command)?;
