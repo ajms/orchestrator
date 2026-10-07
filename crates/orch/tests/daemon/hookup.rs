@@ -405,3 +405,44 @@ async fn doctor_json_carries_the_hookup_problems() {
     );
     assert_eq!(stderr(&output), "");
 }
+
+fn strip_event_tags(path: &std::path::Path) {
+    let mut contents = read_bytes(path);
+    for event in [
+        "PreToolUse",
+        "PostToolUse",
+        "PreInvocation",
+        "PostInvocation",
+        "Stop",
+    ] {
+        contents = contents.replace(&format!(" --event {event}"), "");
+    }
+    write_bytes(path, &contents);
+}
+
+#[tokio::test]
+async fn a_hook_installed_before_event_tags_is_flagged_and_replaced_by_a_reinstall() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    write_bytes(&hooks_file(&env), USERS_HOOKS_BYTES);
+    write_bytes(&settings_file(&env), USERS_SETTINGS_BYTES);
+    orch(&env, &["agent", "install", "antigravity", "--yes"]).await;
+    let current = read_bytes(&hooks_file(&env));
+    strip_event_tags(&hooks_file(&env));
+    strip_event_tags(&env.path("state/orchestrator/hookups/antigravity.json"));
+
+    let doctor = orch(&env, &["doctor"]).await;
+
+    assert_eq!(doctor.status.code(), Some(1), "{}", stderr(&doctor));
+    let report = stdout(&doctor);
+    assert!(report.contains("--event"), "{report}");
+    assert!(
+        report.contains("orch agent install antigravity"),
+        "{report}"
+    );
+    let reinstalled = orch(&env, &["agent", "install", "antigravity", "--yes"]).await;
+    assert!(reinstalled.status.success(), "{}", stderr(&reinstalled));
+    assert_eq!(read_bytes(&hooks_file(&env)), current);
+    orch(&env, &["agent", "uninstall", "antigravity", "--yes"]).await;
+    assert_eq!(read_bytes(&hooks_file(&env)), USERS_HOOKS_BYTES);
+}

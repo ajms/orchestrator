@@ -96,6 +96,15 @@ fn is_orch_hook(entry: &Value) -> bool {
         })
 }
 
+fn is_untagged(entry: &Value) -> bool {
+    let mut found = Vec::new();
+    commands(entry, &mut found);
+    found
+        .iter()
+        .filter_map(|command| command.as_str())
+        .any(|command| !command.contains(" --event "))
+}
+
 fn is_orch_tap(status_line: Option<&Value>) -> bool {
     status_line
         .and_then(|line| line["command"].as_str())
@@ -283,6 +292,12 @@ impl AgentHookup for AntigravityHookup {
             None => problems.push(format!(
                 "the orch hook is missing from {}",
                 hooks.path.display()
+            )),
+            Some(entry) if is_orch_hook(entry) && is_untagged(entry) => problems.push(format!(
+                "the orch hook in {} has commands without `--event` tags; \
+                 rerun `orch agent install {}`",
+                hooks.path.display(),
+                Antigravity::NAME
             )),
             Some(entry) if *entry != hook_entry(orch_program) => problems.push(format!(
                 "the orch hook in {} is not the one this orch installs",
