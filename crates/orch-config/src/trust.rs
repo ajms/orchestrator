@@ -27,6 +27,7 @@ pub enum TrustItem {
     SetupScript(String),
     TeardownScript(String),
     Agent {
+        name: String,
         binary: Option<String>,
         args: Vec<String>,
     },
@@ -84,8 +85,8 @@ fn fields(item: &TrustItem) -> Vec<String> {
     match item {
         TrustItem::SetupScript(script) => vec!["setup".into(), script.clone()],
         TrustItem::TeardownScript(script) => vec!["teardown".into(), script.clone()],
-        TrustItem::Agent { binary, args } => {
-            let mut fields = vec!["agent".into()];
+        TrustItem::Agent { name, binary, args } => {
+            let mut fields = vec!["agent".into(), name.clone()];
             fields.extend(list("binary", binary.as_slice()));
             fields.extend(list("args", args));
             fields

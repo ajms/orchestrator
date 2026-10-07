@@ -13,7 +13,7 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{Adapter, adapter_for, default_adapter, default_program};
+use crate::agents::{Adapter, adapter_for, default_program, launchable, session_adapter};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
 
@@ -78,9 +78,9 @@ fn describe(item: &TrustItem) -> String {
     match item {
         TrustItem::SetupScript(script) => format!("Setup script: {script}"),
         TrustItem::TeardownScript(script) => format!("Teardown script: {script}"),
-        TrustItem::Agent { binary, args } => {
-            let program = binary.clone().unwrap_or_else(default_program);
-            format!("Agent: {program} {}", args.join(" "))
+        TrustItem::Agent { name, binary, args } => {
+            let program = binary.clone().unwrap_or_else(|| default_program(name));
+            format!("Agent {name}: {program} {}", args.join(" "))
         }
         TrustItem::Preset(preset) => format!("Preset {}", preset.name),
         TrustItem::DefaultPreset(preset) => format!("default Preset {}", preset.name),
@@ -221,10 +221,14 @@ impl Daemon {
         if config.setup_script().is_err() {
             return Err(untrusted(root.path(), &config));
         }
+        let agent_name = create
+            .agent
+            .clone()
+            .unwrap_or_else(|| config.default_agent().into());
         let agent = config
-            .agent()
+            .agent(&agent_name)
             .map_err(|_| untrusted(root.path(), &config))?;
-        let adapter = adapter_for(agent).map_err(refused)?;
+        let adapter = adapter_for(&agent).map_err(refused)?;
         let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
         let base = match create.base {
@@ -257,6 +261,7 @@ impl Daemon {
             worktree: worktree.path.clone(),
             phase: Phase::SettingUp,
             preset: preset.name,
+            agent: agent_name,
         };
         let ports = global.ports;
         let stored = self.store.call_blocking(move |store| {
@@ -288,13 +293,19 @@ impl Daemon {
         if let Err(err) = written {
             eprintln!("orch daemon: storing the prompt of {}: {err}", id.as_str());
         }
-        Ok(Live::new(record, repo.path, adapter))
+        Ok(Live::new(record, repo.path, Some(adapter)))
     }
 
-    pub(crate) async fn check_launch(&self, repo: &Path, preset: &str) -> Result<(), RequestError> {
+    pub(crate) async fn check_launch(
+        &self,
+        repo: &Path,
+        record: &SessionRecord,
+    ) -> Result<(), RequestError> {
         let config = self.repo_config(repo).await?;
-        config.agent().map_err(|_| untrusted(repo, &config))?;
-        select_preset(repo, &config, Some(preset)).map(drop)
+        config
+            .agent(&record.agent)
+            .map_err(|_| untrusted(repo, &config))?;
+        select_preset(repo, &config, Some(&record.preset)).map(drop)
     }
 
     pub(crate) async fn check_teardown(&self, repo: &Path) -> Result<(), RequestError> {
@@ -332,7 +343,7 @@ impl Daemon {
         id: &SessionId,
     ) -> Result<Reply, RequestError> {
         let (record, repo) = self.session_repo(id)?;
-        self.check_launch(&repo, &record.preset).await?;
+        self.check_launch(&repo, &record).await?;
         self.update(id, |live| {
             live.transition(PhaseEvent::SetupSkipped)?;
             live.launching = true;
@@ -347,7 +358,7 @@ impl Daemon {
     pub(crate) async fn resume(self: &Arc<Self>, id: &SessionId) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
         let (record, repo) = self.session_repo(id)?;
-        self.check_launch(&repo, &record.preset).await?;
+        self.check_launch(&repo, &record).await?;
         let mut replaced = None;
         self.update(id, |live| {
             if live.status.flags().worktree_missing {
@@ -383,14 +394,16 @@ impl Daemon {
         name: String,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
-        let (_claim, _, repo) = self.claim(id, |live| {
+        let (_claim, record, repo) = self.claim(id, |live| {
             live.status
                 .check_preset_change()
                 .map_err(|refusal| gate_message("Changing the Preset", refusal))
         })?;
         let config = self.repo_config(&repo).await?;
         let preset = select_preset(&repo, &config, Some(&name))?;
-        config.agent().map_err(|_| untrusted(&repo, &config))?;
+        config
+            .agent(&record.agent)
+            .map_err(|_| untrusted(&repo, &config))?;
         let mut restart = false;
         let mut replaced = None;
         self.update(id, |live| {
@@ -454,7 +467,7 @@ impl Daemon {
         let spawned = match launch {
             Ok((adapter, argv)) => {
                 let _ = self.update(id, |live| {
-                    live.adapter = adapter;
+                    live.adapter = Some(adapter);
                     Ok(())
                 });
                 self.spawn_holder(&record, argv).await
@@ -492,8 +505,8 @@ impl Daemon {
         prompt: Option<String>,
         resume: bool,
     ) -> Result<(Adapter, Vec<String>), String> {
-        let agent = config.agent().map_err(|err| err.to_string())?;
-        let adapter = adapter_for(agent)?;
+        let agent = config.agent(&record.agent).map_err(|err| err.to_string())?;
+        let adapter = launchable(&agent, &record.worktree)?;
         let preset =
             select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
         let mut spec = LaunchSpec::new(
@@ -605,17 +618,6 @@ impl Daemon {
         suspended
     }
 
-    pub(crate) async fn repo_adapter(&self, repo: &Path) -> Adapter {
-        match self.repo_config(repo).await {
-            Ok(config) => config
-                .agent()
-                .ok()
-                .and_then(|agent| adapter_for(agent).ok())
-                .unwrap_or_else(default_adapter),
-            Err(_) => default_adapter(),
-        }
-    }
-
     async fn load_sessions(&self) -> Vec<(SessionId, Phase)> {
         let listed = self
             .store
@@ -634,7 +636,7 @@ impl Daemon {
             let Some(repo) = repos.iter().find(|repo| repo.id == record.repo) else {
                 continue;
             };
-            let adapter = self.repo_adapter(&repo.path).await;
+            let adapter = session_adapter(&record.agent);
             let id = record.id.clone();
             let mut live = Live::new(record, repo.path.clone(), adapter);
             live.setup_output = self.read_setup_log(&id).await;

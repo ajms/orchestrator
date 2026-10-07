@@ -6,10 +6,20 @@ use crate::PortRange;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigProblem {
-    UnknownPermissionMode { preset: String, mode: String },
+    UnknownPermissionMode {
+        preset: String,
+        mode: String,
+    },
     ReservedPresetName,
     EmptyPortRange(PortRange),
-    Misplaced { key: &'static str },
+    Misplaced {
+        key: &'static str,
+    },
+    OldAgentTable {
+        name: String,
+        binary: Option<String>,
+        args: Option<Vec<String>>,
+    },
 }
 
 impl fmt::Display for ConfigProblem {
@@ -27,6 +37,19 @@ impl fmt::Display for ConfigProblem {
                 range.start, range.end, range.block_size
             ),
             ConfigProblem::Misplaced { key } => write!(f, "{key} is not allowed here"),
+            ConfigProblem::OldAgentTable { name, binary, args } => {
+                write!(f, "the [agent] table was replaced; write agent = {name:?}")?;
+                if binary.is_some() || args.is_some() {
+                    write!(f, " and [agents.{name}]")?;
+                    if let Some(binary) = binary {
+                        write!(f, " binary = {binary:?}")?;
+                    }
+                    if let Some(args) = args {
+                        write!(f, " args = {args:?}")?;
+                    }
+                }
+                Ok(())
+            }
         }
     }
 }

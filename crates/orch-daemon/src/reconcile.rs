@@ -12,6 +12,7 @@ use orch_protocol::{
 };
 use orch_store::{NewSession, PortBlock, RepoRoot, SessionRecord};
 
+use crate::agents::session_adapter;
 use crate::cleanup::{CleanupMarker, remove_session_dir};
 use crate::lifecycle::{
     Busy, HOLDER_EXIT_WAIT, new_session_id, refused, select_preset, session_env, with_git,
@@ -42,6 +43,7 @@ struct NewRecord {
     base: String,
     phase: Phase,
     preset: String,
+    agent: String,
     port_block: Option<PortBlock>,
 }
 
@@ -250,6 +252,7 @@ impl Daemon {
                     worktree: new.worktree,
                     phase: new.phase,
                     preset: new.preset,
+                    agent: new.agent,
                 })?;
                 match new.port_block {
                     Some(block) => drop(store.hold_port_block(&created.id, block)?),
@@ -261,7 +264,7 @@ impl Daemon {
             })
             .await?
             .map_err(refused)?;
-        let adapter = self.repo_adapter(&repo).await;
+        let adapter = session_adapter(&record.agent);
         self.lock().insert(Live::new(record.clone(), repo, adapter));
         Ok(record)
     }
@@ -339,6 +342,7 @@ impl Daemon {
                 base,
                 phase: Phase::Active,
                 preset,
+                agent: config.default_agent().into(),
                 port_block: hello.port_block,
             })
             .await
@@ -967,6 +971,7 @@ impl Daemon {
                 base,
                 phase: Phase::Suspended,
                 preset: preset.name,
+                agent: config.default_agent().into(),
                 port_block: None,
             })
             .await?;

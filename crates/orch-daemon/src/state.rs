@@ -85,7 +85,7 @@ pub(crate) struct Live {
     pub(crate) record: SessionRecord,
     pub(crate) repo: PathBuf,
     pub(crate) status: SessionStatus,
-    pub(crate) adapter: Adapter,
+    pub(crate) adapter: Option<Adapter>,
     pub(crate) prompts: Vec<PendingGuard>,
     pub(crate) setup_output: Option<String>,
     pub(crate) last_error: Option<String>,
@@ -184,13 +184,16 @@ impl PaneSizes {
 }
 
 impl Live {
-    pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Adapter) -> Self {
-        let capabilities = adapter.capabilities();
+    pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Option<Adapter>) -> Self {
+        let capabilities = adapter
+            .as_ref()
+            .map(|adapter| adapter.capabilities())
+            .unwrap_or_default();
         let mut status = capabilities.session_status();
         status.restore(record.phase, record.flags.clone());
         let transcripts = capabilities
             .transcripts
-            .then(|| adapter.subagent_transcripts())
+            .then(|| adapter.as_ref()?.subagent_transcripts())
             .flatten();
         Self {
             record,

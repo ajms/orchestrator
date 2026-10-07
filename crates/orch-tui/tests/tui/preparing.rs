@@ -149,6 +149,7 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
         review_command: None,
         branch_prefix: "orch/".into(),
         trust: None,
+        ..RepoSettings::default()
     }];
     let message = "branch orch/fix-login-timeout-v2 already exists".to_string();
     tui.daemon()
@@ -160,6 +161,7 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
     tui.keys("-v2");
     tui.press(KeyCode::Tab);
     tui.keys("release/1.2");
+    tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Right);
     tui.press(KeyCode::Right);

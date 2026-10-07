@@ -1202,6 +1202,7 @@ dependencies = [
  "orch-protocol",
  "orch-store",
  "orch-tui",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tokio",

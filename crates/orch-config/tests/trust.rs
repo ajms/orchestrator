@@ -121,14 +121,22 @@ fn personal_loosening_presets_are_always_trusted() {
 #[test]
 fn committed_agent_binary_and_args_need_trust() {
     let fx = Fixture::new();
-    fx.repo_file(
-        "[agent]\nbinary = \"./bin/claude\"\nargs = [\"--dangerously-skip-permissions\"]\n",
+    fx.repo_file("[agents.antigravity]\nbinary = \"./bin/agy\"\nargs = [\"--yolo\"]\n");
+    let untrusted = fx.untrusted();
+    assert_eq!(untrusted.agent("antigravity"), Err(Untrusted));
+    assert!(untrusted.agent("claude").is_ok());
+    assert_eq!(
+        untrusted.trust_request().unwrap().items,
+        vec![TrustItem::Agent {
+            name: "antigravity".into(),
+            binary: Some("./bin/agy".into()),
+            args: vec!["--yolo".into()],
+        }]
     );
-    assert_eq!(fx.untrusted().agent(), Err(Untrusted));
     let approved = fx.approved();
     assert_eq!(
-        approved.agent().unwrap().binary.as_deref(),
-        Some("./bin/claude")
+        approved.agent("antigravity").unwrap().binary.as_deref(),
+        Some("./bin/agy")
     );
 }
 
@@ -185,9 +193,23 @@ fn personal_default_preset_that_loosens_is_trusted() {
 }
 
 #[test]
-fn committed_agent_name_alone_needs_no_trust() {
+fn committed_default_agent_alone_needs_no_trust() {
     let fx = Fixture::new();
-    fx.repo_file("[agent]\nname = \"claude\"\n");
+    fx.repo_file("agent = \"antigravity\"\n");
     assert_eq!(fx.untrusted().trust_request(), None);
-    assert_eq!(fx.untrusted().agent().unwrap().name, "claude");
+    assert_eq!(fx.untrusted().default_agent(), "antigravity");
+}
+
+#[test]
+fn personal_agent_binary_needs_no_trust() {
+    let fx = Fixture::new();
+    fx.global(&format!(
+        "[repos.{}.agents.claude]\nbinary = \"./bin/claude\"\n",
+        fx.repo_key()
+    ));
+    assert_eq!(fx.untrusted().trust_request(), None);
+    assert_eq!(
+        fx.untrusted().agent("claude").unwrap().binary.as_deref(),
+        Some("./bin/claude")
+    );
 }

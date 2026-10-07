@@ -122,6 +122,7 @@ fn an_edited_branch_base_and_preset_are_sent() {
     tui.press(KeyCode::Down);
     assert!(field(&mut tui, "Base").contains("orch/other-work"));
     tui.press(KeyCode::Tab);
+    tui.press(KeyCode::Tab);
     tui.press(KeyCode::Right);
     assert!(field(&mut tui, "Preset").contains("plan"));
     submit(&mut tui);
@@ -134,6 +135,7 @@ fn an_edited_branch_base_and_preset_are_sent() {
             branch: Some("orch/stacked-work-v2".into()),
             base: Some("orch/other-work".into()),
             preset: Some("plan".into()),
+            agent: None,
         }]
     );
 }

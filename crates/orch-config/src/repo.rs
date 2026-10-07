@@ -34,21 +34,58 @@ pub(crate) struct RepoLayer {
     base: Option<String>,
     preset: Option<String>,
     review_command: Option<String>,
+    agent: Option<AgentSetting>,
     #[serde(default)]
-    agent: AgentLayer,
+    agents: BTreeMap<String, AgentLayer>,
     #[serde(default)]
     pub(crate) notifications: NotificationsLayer,
     #[serde(default)]
     presets: BTreeMap<String, PresetLayer>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum AgentSetting {
+    Name(String),
+    OldTable(OldAgentTable),
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AgentLayer {
+struct OldAgentTable {
     name: Option<String>,
     binary: Option<String>,
     args: Option<Vec<String>>,
 }
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AgentLayer {
+    binary: Option<String>,
+    args: Option<Vec<String>>,
+}
+
+impl RepoLayer {
+    pub(crate) fn check(&self) -> Result<(), ConfigProblem> {
+        match &self.agent {
+            Some(AgentSetting::OldTable(old)) => Err(ConfigProblem::OldAgentTable {
+                name: old.name.clone().unwrap_or_else(|| DEFAULT_AGENT.into()),
+                binary: old.binary.clone(),
+                args: old.args.clone(),
+            }),
+            _ => Ok(()),
+        }
+    }
+
+    fn agent_name(&self) -> Option<&String> {
+        match &self.agent {
+            Some(AgentSetting::Name(name)) => Some(name),
+            _ => None,
+        }
+    }
+}
+
+pub const DEFAULT_AGENT: &str = "claude";
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,6 +125,12 @@ pub struct AgentConfig {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct LayeredAgent {
+    config: AgentConfig,
+    committed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresetError {
     Unknown(String),
@@ -101,8 +144,8 @@ pub struct RepoConfig {
     base: Option<String>,
     preset: Option<Sourced<String>>,
     review_command: Option<String>,
-    agent: AgentConfig,
-    agent_committed: bool,
+    default_agent: String,
+    agents: BTreeMap<String, LayeredAgent>,
     notifications: Notifications,
     presets: BTreeMap<String, Sourced<Preset>>,
     trust_request: Option<TrustRequest>,
@@ -116,6 +159,7 @@ impl RepoConfig {
         approved: Option<&TrustHash>,
     ) -> Result<Self, (Source, ConfigProblem)> {
         for (source, layer) in &layers {
+            layer.check().map_err(|problem| (*source, problem))?;
             if *source == Source::RepoFile && layer.review_command.is_some() {
                 let key = "review_command";
                 return Err((*source, ConfigProblem::Misplaced { key }));
@@ -129,21 +173,36 @@ impl RepoConfig {
                 })
             })
         };
-        let binary = pick(&|layer| layer.agent.binary.as_ref());
-        let args = layers.iter().rev().find_map(|(source, layer)| {
-            layer.agent.args.clone().map(|value| Sourced {
-                value,
-                source: *source,
+        let names = layers
+            .iter()
+            .flat_map(|(_, layer)| layer.agents.keys())
+            .collect::<std::collections::BTreeSet<_>>();
+        let agents = names
+            .into_iter()
+            .map(|name| {
+                let binary = pick(&|layer| {
+                    layer
+                        .agents
+                        .get(name)
+                        .and_then(|agent| agent.binary.as_ref())
+                });
+                let args = layers.iter().rev().find_map(|(source, layer)| {
+                    let args = layer.agents.get(name)?.args.clone()?;
+                    Some(Sourced {
+                        value: args,
+                        source: *source,
+                    })
+                });
+                let committed = binary.as_ref().is_some_and(Sourced::committed)
+                    || args.as_ref().is_some_and(Sourced::committed);
+                let config = AgentConfig {
+                    name: name.clone(),
+                    binary: binary.map(|binary| binary.value),
+                    args: args.map(|args| args.value).unwrap_or_default(),
+                };
+                (name.clone(), LayeredAgent { config, committed })
             })
-        });
-        let agent_committed = binary.as_ref().is_some_and(Sourced::committed)
-            || args.as_ref().is_some_and(Sourced::committed);
-        let agent = AgentConfig {
-            name: pick(&|layer| layer.agent.name.as_ref())
-                .map_or_else(|| "claude".into(), |name| name.value),
-            binary: binary.map(|binary| binary.value),
-            args: args.map(|args| args.value).unwrap_or_default(),
-        };
+            .collect();
 
         let mut presets = BTreeMap::new();
         for (source, layer) in &layers {
@@ -169,8 +228,12 @@ impl RepoConfig {
             preset: pick(&|layer| layer.preset.as_ref()),
             review_command: pick(&|layer| layer.review_command.as_ref())
                 .map(|sourced| sourced.value),
-            agent,
-            agent_committed,
+            default_agent: layers
+                .iter()
+                .rev()
+                .find_map(|(_, layer)| layer.agent_name())
+                .map_or_else(|| DEFAULT_AGENT.into(), Clone::clone),
+            agents,
             notifications: Notifications::layered(
                 std::iter::once(global_notifications)
                     .chain(layers.iter().map(|(_, layer)| &layer.notifications)),
@@ -197,12 +260,16 @@ impl RepoConfig {
         let mut items = Vec::new();
         items.extend(committed(&self.setup).map(TrustItem::SetupScript));
         items.extend(committed(&self.teardown).map(TrustItem::TeardownScript));
-        if self.agent_committed {
-            items.push(TrustItem::Agent {
-                binary: self.agent.binary.clone(),
-                args: self.agent.args.clone(),
-            });
-        }
+        items.extend(
+            self.agents
+                .values()
+                .filter(|agent| agent.committed)
+                .map(|agent| TrustItem::Agent {
+                    name: agent.config.name.clone(),
+                    binary: agent.config.binary.clone(),
+                    args: agent.config.args.clone(),
+                }),
+        );
         items.extend(
             self.presets
                 .values()
@@ -262,10 +329,19 @@ impl RepoConfig {
         self.review_command.as_deref()
     }
 
-    pub fn agent(&self) -> Result<&AgentConfig, Untrusted> {
-        match self.agent_committed && !self.trusted {
-            true => Err(Untrusted),
-            false => Ok(&self.agent),
+    pub fn default_agent(&self) -> &str {
+        &self.default_agent
+    }
+
+    pub fn agent(&self, name: &str) -> Result<AgentConfig, Untrusted> {
+        match self.agents.get(name) {
+            Some(agent) if agent.committed && !self.trusted => Err(Untrusted),
+            Some(agent) => Ok(agent.config.clone()),
+            None => Ok(AgentConfig {
+                name: name.into(),
+                binary: None,
+                args: Vec::new(),
+            }),
         }
     }
 

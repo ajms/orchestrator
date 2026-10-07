@@ -1,4 +1,4 @@
-use orch_protocol::{Reply, RepoSettings, Request, TrustNeeded};
+use orch_protocol::{AgentChoice, Reply, RepoSettings, Request, TrustNeeded};
 
 use crate::common::*;
 
@@ -80,5 +80,49 @@ async fn an_untrusted_loosening_preset_is_withheld_and_its_trust_request_reporte
             .await
             .presets
             .contains(&"yolo".to_string())
+    );
+}
+
+#[tokio::test]
+async fn repo_settings_offer_the_built_in_agents_and_say_why_one_is_unavailable() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+
+    let resolved = settings(&mut client, &repo).await;
+    assert_eq!(resolved.default_agent, "claude");
+    assert_eq!(
+        resolved.agents,
+        vec![AgentChoice {
+            name: "claude".into(),
+            unavailable: None,
+        }]
+    );
+
+    env.write_config_with_agent(
+        &format!("[repos.{repo:?}]\nagent = \"antigravity\"\n"),
+        "/nonexistent/agent",
+    );
+    let resolved = settings(&mut client, &repo).await;
+    assert_eq!(resolved.default_agent, "antigravity");
+    let [claude, antigravity] = &resolved.agents[..] else {
+        panic!("{:?}", resolved.agents);
+    };
+    assert_eq!(claude.name, "claude");
+    assert!(
+        claude
+            .unavailable
+            .as_deref()
+            .is_some_and(|why| why.contains("/nonexistent/agent")),
+        "{claude:?}"
+    );
+    assert_eq!(antigravity.name, "antigravity");
+    assert!(
+        antigravity
+            .unavailable
+            .as_deref()
+            .is_some_and(|why| why.contains("unknown")),
+        "{antigravity:?}"
     );
 }

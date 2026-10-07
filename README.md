@@ -133,6 +133,9 @@ review_command = "git -p diff \"$ORCH_MERGE_BASE\" \"$ORCH_REVIEW_TREE\""
 mode = "default"
 deny = ["WebFetch"]
 
+[defaults.agents.claude]      # where to find an Agent, resolved at every launch
+binary = "/opt/claude/bin/claude"
+
 [repos."~/src/my-repo"]       # personal overrides; these win over the Repo's file
 setup = "direnv allow && make deps"
 ```
@@ -144,9 +147,7 @@ setup = "npm ci"
 teardown = "docker compose down"
 base = "main"
 preset = "ask"
-
-[agent]
-name = "claude"
+agent = "claude"
 
 [presets.tight]
 mode = "plan"
@@ -154,6 +155,8 @@ deny = ["Bash(rm *)"]
 ```
 
 Precedence is: personal override > Repo file > global defaults.
+
+The old `[agent]` table is no longer read; `orch` reports it as a config error and shows the `agent =` / `[agents.<name>]` form to use instead. A Session whose Agent is unknown, or whose binary is missing, fails as Errored with a message; `orch` never falls back to Claude.
 
 Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml` unless noted):
 
@@ -164,7 +167,8 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `base` | Base branch for new Sessions; unset means origin's default branch, else the Repo's current branch |
 | `preset` | Default Preset for new Sessions (built-in default: `edits`) |
 | `review_command` | Command shown when reviewing a Session; not allowed in `.orchestrator.toml` |
-| `[agent]` | `name` (default `claude`), `binary`, `args` |
+| `agent` | Default Agent for new Sessions (built-in default: `claude`); the `:new` form can pick another. A Session keeps its Agent for good. |
+| `[agents.<name>]` | `binary` (default: the Agent's own, e.g. `claude` on `PATH`) and `args` for that Agent, read at every launch, resume and Draft |
 | `[presets.<name>]` | `mode`, `allow`, `deny` |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
 
@@ -176,7 +180,7 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `ORCH_WORKTREE` | Absolute path of the Worktree |
 | `ORCH_PORT_BASE` | First port of the Session's block (see `ports`), e.g. `PORT=$((ORCH_PORT_BASE + 1))` |
 
-**Trust:** scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
+**Trust:** scripts (`setup`, `teardown`), an Agent's `binary` and `args` and permission-loosening Presets that come from a Repo's own file only run after you approve them (a committed `agent =` needs no Trust, since it only picks a built-in Agent), in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
 
 State lives in `~/.local/state/orchestrator/state.db`. Runtime sockets live under `$XDG_RUNTIME_DIR/orchestrator`.
 

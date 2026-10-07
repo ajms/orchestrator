@@ -20,6 +20,7 @@ pub struct NewSession {
     pub worktree: PathBuf,
     pub phase: Phase,
     pub preset: String,
+    pub agent: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +34,7 @@ pub struct SessionRecord {
     pub worktree: PathBuf,
     pub phase: Phase,
     pub flags: Flags,
+    pub agent: String,
     pub preset: String,
     pub last_mode: Option<PermissionMode>,
     pub agent_state: Option<AgentState>,
@@ -58,7 +60,7 @@ impl SessionRecord {
 const COLUMNS: &str = "id, repo_id, slug, branch, base, worktree, phase, preset, last_mode,
     unseen, stalled, needs_rebase, recovered, worktree_missing, base_missing, muted,
     pr_number, pr_checks, pr_review, pr_new_comments, pr_state,
-    port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title";
+    port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title, agent";
 
 fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
     let pr = match row.get::<_, Option<i64>>("pr_number")? {
@@ -90,6 +92,7 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
             base_missing: row.get("base_missing")?,
             muted: row.get("muted")?,
         },
+        agent: row.get("agent")?,
         preset: row.get("preset")?,
         last_mode: row
             .get::<_, Option<Stored<PermissionMode>>>("last_mode")?
@@ -112,8 +115,8 @@ impl Store {
         let now = now_millis();
         self.conn.execute(
             "INSERT INTO sessions
-                (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at, agent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
             params![
                 new.id.as_str(),
                 new.repo.0,
@@ -124,6 +127,7 @@ impl Store {
                 Stored(new.phase),
                 new.preset,
                 now,
+                new.agent,
             ],
         )?;
         self.existing_session(&new.id)
