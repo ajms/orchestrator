@@ -377,7 +377,7 @@ fn retitle(live: &mut Live, title: &str) {
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
     let check = guard_check(live.adapter.capabilities(), events);
     let agent_dirs = live.adapter.agent_dirs(&orch_config::xdg::process_env);
-    let decision = check.map(|(tool, action, cwd)| {
+    let decision = check.map(|check| {
         let context = GuardContext {
             worktree: &live.record.worktree,
             branch: &live.record.branch,
@@ -386,8 +386,8 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
             allowed: &live.record.guard_allowances,
             agent_dirs: &agent_dirs,
         };
-        let decision = evaluate_guard(action, cwd.as_deref().map(Path::new), &context);
-        (tool.clone(), decision)
+        let decision = evaluate_guard(check.action, check.cwd, &context);
+        (check.tool.to_owned(), decision)
     });
     match decision {
         Some((tool, GuardDecision::Ask(hit))) => {
@@ -408,14 +408,22 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
     }
 }
 
-type GuardCheck<'a> = (&'a String, &'a GuardedAction, &'a Option<String>);
+struct GuardCheck<'a> {
+    tool: &'a str,
+    action: &'a GuardedAction,
+    cwd: Option<&'a Path>,
+}
 
 fn guard_check(capabilities: Capabilities, events: &[AgentEvent]) -> Option<GuardCheck<'_>> {
     if !capabilities.guards_available() {
         return None;
     }
     events.iter().find_map(|event| match event {
-        AgentEvent::GuardCheck { tool, action, cwd } => Some((tool, action, cwd)),
+        AgentEvent::GuardCheck { tool, action, cwd } => Some(GuardCheck {
+            tool,
+            action,
+            cwd: cwd.as_deref().map(Path::new),
+        }),
         _ => None,
     })
 }

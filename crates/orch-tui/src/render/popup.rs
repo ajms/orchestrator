@@ -188,16 +188,8 @@ fn trust(frame: &mut Frame, repo: &std::path::Path, items: &[String], skippable:
 }
 
 fn guard(frame: &mut Frame, prompt: &GuardPrompt) {
-    let heading = match guard_kind(prompt.kind) {
-        Some(kind) => Line::from(vec![
-            Span::raw(" The Agent wants to use "),
-            Span::raw(prompt.tool.clone()).bold(),
-            Span::raw(format!(" on {kind}:")),
-        ]),
-        None => Line::from(" The Agent wants to use a tool that reaches beyond the Session:"),
-    };
     let lines = vec![
-        heading,
+        guard_heading(prompt),
         Line::default(),
         Line::from(format!("   {}", prompt.target)).yellow(),
         Line::default(),
@@ -206,13 +198,22 @@ fn guard(frame: &mut Frame, prompt: &GuardPrompt) {
     show(frame, " Guard ", Color::Yellow, lines, 70);
 }
 
-fn guard_kind(kind: GuardKindView) -> Option<&'static str> {
-    match kind {
-        GuardKindView::BaseBranch => Some("the Base branch"),
-        GuardKindView::OtherRef => Some("another ref"),
-        GuardKindView::WorktreeManagement => Some("worktrees"),
-        GuardKindView::WriteOutsideWorktree => Some("files outside the Worktree"),
-        GuardKindView::ExternalTool => None,
+fn guard_heading(prompt: &GuardPrompt) -> Line<'static> {
+    let on = |target: &str| {
+        Line::from(vec![
+            Span::raw(" The Agent wants to use "),
+            Span::raw(prompt.tool.clone()).bold(),
+            Span::raw(format!(" on {target}:")),
+        ])
+    };
+    match prompt.kind {
+        GuardKindView::BaseBranch => on("the Base branch"),
+        GuardKindView::OtherRef => on("another ref"),
+        GuardKindView::WorktreeManagement => on("worktrees"),
+        GuardKindView::WriteOutsideWorktree => on("files outside the Worktree"),
+        GuardKindView::ExternalTool => {
+            Line::from(" The Agent wants to use a tool that reaches beyond the Session:")
+        }
     }
 }
 
