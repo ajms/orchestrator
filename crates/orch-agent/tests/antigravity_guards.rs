@@ -143,8 +143,8 @@ fn a_guarded_tool_whose_target_orch_cannot_read_is_still_checked() {
 }
 
 #[test]
-fn an_unreadable_tool_call_makes_agy_ask_the_user_even_with_guards_off() {
-    for enabled in [true, false] {
+fn an_unreadable_tool_call_forces_agy_to_ask_while_guards_are_on() {
+    for (enabled, decision) in [(true, "force_ask"), (false, "ask")] {
         let context = GuardContext {
             worktree: Path::new(WORKTREE),
             branch: "orch/fix-login",
@@ -153,10 +153,10 @@ fn an_unreadable_tool_call_makes_agy_ask_the_user_even_with_guards_off() {
             allowed: &[],
             agent_dirs: &[],
         };
-        let decision = evaluate_guard(&GuardedAction::Unreadable, None, &context);
+        let guard = evaluate_guard(&GuardedAction::Unreadable, None, &context);
         assert_eq!(
-            answered(guard_outcome(decision, None)),
-            json!({ "decision": "force_ask" })
+            answered(guard_outcome(guard, None)),
+            json!({ "decision": decision })
         );
     }
 }

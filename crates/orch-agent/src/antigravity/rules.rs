@@ -4,19 +4,21 @@ use orch_core::GuardedAction;
 use serde_json::Value;
 
 use super::guards::MCP_PREFIX;
+use super::invocations::{KEYWORDS, invocations, is_wrapper};
 use crate::guard::paths;
 use crate::guard::shell::{self, SimpleCommand, Word};
 use crate::{RuleScope, RuleVerdict, Rules};
 
 const ANY: &str = "*";
-const WRAPPERS: [&str; 9] = [
-    "env", "sudo", "doas", "command", "exec", "nohup", "time", "nice", "ionice",
+const GIT_DIR: &str = ".git";
+const DIRECTORY_CHANGES: [&str; 3] = ["cd", "pushd", "popd"];
+const RISKY_GIT_OPTIONS: [&str; 5] = [
+    "--output",
+    "--upload-pack",
+    "--exec",
+    "--config-env",
+    "--receive-pack",
 ];
-const FLAGS_WITH_VALUES: [&str; 8] = ["-u", "-g", "-C", "-h", "-p", "-U", "-n", "-c"];
-const KEYWORDS: [&str; 11] = [
-    "if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "fi",
-];
-const SHELLS: [&str; 6] = ["sh", "bash", "zsh", "dash", "ksh", "fish"];
 
 enum Rule<'a> {
     Command(Vec<&'a str>),
@@ -83,6 +85,12 @@ pub(super) fn verdict(
         .map(|rule| RuleVerdict::Allow { rule: rule.clone() })
 }
 
+#[derive(Clone, Copy)]
+enum Strictness {
+    Deny,
+    Allow,
+}
+
 struct Checker<'s, 'r> {
     scope: &'s RuleScope<'s>,
     allow: &'r [Parsed<'r>],
@@ -103,13 +111,14 @@ impl<'r> Checker<'_, 'r> {
             (GuardedAction::Shell { command }, Rule::Command(prefix)) => invocations(command)
                 .iter()
                 .any(|words| starts_with(words, prefix)),
-            (GuardedAction::WriteFile { path }, Rule::WriteFile(pattern)) => {
-                self.covers(&paths::resolve(&self.cwd(), path), pattern)
-            }
+            (GuardedAction::WriteFile { path }, Rule::WriteFile(pattern)) => self.covers(
+                &paths::resolve(&self.cwd(), path),
+                pattern,
+                Strictness::Deny,
+            ),
             (GuardedAction::ExternalTool { name }, Rule::AnyMcp) => name.starts_with(MCP_PREFIX),
             (GuardedAction::ExternalTool { name }, Rule::Mcp { server, tool }) => {
-                let prefix = format!("{MCP_PREFIX}{}_", underscored(server));
-                match name.strip_prefix(&prefix) {
+                match mcp_tool(name, server) {
                     Some(_) if *tool == ANY => true,
                     Some(rest) => rest == underscored(tool),
                     None => false,
@@ -132,7 +141,9 @@ impl<'r> Checker<'_, 'r> {
 
     fn allowed_write(&self, path: &Path) -> Option<&'r String> {
         self.allow.iter().find_map(|parsed| match parsed.rule {
-            Rule::WriteFile(pattern) => self.covers(path, pattern).then_some(parsed.text),
+            Rule::WriteFile(pattern) => self
+                .covers(path, pattern, Strictness::Allow)
+                .then_some(parsed.text),
             _ => None,
         })
     }
@@ -141,12 +152,23 @@ impl<'r> Checker<'_, 'r> {
         let mut cwd = self.cwd();
         let mut first = None;
         for command in shell::parse(line) {
+            let changes_directory = command
+                .words
+                .first()
+                .is_some_and(|word| DIRECTORY_CHANGES.contains(&word.text.as_str()));
+            let into = match command.words.as_slice() {
+                [cd, dir] if cd.text == "cd" && !dir.dynamic && !dir.text.starts_with('-') => {
+                    Some(paths::resolve(&cwd, &dir.text))
+                }
+                _ => None,
+            };
+            if changes_directory && into.is_none() {
+                return None;
+            }
             let rule = self.allowed_command(&cwd, &command)?;
             first.get_or_insert(rule);
-            if let [cd, dir] = command.words.as_slice()
-                && cd.text == "cd"
-            {
-                cwd = paths::resolve(&cwd, &dir.text);
+            if let Some(into) = into {
+                cwd = into;
             }
         }
         first
@@ -162,8 +184,9 @@ impl<'r> Checker<'_, 'r> {
             && command.nested.is_empty()
             && command.words.iter().all(|word| !word.dynamic)
             && !words[0].contains('=')
-            && !WRAPPERS.contains(&words[0])
-            && !KEYWORDS.contains(&words[0]);
+            && !is_wrapper(words[0])
+            && !KEYWORDS.contains(&words[0])
+            && !(words[0] == "git" && words.iter().any(|word| risky_git_option(word)));
         if !plain
             || !command
                 .written
@@ -193,24 +216,33 @@ impl<'r> Checker<'_, 'r> {
                 Rule::AnyMcp => name.starts_with(MCP_PREFIX),
                 Rule::Mcp { server, tool } => owner(name, &servers)
                     .filter(|(owner, _)| *owner == server)
-                    .is_some_and(|(_, rest)| tool == ANY || rest == underscored(tool)),
+                    .is_some_and(|(_, rest)| match tool {
+                        ANY => !rest.contains('_'),
+                        tool => rest == underscored(tool),
+                    }),
                 _ => false,
             };
             matches.then_some(parsed.text)
         })
     }
 
-    fn covers(&self, path: &Path, pattern: &str) -> bool {
-        if pattern == ANY {
-            return true;
-        }
-        let pattern = paths::resolve(&self.worktree(), pattern);
-        let pattern: Vec<String> = parts(&pattern);
-        let path: Vec<String> = parts(path);
-        let pattern: Vec<&str> = pattern.iter().map(String::as_str).collect();
+    fn covers(&self, path: &Path, pattern: &str, strictness: Strictness) -> bool {
+        let path = parts(path);
         let path: Vec<&str> = path.iter().map(String::as_str).collect();
-        glob_covers(&pattern, &path)
+        if pattern == ANY {
+            return matches!(strictness, Strictness::Deny) || !path.contains(&GIT_DIR);
+        }
+        let pattern = parts(&paths::resolve(&self.worktree(), pattern));
+        let pattern: Vec<&str> = pattern.iter().map(String::as_str).collect();
+        glob_covers(&pattern, &path, strictness)
     }
+}
+
+fn risky_git_option(word: &str) -> bool {
+    word == "-c"
+        || RISKY_GIT_OPTIONS
+            .iter()
+            .any(|option| word.starts_with(option))
 }
 
 fn parts(path: &Path) -> Vec<String> {
@@ -220,13 +252,17 @@ fn parts(path: &Path) -> Vec<String> {
         .collect()
 }
 
-fn glob_covers(pattern: &[&str], path: &[&str]) -> bool {
+fn glob_covers(pattern: &[&str], path: &[&str], strictness: Strictness) -> bool {
+    let open = |name: &&str| matches!(strictness, Strictness::Deny) || *name != GIT_DIR;
     match pattern.split_first() {
-        None => true,
-        Some((&"**", rest)) => (0..=path.len()).any(|skip| glob_covers(rest, &path[skip..])),
-        Some((part, rest)) => path
-            .split_first()
-            .is_some_and(|(name, tail)| wildcard(part, name) && glob_covers(rest, tail)),
+        None => path.iter().all(open),
+        Some((&"**", rest)) => (0..=path.len())
+            .take_while(|skip| path[..*skip].iter().all(open))
+            .any(|skip| glob_covers(rest, &path[skip..], strictness)),
+        Some((part, rest)) => path.split_first().is_some_and(|(name, tail)| {
+            let named = part == name || part.contains('*') && open(name);
+            named && wildcard(part, name) && glob_covers(rest, tail, strictness)
+        }),
     }
 }
 
@@ -250,82 +286,19 @@ fn starts_with<S: AsRef<str>>(words: &[S], prefix: &[&str]) -> bool {
         && prefix.iter().zip(words).all(|(a, b)| *a == b.as_ref())
 }
 
-fn invocations(line: &str) -> Vec<Vec<String>> {
-    let mut found = Vec::new();
-    collect_invocations(line, &mut found, 0);
-    found
-}
-
-fn collect_invocations(line: &str, found: &mut Vec<Vec<String>>, depth: usize) {
-    if depth > 8 {
-        return;
-    }
-    for command in shell::parse(line) {
-        for nested in &command.nested {
-            collect_invocations(nested, found, depth + 1);
-        }
-        let words = program_words(&command);
-        if let Some(program) = words.first()
-            && SHELLS.contains(&program.as_str())
-            && let Some(script) = shell_script(&words[1..])
-        {
-            collect_invocations(script, found, depth + 1);
-        }
-        if !words.is_empty() {
-            found.push(words);
-        }
-    }
-}
-
-fn program_words(command: &SimpleCommand) -> Vec<String> {
-    let mut words = command
-        .words
-        .iter()
-        .map(|word| word.text.as_str())
-        .peekable();
-    let mut wrapped = false;
-    while let Some(word) = words.peek().copied() {
-        if KEYWORDS.contains(&word) || word.contains('=') && !word.starts_with('-') {
-            words.next();
-        } else if WRAPPERS.contains(&word) {
-            wrapped = true;
-            words.next();
-        } else if wrapped && word.starts_with('-') {
-            words.next();
-            if FLAGS_WITH_VALUES.contains(&word) {
-                words.next();
-            }
-        } else {
-            break;
-        }
-    }
-    let mut words: Vec<String> = words.map(String::from).collect();
-    if let Some(program) = words.first_mut() {
-        *program = program.rsplit('/').next().unwrap_or_default().into();
-    }
-    words
-}
-
-fn shell_script(args: &[String]) -> Option<&str> {
-    let at = args
-        .iter()
-        .position(|arg| arg.starts_with('-') && !arg.starts_with("--") && arg.contains('c'))?;
-    args[at + 1..]
-        .iter()
-        .find(|arg| !arg.starts_with('-'))
-        .map(String::as_str)
-}
-
 fn underscored(name: &str) -> String {
     name.replace('-', "_")
 }
 
+fn mcp_tool<'n>(name: &'n str, server: &str) -> Option<&'n str> {
+    name.strip_prefix(MCP_PREFIX)?
+        .strip_prefix(&format!("{}_", underscored(server)))
+}
+
 fn owner<'s, 'n>(name: &'n str, servers: &'s [String]) -> Option<(&'s str, &'n str)> {
-    let rest = name.strip_prefix(MCP_PREFIX)?;
-    let mut owners = servers.iter().filter_map(|server| {
-        rest.strip_prefix(&format!("{}_", underscored(server)))
-            .map(|tool| (server.as_str(), tool))
-    });
+    let mut owners = servers
+        .iter()
+        .filter_map(|server| mcp_tool(name, server).map(|tool| (server.as_str(), tool)));
     let first = owners.next()?;
     owners.next().is_none().then_some(first)
 }
