@@ -102,6 +102,7 @@ impl RepoLayer {
 }
 
 pub const DEFAULT_AGENT: &str = ClaudeCode::NAME;
+pub(crate) const TOP_LEVEL_RULES_AGENT: &str = ClaudeCode::NAME;
 
 #[derive(Debug, Default, Deserialize)]
 struct PresetLayer {
@@ -135,7 +136,7 @@ impl PresetLayer {
                     }
                 })?),
             };
-        if self.agents.contains_key(ClaudeCode::NAME) {
+        if self.agents.contains_key(TOP_LEVEL_RULES_AGENT) {
             return Err(ConfigProblem::ClaudeRuleTable {
                 preset: name.into(),
             });
@@ -150,12 +151,12 @@ impl PresetLayer {
                 agent: agent.clone(),
             });
         }
-        let claude = (ClaudeCode::NAME, &self.allow, &self.deny);
+        let top_level = (TOP_LEVEL_RULES_AGENT, &self.allow, &self.deny);
         let agents = self
             .agents
             .iter()
             .map(|(agent, rules)| (agent.as_str(), &rules.allow, &rules.deny));
-        let rules = std::iter::once(claude)
+        let rules = std::iter::once(top_level)
             .chain(agents)
             .map(|(agent, allow, deny)| {
                 let rules = Rules {
