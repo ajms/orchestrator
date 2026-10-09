@@ -267,6 +267,7 @@ impl Daemon {
                 }
                 let events = live.adapter.map_hook(&payload).unwrap_or_default();
                 let effects = observe(live, &events, now, &mut conversations, &mut usage);
+                describe_subagents(live, &events);
                 if let Some(guard) = guard {
                     decide_guard(live, guard, &events, now);
                 }
@@ -428,6 +429,29 @@ fn guard_check(capabilities: Capabilities, events: &[AgentEvent]) -> Option<Guar
         } => Some((tool, input_json, cwd)),
         _ => None,
     })
+}
+
+fn describe_subagents(live: &mut Live, events: &[AgentEvent]) {
+    let Some(transcripts) = &live.transcripts else {
+        return;
+    };
+    for event in events {
+        let id = match event {
+            AgentEvent::SubagentStarted { id, .. } => id,
+            AgentEvent::ToolStarted {
+                subagent: Some(id), ..
+            } => id,
+            _ => continue,
+        };
+        let undescribed = live
+            .status
+            .subagents()
+            .iter()
+            .any(|subagent| &subagent.id == id && subagent.description.is_empty());
+        if let Some(description) = transcripts.describe(id).filter(|_| undescribed) {
+            live.status.describe_subagent(id, description);
+        }
+    }
 }
 
 fn exit_observation(exit: &AgentExit) -> Observation {

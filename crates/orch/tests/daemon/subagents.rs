@@ -258,3 +258,53 @@ async fn back_to_back_subscriptions_follow_the_last_one() {
     }
     assert_eq!(last.as_deref(), Some("b9e2"));
 }
+
+fn describe(env: &Env, subagent: &str, description: &str) {
+    let meta = env.path(&format!(
+        "projects/conv-1/subagents/agent-{subagent}.meta.json"
+    ));
+    std::fs::create_dir_all(meta.parent().unwrap()).unwrap();
+    std::fs::write(meta, format!(r#"{{"description":"{description}"}}"#)).unwrap();
+}
+
+#[tokio::test]
+async fn a_subagent_shows_the_description_the_agent_recorded() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = idle_session(&env, &mut client, "Explore").await;
+    describe(&env, SUBAGENT, "Find the login redirect");
+    pane.hook(&subagent_hook(
+        "SubagentStart",
+        &reading(&env.path("projects/conv-1.jsonl")),
+    ))
+    .await;
+    client
+        .until(&id, "the described Subagent", |view| {
+            view.subagents
+                .iter()
+                .any(|subagent| subagent.description == "Find the login redirect")
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_description_recorded_after_the_start_shows_with_the_next_tool_call() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane, _) = started_subagent(&env, &mut client).await;
+    describe(&env, SUBAGENT, "Find the login redirect");
+    pane.hook(&subagent_hook(
+        "PreToolUse",
+        r#""tool_name":"Grep","tool_input":{"pattern":"redirect"},"tool_use_id":"toolu_01""#,
+    ))
+    .await;
+    client
+        .until(&id, "the described Subagent", |view| {
+            view.subagents
+                .iter()
+                .any(|subagent| subagent.description == "Find the login redirect")
+        })
+        .await;
+}

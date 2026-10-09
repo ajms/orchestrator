@@ -105,6 +105,7 @@ pub struct TranscriptRead {
 pub trait SubagentTranscripts: Send {
     fn follow(&mut self, payload: &str);
     fn locate(&self, subagent: &SubagentId) -> Option<PathBuf>;
+    fn describe(&self, subagent: &SubagentId) -> Option<String>;
     fn reader(&self) -> Box<dyn TranscriptReader>;
 }
 

@@ -57,9 +57,21 @@ impl SubagentTranscripts for ClaudeSubagentTranscripts {
         self.paths.get(subagent.as_str()).cloned()
     }
 
+    fn describe(&self, subagent: &SubagentId) -> Option<String> {
+        let meta = self.locate(subagent)?.with_extension("meta.json");
+        let meta: Meta = serde_json::from_slice(&std::fs::read(meta).ok()?).ok()?;
+        meta.description
+            .filter(|description| !description.is_empty())
+    }
+
     fn reader(&self) -> Box<dyn TranscriptReader> {
         Box::new(ClaudeTranscriptReader::default())
     }
+}
+
+#[derive(Deserialize)]
+struct Meta {
+    description: Option<String>,
 }
 
 #[derive(Debug, Default)]
