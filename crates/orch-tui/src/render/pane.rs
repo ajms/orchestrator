@@ -258,7 +258,7 @@ fn placeholder(view: &SessionView, closed: Option<String>) -> Vec<Line<'static>>
     }
     let hint = match view.phase {
         PhaseView::SettingUp => "Running the Setup script…",
-        PhaseView::SetupFailed => "Setup failed — :retry · :start (anyway) · :discard",
+        PhaseView::SetupFailed => "Setup failed — :retry · :start (anyway) · :d(iscard)",
         PhaseView::Suspended => "Suspended — i / :resume continues the Conversation",
         PhaseView::Landed => "Landed",
         PhaseView::Discarded => "Discarded",

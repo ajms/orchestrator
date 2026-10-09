@@ -101,16 +101,16 @@ In the Review view the wheel scrolls the column under it, a click on a file show
 
 Commands:
 
-- `:new`
-- `:land`
-- `:discard`
+- `:n`, `:new`
+- `:l`, `:land`
+- `:d`, `:discard`
 - `:review`
 - `:resume`
 - `:retry`, `:start` (after Setup failed)
-- `:preset <name>`
+- `:p <name>`, `:preset <name>`
 - `:guards on|off`
-- `:mute`
-- `:usage`
+- `:m`, `:mute`
+- `:u`, `:usage`
 - `:reconcile`
 - `:refresh`, `:abandon` (PRs)
 - `:q`

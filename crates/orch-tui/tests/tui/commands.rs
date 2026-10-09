@@ -36,6 +36,29 @@ fn q_quits() {
 }
 
 #[test]
+fn short_commands_do_what_their_long_form_does() {
+    for (short, long) in [
+        ("d", "discard"),
+        ("n", "new"),
+        ("l", "land"),
+        ("p edits", "preset edits"),
+        ("m", "mute"),
+        ("u", "usage"),
+    ] {
+        let mut by_short = one_session();
+        by_short.command(short);
+        let mut by_long = one_session();
+        by_long.command(long);
+        assert_eq!(
+            by_short.daemon().requests(),
+            by_long.daemon().requests(),
+            ":{short}"
+        );
+        assert_eq!(by_short.screen(), by_long.screen(), ":{short}");
+    }
+}
+
+#[test]
 fn resume_retry_and_start_act_on_the_selected_session() {
     let mut tui = one_session();
     tui.command("resume");
