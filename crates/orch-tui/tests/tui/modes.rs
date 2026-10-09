@@ -37,6 +37,7 @@ fn insert_mode_sends_every_key_to_the_pane_including_esc() {
     tui.keys(":jk");
 
     assert_eq!(tui.daemon().input, b"ls -la\r\x1b\x03:jk");
+    assert!(tui.daemon().reports.is_empty());
     assert!(statusline(&mut tui).contains("INSERT"));
 }
 

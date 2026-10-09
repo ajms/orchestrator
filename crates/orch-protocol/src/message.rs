@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -24,6 +24,10 @@ pub enum ToDaemon {
         request: Request,
     },
     Input {
+        #[serde(with = "bytes")]
+        bytes: Vec<u8>,
+    },
+    Report {
         #[serde(with = "bytes")]
         bytes: Vec<u8>,
     },

@@ -96,7 +96,7 @@ fn pane(app: &mut App, event: MouseEvent) {
     match requested {
         Some((mode, encoding)) => {
             if let Some(bytes) = passthrough::encode(event, point, mode, encoding) {
-                app.push(Call::Input(bytes));
+                app.push(Call::Report(bytes));
             }
         }
         None => {

@@ -152,23 +152,32 @@ fn a_guard_prompt_needs_input() {
 }
 
 #[test]
-fn user_input_sets_working_provisionally_while_agent_waits() {
-    for setup in [AgentEvent::TurnEnded, AgentEvent::PermissionRequested] {
-        let mut status = idle_session();
-        status.feed_event(setup);
-        status.feed(Observation::UserInput);
-        assert_eq!(status.agent_state(), Some(AgentState::Working));
-    }
+fn user_input_sets_working_provisionally_while_agent_needs_input() {
+    let mut status = idle_session();
+    status.feed_event(AgentEvent::PermissionRequested);
+    status.feed(Observation::UserInput);
+    assert_eq!(status.agent_state(), Some(AgentState::Working));
 }
 
 #[test]
-fn user_input_sets_working_provisionally_on_an_errored_but_alive_agent() {
+fn user_input_leaves_an_idle_agent_idle_until_a_prompt_is_submitted() {
+    let mut status = idle_session();
+    status.feed_event(AgentEvent::TurnEnded);
+    status.feed(Observation::UserInput);
+    assert_eq!(status.agent_state(), Some(AgentState::Idle));
+
+    status.feed_event(AgentEvent::PromptSubmitted);
+    assert_eq!(status.agent_state(), Some(AgentState::Working));
+}
+
+#[test]
+fn user_input_leaves_an_errored_but_alive_agent_errored() {
     let mut status = working_session();
     status.feed_event(AgentEvent::Failed {
         kind: FailureKind::Server,
     });
     status.feed(Observation::UserInput);
-    assert_eq!(status.agent_state(), Some(AgentState::Working));
+    assert_eq!(status.agent_state(), Some(AgentState::Errored));
 }
 
 #[test]

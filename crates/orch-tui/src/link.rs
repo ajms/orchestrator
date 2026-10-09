@@ -19,6 +19,7 @@ pub trait DaemonLink {
     fn open_pane(&mut self, pane: PaneId, session: &SessionId, size: Size);
     fn close_pane(&mut self);
     fn input(&mut self, bytes: Vec<u8>);
+    fn report(&mut self, bytes: Vec<u8>);
     fn paste(&mut self, text: String);
     fn resize_pane(&mut self, size: Size);
 }
@@ -64,6 +65,7 @@ impl<L: DaemonLink> Tui<L> {
                 Call::OpenPane(pane, session, size) => self.link.open_pane(pane, &session, size),
                 Call::ClosePane => self.link.close_pane(),
                 Call::Input(bytes) => self.link.input(bytes),
+                Call::Report(bytes) => self.link.report(bytes),
                 Call::Paste(text) => self.link.paste(text),
                 Call::ResizePane(size) => self.link.resize_pane(size),
                 Call::Local(effect) => local.push(effect),

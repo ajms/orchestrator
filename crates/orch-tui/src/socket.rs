@@ -115,6 +115,10 @@ impl DaemonLink for SocketLink {
         self.send_pane(ToDaemon::Input { bytes });
     }
 
+    fn report(&mut self, bytes: Vec<u8>) {
+        self.send_pane(ToDaemon::Report { bytes });
+    }
+
     fn paste(&mut self, text: String) {
         self.send_pane(ToDaemon::Paste { text });
     }

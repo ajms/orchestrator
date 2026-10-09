@@ -20,9 +20,7 @@ impl AgentState {
             Observation::Exited { .. } => AgentState::Errored,
             Observation::GuardPrompted => AgentState::NeedsInput,
             Observation::UserInput => match self {
-                AgentState::Idle | AgentState::NeedsInput | AgentState::Errored => {
-                    AgentState::Working
-                }
+                AgentState::NeedsInput => AgentState::Working,
                 other => other,
             },
             Observation::Agent(event) => self.after_event(event),

@@ -47,6 +47,31 @@ async fn the_agent_state_follows_the_agents_hooks_and_exit() {
 }
 
 #[tokio::test]
+async fn reports_reach_the_agent_without_counting_as_answering_it() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = running_session(&env, &mut client, "Refactor").await;
+    let mut pane = env.pane(&id, PANE).await;
+
+    pane.hook(&hook("PermissionRequest", r#""tool_name":"Bash""#))
+        .await;
+    client
+        .until(&id, "Needs input", agent_is(State::NeedsInput))
+        .await;
+
+    let compacted =
+        r#"{"hook_event_name":"SessionStart","session_id":"conv-2","source":"compact"}"#;
+    pane.report(&format!("hook {compacted}\r")).await;
+    let reported = client
+        .until(&id, "the reported line ran", |view| {
+            view.conversation.as_deref() == Some("conv-2")
+        })
+        .await;
+    assert_eq!(reported.agent, Some(State::NeedsInput));
+}
+
+#[tokio::test]
 async fn an_agent_exiting_with_failure_is_errored_and_keeps_its_final_screen() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;

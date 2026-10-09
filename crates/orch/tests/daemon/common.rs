@@ -704,6 +704,10 @@ impl PaneView {
             .unwrap();
     }
 
+    pub async fn report(&mut self, bytes: &str) {
+        self.pane.report(bytes.as_bytes().to_vec()).await.unwrap();
+    }
+
     pub async fn hook(&mut self, payload: &str) {
         self.type_line(&format!("hook {payload}")).await;
     }
