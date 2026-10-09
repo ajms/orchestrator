@@ -56,9 +56,14 @@ pub(crate) async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
         };
         let Ok(Some(message)) = message else { break };
         if let ToDaemon::Request { id, request } = message {
+            last_used.touch();
+            if follows_subagent(&request) {
+                let result = handle(&daemon, client, request).await;
+                outbox.send(FromDaemon::Response { id, result });
+                continue;
+            }
             let daemon = daemon.clone();
             let outbox = outbox.clone();
-            last_used.touch();
             requests.spawn(async move {
                 let result = handle(&daemon, client, request).await;
                 daemon.store.flush().await;
@@ -70,6 +75,13 @@ pub(crate) async fn serve(daemon: Arc<Daemon>, stream: UnixStream) {
     requests.abort_all();
     daemon.lock().remove_client(client);
     writing.abort();
+}
+
+fn follows_subagent(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::SubscribeSubagent { .. } | Request::UnsubscribeSubagent
+    )
 }
 
 async fn write_loop(mut writer: OwnedWriteHalf, outbox: Arc<Outbox>) {

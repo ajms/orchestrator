@@ -240,3 +240,47 @@ fn a_missing_transcript_reads_as_nothing_yet() {
     let read = reader().read(Path::new("/nonexistent/agent-x.jsonl"));
     assert_eq!(read.entries, []);
 }
+
+#[test]
+fn a_subagent_is_described_by_the_metadata_beside_its_transcript() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = dir.path().join("conv-1.jsonl");
+    let mut start = hook("subagent_start");
+    start["transcript_path"] = session.display().to_string().into();
+    let mut transcripts = claude_transcripts();
+    follow(&mut transcripts, &start);
+    let subagent = SubagentId(SUBAGENT.into());
+    assert_eq!(transcripts.describe(&subagent), None);
+
+    let meta = dir
+        .path()
+        .join(format!("conv-1/subagents/agent-{SUBAGENT}.meta.json"));
+    std::fs::create_dir_all(meta.parent().unwrap()).unwrap();
+    std::fs::write(
+        &meta,
+        r#"{"agentType":"Explore","description":"Find the login redirect","toolUseId":"toolu_01"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        transcripts.describe(&subagent).as_deref(),
+        Some("Find the login redirect")
+    );
+}
+
+#[test]
+fn a_background_subagents_hand_back_reads_as_its_text() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    append(
+        file.path(),
+        &[
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_09", "name": "SubagentHandback", "input": {"message": "Found it in login.rs."}}]}})
+                .to_string(),
+            json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_09", "content": "{\"success\":true}"}]}})
+                .to_string(),
+        ],
+    );
+    assert_eq!(
+        reader().read(file.path()).entries,
+        [text("Found it in login.rs.")]
+    );
+}

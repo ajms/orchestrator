@@ -94,6 +94,12 @@ impl SessionStatus {
         &self.subagents
     }
 
+    pub fn describe_subagent(&mut self, id: &SubagentId, description: String) {
+        if let Some(subagent) = self.subagent_mut(id) {
+            subagent.description = description;
+        }
+    }
+
     pub fn take_attention(&mut self) -> Vec<Attention> {
         std::mem::take(&mut self.raised)
     }

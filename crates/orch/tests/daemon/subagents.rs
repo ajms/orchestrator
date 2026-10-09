@@ -2,7 +2,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use orch_core::TranscriptEntry;
-use orch_protocol::{Request, RequestError, SubagentTranscript};
+use orch_holder::{read_frame_async, write_frame_async};
+use orch_protocol::{DisplayVars, FromDaemon, Request, RequestError, SubagentTranscript, ToDaemon};
+use tokio::io::AsyncWriteExt;
 
 use crate::common::*;
 
@@ -207,4 +209,102 @@ async fn subscribing_to_another_subagent_replaces_the_stream() {
     tokio::time::sleep(std::time::Duration::from_millis(600)).await;
     client.drain().await;
     assert_eq!(client.transcripts.len(), 2, "{:?}", client.transcripts);
+}
+
+#[tokio::test]
+async fn back_to_back_subscriptions_follow_the_last_one() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane, first) = started_subagent(&env, &mut client).await;
+    append(&first, &said("First."));
+    let conversation = env.path("projects/conv-1.jsonl");
+    pane.hook(&hook_for("b9e2", "SubagentStart", &reading(&conversation)))
+        .await;
+    client
+        .until(&id, "a second Subagent", |view| view.subagents.len() == 2)
+        .await;
+    append(
+        &env.path("projects/conv-1/subagents/agent-b9e2.jsonl"),
+        &said("Second."),
+    );
+
+    let (mut reader, mut writer) = env.tui(DisplayVars::default()).await;
+    let mut both = Vec::new();
+    for (n, subagent) in [SUBAGENT, "b9e2"].repeat(5).into_iter().enumerate() {
+        let request = Request::SubscribeSubagent {
+            session: id.clone(),
+            subagent: subagent.into(),
+        };
+        write_frame_async(
+            &mut both,
+            &ToDaemon::Request {
+                id: n as u64,
+                request,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    writer.write_all(&both).await.unwrap();
+    let mut last = None;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(800);
+    while let Ok(frame) =
+        tokio::time::timeout_at(deadline, read_frame_async::<FromDaemon>(&mut reader)).await
+    {
+        if let Some(FromDaemon::SubagentTranscript(streamed)) = frame.unwrap() {
+            last = Some(streamed.subagent);
+        }
+    }
+    assert_eq!(last.as_deref(), Some("b9e2"));
+}
+
+fn describe(env: &Env, subagent: &str, description: &str) {
+    let meta = env.path(&format!(
+        "projects/conv-1/subagents/agent-{subagent}.meta.json"
+    ));
+    std::fs::create_dir_all(meta.parent().unwrap()).unwrap();
+    std::fs::write(meta, format!(r#"{{"description":"{description}"}}"#)).unwrap();
+}
+
+#[tokio::test]
+async fn a_subagent_shows_the_description_the_agent_recorded() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = idle_session(&env, &mut client, "Explore").await;
+    describe(&env, SUBAGENT, "Find the login redirect");
+    pane.hook(&subagent_hook(
+        "SubagentStart",
+        &reading(&env.path("projects/conv-1.jsonl")),
+    ))
+    .await;
+    client
+        .until(&id, "the described Subagent", |view| {
+            view.subagents
+                .iter()
+                .any(|subagent| subagent.description == "Find the login redirect")
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_description_recorded_after_the_start_shows_with_the_next_tool_call() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane, _) = started_subagent(&env, &mut client).await;
+    describe(&env, SUBAGENT, "Find the login redirect");
+    pane.hook(&subagent_hook(
+        "PreToolUse",
+        r#""tool_name":"Grep","tool_input":{"pattern":"redirect"},"tool_use_id":"toolu_01""#,
+    ))
+    .await;
+    client
+        .until(&id, "the described Subagent", |view| {
+            view.subagents
+                .iter()
+                .any(|subagent| subagent.description == "Find the login redirect")
+        })
+        .await;
 }

@@ -156,7 +156,7 @@ impl HookPayload {
             H::StopFailure => vec![AgentEvent::Failed {
                 kind: failure_kind(self.error.as_deref().unwrap_or("unknown")),
             }],
-            // Known limitation: the description lives on the parent's Task/Agent PreToolUse, which a pure mapper cannot correlate.
+            // The Daemon fills the description from SubagentTranscripts::describe.
             H::SubagentStart => subagent
                 .map(|id| AgentEvent::SubagentStarted {
                     id,

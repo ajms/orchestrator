@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use orch_core::{SubagentId, TranscriptEntry};
@@ -8,6 +8,7 @@ use serde_json::Value;
 use super::lines::FollowedLines;
 use crate::{SubagentTranscripts, TranscriptRead, TranscriptReader};
 
+const HAND_BACK: &str = "SubagentHandback";
 const KEY_ARGUMENTS: [&str; 9] = [
     "command",
     "file_path",
@@ -57,14 +58,27 @@ impl SubagentTranscripts for ClaudeSubagentTranscripts {
         self.paths.get(subagent.as_str()).cloned()
     }
 
+    fn describe(&self, subagent: &SubagentId) -> Option<String> {
+        let meta = self.locate(subagent)?.with_extension("meta.json");
+        let meta: Meta = serde_json::from_slice(&std::fs::read(meta).ok()?).ok()?;
+        meta.description
+            .filter(|description| !description.is_empty())
+    }
+
     fn reader(&self) -> Box<dyn TranscriptReader> {
         Box::new(ClaudeTranscriptReader::default())
     }
 }
 
+#[derive(Deserialize)]
+struct Meta {
+    description: Option<String>,
+}
+
 #[derive(Debug, Default)]
 struct ClaudeTranscriptReader {
     lines: FollowedLines,
+    hand_backs: HashSet<String>,
 }
 
 impl TranscriptReader for ClaudeTranscriptReader {
@@ -72,9 +86,16 @@ impl TranscriptReader for ClaudeTranscriptReader {
         let Some(read) = self.lines.read(path) else {
             return TranscriptRead::default();
         };
+        if read.reset {
+            self.hand_backs.clear();
+        }
         TranscriptRead {
             reset: read.reset,
-            entries: read.lines.iter().flat_map(|line| entries(line)).collect(),
+            entries: read
+                .lines
+                .iter()
+                .flat_map(|line| entries(line, &mut self.hand_backs))
+                .collect(),
         }
     }
 }
@@ -122,7 +143,7 @@ enum Block {
     Other,
 }
 
-fn entries(line: &[u8]) -> Vec<TranscriptEntry> {
+fn entries(line: &[u8], hand_backs: &mut HashSet<String>) -> Vec<TranscriptEntry> {
     let Ok(line) = serde_json::from_slice::<Line>(line) else {
         return Vec::new();
     };
@@ -148,6 +169,12 @@ fn entries(line: &[u8]) -> Vec<TranscriptEntry> {
             Block::Text { .. } if answers_tools => None,
             Block::Text { text } if from_user => Some(TranscriptEntry::Prompt { text }),
             Block::Text { text } => Some(TranscriptEntry::Text { text }),
+            Block::ToolUse { id, name, input } if name == HAND_BACK => {
+                hand_backs.insert(id);
+                let text = input.get("message")?.as_str()?.to_string();
+                Some(TranscriptEntry::Text { text })
+            }
+            Block::ToolResult { tool_use_id, .. } if hand_backs.contains(&tool_use_id) => None,
             Block::ToolUse { id, name, input } => Some(TranscriptEntry::ToolCall {
                 id,
                 argument: key_argument(&input),
