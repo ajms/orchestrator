@@ -17,11 +17,22 @@ The domain vocabulary (Session, Repo, Worktree, Landing, Preset, Guard, Trust…
 
 ## Install
 
+Install the latest Linux x86_64 build from [Releases](https://github.com/ajms/orchestrator/releases) into `~/.local/bin`:
+
 ```sh
-cargo install --path crates/orch      # or: cargo build --release → target/release/orch
+mkdir -p ~/.local/bin
+gh release download --repo ajms/orchestrator --pattern '*x86_64-unknown-linux-gnu.tar.gz' -O - \
+  | tar -xz -C ~/.local/bin orch
+orch --version
 ```
 
-Or download a Linux x86_64 build from [Releases](https://github.com/ajms/orchestrator/releases).
+Or build from source into `~/.local/bin`:
+
+```sh
+cargo install --path crates/orch --root ~/.local   # installs ~/.local/bin/orch
+```
+
+Make sure `~/.local/bin` is on your `PATH` (e.g. `export PATH="$HOME/.local/bin:$PATH"` in your shell profile). To upgrade, run the same command again; running Agents are not interrupted.
 
 The Daemon starts automatically the first time you run `orch`, and exits after a few idle minutes once no Client, Holder or open PR needs it. If you'd rather have it start with your login:
 
