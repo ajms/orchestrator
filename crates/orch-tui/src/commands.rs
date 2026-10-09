@@ -14,11 +14,11 @@ const COMMANDS: &[Command] = &[
         run: |app, _| app.push(Call::Local(Effect::Quit)),
     },
     Command {
-        names: &["new"],
+        names: &["n", "new"],
         run: |app, _| app.open_new_form(),
     },
     Command {
-        names: &["land"],
+        names: &["l", "land"],
         run: |app, _| app.open_land(),
     },
     Command {
@@ -30,7 +30,7 @@ const COMMANDS: &[Command] = &[
         run: |app, _| app.on_selected(|session| Request::AbandonPr { session }),
     },
     Command {
-        names: &["discard"],
+        names: &["d", "discard"],
         run: |app, _| app.load_discard_preview(),
     },
     Command {
@@ -62,15 +62,15 @@ const COMMANDS: &[Command] = &[
         run: guards,
     },
     Command {
-        names: &["preset"],
+        names: &["p", "preset"],
         run: preset,
     },
     Command {
-        names: &["mute"],
+        names: &["m", "mute"],
         run: mute,
     },
     Command {
-        names: &["usage"],
+        names: &["u", "usage"],
         run: |app, _| app.request_usage(),
     },
     Command {
