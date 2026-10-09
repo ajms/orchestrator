@@ -5,10 +5,9 @@ use std::rc::Rc;
 use orch_core::SessionId;
 use orch_protocol::TranscriptEntry;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthChar;
 
-const TRIMMED_LINES: usize = 5;
 const CALL: &str = "● ";
 const RESULT: &str = "  ⎿ ";
 const RESULT_MORE: &str = "    ";
@@ -26,17 +25,15 @@ pub(crate) struct Transcript {
 }
 
 struct Piece {
-    prefix: &'static str,
-    text: String,
-    style: Style,
+    prefix: (&'static str, Style),
+    spans: Vec<(String, Style)>,
 }
 
 impl Piece {
-    fn new(prefix: &'static str, text: impl Into<String>, style: Style) -> Self {
+    fn plain(prefix: &'static str, text: impl Into<String>, style: Style) -> Self {
         Self {
-            prefix,
-            text: text.into(),
-            style,
+            prefix: (prefix, style),
+            spans: vec![(text.into(), style)],
         }
     }
 }
@@ -113,12 +110,8 @@ impl Transcript {
         let columns = usize::from(width.max(1));
         let rows: Rc<[Line<'static>]> = self
             .pieces()
-            .into_iter()
-            .flat_map(|piece| {
-                wrap(piece.prefix, &clean(&piece.text), columns)
-                    .into_iter()
-                    .map(move |row| Line::styled(row, piece.style))
-            })
+            .iter()
+            .flat_map(|piece| wrap(piece, columns))
             .collect();
         *self.rows.borrow_mut() = Some((width, rows.clone()));
         rows
@@ -130,17 +123,19 @@ impl Transcript {
             let start = pieces.len();
             match entry {
                 TranscriptEntry::Prompt { text } => {
-                    pieces.extend(text_pieces(text, Style::new().fg(Color::Cyan)));
+                    let style = Style::new().fg(Color::Cyan);
+                    pieces.extend(text.lines().map(|line| Piece::plain("", line, style)));
                 }
-                TranscriptEntry::Text { text } => pieces.extend(text_pieces(text, Style::new())),
+                TranscriptEntry::Text { text } => {
+                    pieces.extend(text.lines().map(|line| Piece {
+                        prefix: ("", Style::new()),
+                        spans: markdown(line),
+                    }));
+                }
                 TranscriptEntry::ToolCall { id, tool, argument } => {
-                    let call = match argument {
-                        Some(argument) => format!("{tool} {argument}"),
-                        None => tool.clone(),
-                    };
-                    let bold = Style::new().add_modifier(Modifier::BOLD);
-                    pieces.push(Piece::new(CALL, call, bold));
-                    if let Some((text, error)) = self.result_of(id) {
+                    let result = self.result_of(id);
+                    pieces.push(call_piece(tool, argument.as_deref(), result));
+                    if let Some((text, error)) = result {
                         pieces.extend(self.result_pieces(text, error));
                     }
                 }
@@ -151,7 +146,7 @@ impl Transcript {
                 }
             }
             if pieces.len() > start {
-                pieces.push(Piece::new("", "", Style::new()));
+                pieces.push(Piece::plain("", "", Style::new()));
             }
         }
         pieces.pop();
@@ -171,41 +166,76 @@ impl Transcript {
             false => Style::new().fg(Color::DarkGray),
         };
         let mut texts: Vec<String> = text.lines().map(String::from).collect();
+        if !self.full {
+            texts = vec![match texts.len() {
+                0 => "(no output)".into(),
+                1 => texts.remove(0),
+                _ if error => texts.remove(0),
+                lines => format!("{lines} lines"),
+            }];
+        }
         if texts.is_empty() {
             texts.push(String::new());
         }
         if error {
             texts[0] = format!("error: {}", texts[0]);
         }
-        let hidden = match self.full {
-            true => 0,
-            false => texts.len().saturating_sub(TRIMMED_LINES),
-        };
-        texts.truncate(texts.len() - hidden);
-        let mut pieces: Vec<_> = texts
+        texts
             .into_iter()
             .enumerate()
             .map(|(at, text)| {
                 let prefix = if at == 0 { RESULT } else { RESULT_MORE };
-                Piece::new(prefix, text, style)
+                Piece::plain(prefix, text, style)
             })
-            .collect();
-        if hidden > 0 {
-            let more = format!("… {hidden} more lines");
-            pieces.push(Piece::new(
-                RESULT_MORE,
-                more,
-                Style::new().fg(Color::DarkGray),
-            ));
-        }
-        pieces
+            .collect()
     }
 }
 
-fn text_pieces(text: &str, style: Style) -> Vec<Piece> {
-    text.lines()
-        .map(|line| Piece::new("", line, style))
-        .collect()
+fn call_piece(tool: &str, argument: Option<&str>, result: Option<(&str, bool)>) -> Piece {
+    let bullet = match result {
+        None => Color::DarkGray,
+        Some((_, true)) => Color::Red,
+        Some((_, false)) => Color::Green,
+    };
+    let mut spans = vec![(tool.to_string(), Style::new().add_modifier(Modifier::BOLD))];
+    if let Some(argument) = argument {
+        let mut lines = argument.lines();
+        let first = lines.next().unwrap_or_default();
+        let more = if lines.next().is_some() { " …" } else { "" };
+        spans.push((format!("({first}{more})"), Style::new()));
+    }
+    Piece {
+        prefix: (CALL, Style::new().fg(bullet)),
+        spans,
+    }
+}
+
+fn markdown(line: &str) -> Vec<(String, Style)> {
+    let code = Style::new().fg(Color::Magenta);
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let mut spans = Vec::new();
+    let mut rest = line;
+    loop {
+        let next = [("`", code), ("**", bold)]
+            .into_iter()
+            .filter_map(|(marker, style)| {
+                let open = rest.find(marker)?;
+                let inner = &rest[open + marker.len()..];
+                let close = inner.find(marker).filter(|close| *close > 0)?;
+                Some((open, marker, style, close))
+            })
+            .min_by_key(|(open, ..)| *open);
+        let Some((open, marker, style, close)) = next else {
+            break;
+        };
+        spans.push((rest[..open].to_string(), Style::new()));
+        let inner = &rest[open + marker.len()..];
+        spans.push((inner[..close].to_string(), style));
+        rest = &inner[close + marker.len()..];
+    }
+    spans.push((rest.to_string(), Style::new()));
+    spans.retain(|(text, _)| !text.is_empty());
+    spans
 }
 
 fn clean(text: &str) -> String {
@@ -250,20 +280,33 @@ fn skip_escape(chars: &mut std::iter::Peekable<std::str::Chars>) {
     }
 }
 
-fn wrap(prefix: &str, text: &str, width: usize) -> Vec<String> {
+fn wrap(piece: &Piece, width: usize) -> Vec<Line<'static>> {
+    let (prefix, prefix_style) = piece.prefix;
     let indent = " ".repeat(prefix.chars().count());
     let mut rows = Vec::new();
-    let mut row = prefix.to_string();
+    let mut row = vec![Span::styled(prefix, prefix_style)];
     let mut used = indent.len();
-    for (at, c) in text.chars().enumerate() {
-        let wide = c.width().unwrap_or(0);
-        if used + wide > width && at > 0 {
-            rows.push(std::mem::replace(&mut row, indent.clone()));
-            used = indent.len();
+    let mut first = true;
+    for (text, style) in &piece.spans {
+        for c in clean(text).chars() {
+            let wide = c.width().unwrap_or(0);
+            if used + wide > width && !first {
+                let next = vec![Span::raw(indent.clone())];
+                rows.push(Line::from(std::mem::replace(&mut row, next)));
+                used = indent.len();
+            }
+            first = false;
+            push_char(&mut row, c, *style);
+            used += wide;
         }
-        row.push(c);
-        used += wide;
     }
-    rows.push(row);
+    rows.push(Line::from(row));
     rows
+}
+
+fn push_char(row: &mut Vec<Span<'static>>, c: char, style: Style) {
+    match row.last_mut() {
+        Some(last) if last.style == style => last.content.to_mut().push(c),
+        _ => row.push(Span::styled(c.to_string(), style)),
+    }
 }

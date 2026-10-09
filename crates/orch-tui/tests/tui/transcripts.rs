@@ -164,8 +164,7 @@ fn renders_the_prompt_text_and_tool_calls_with_their_results() {
 
     assert!(shows(&mut tui, "find every caller of render"));
     assert!(shows(&mut tui, "Looking at the render module."));
-    let read = tui.line_with("src/render.rs");
-    assert!(read.contains("Read"), "{read}");
+    assert!(shows(&mut tui, "● Read(src/render.rs)"));
     let lines = tui.pane_lines();
     let at = |needle: &str| lines.iter().position(|line| line.contains(needle)).unwrap();
     assert_eq!(at("fn render() {}"), at("src/render.rs") + 1);
@@ -189,7 +188,49 @@ fn tool_errors_are_marked() {
 }
 
 #[test]
-fn long_results_are_trimmed_to_five_lines() {
+fn a_call_shows_its_tool_with_the_argument_in_parentheses() {
+    let mut tui = on_subagent();
+
+    backlog(&mut tui, vec![call("t1", "Bash", "cargo test")]);
+
+    assert!(shows(&mut tui, "● Bash(cargo test)"));
+}
+
+#[test]
+fn a_multi_line_argument_shows_its_first_line() {
+    let mut tui = on_subagent();
+
+    backlog(
+        &mut tui,
+        vec![call("t1", "Bash", "cat <<END\nprint(1)\nEND")],
+    );
+
+    assert!(shows(&mut tui, "● Bash(cat <<END …)"));
+    assert!(!shows(&mut tui, "print(1)"));
+}
+
+#[test]
+fn the_bullet_shows_whether_a_call_is_pending_done_or_failed() {
+    let mut tui = on_subagent();
+
+    backlog(
+        &mut tui,
+        vec![
+            call("t1", "Read", "done.rs"),
+            result("t1", "fn done() {}", false),
+            call("t2", "Bash", "failed"),
+            result("t2", "boom", true),
+            call("t3", "Grep", "pending"),
+        ],
+    );
+
+    assert_eq!(tui.colour_of("● Read"), Color::Green);
+    assert_eq!(tui.colour_of("● Bash"), Color::Red);
+    assert_eq!(tui.colour_of("● Grep"), Color::DarkGray);
+}
+
+#[test]
+fn multi_line_results_collapse_to_their_line_count() {
     let mut tui = on_subagent();
 
     backlog(
@@ -200,9 +241,18 @@ fn long_results_are_trimmed_to_five_lines() {
         ],
     );
 
-    assert!(shows(&mut tui, "out 05"));
-    assert!(!shows(&mut tui, "out 06"));
-    assert!(shows(&mut tui, "… 3 more lines"));
+    assert!(shows(&mut tui, "⎿ 8 lines"));
+    assert!(!shows(&mut tui, "out 01"));
+}
+
+#[test]
+fn bold_and_code_in_text_are_styled_without_their_markers() {
+    let mut tui = on_subagent();
+
+    backlog(&mut tui, vec![text("a **loud** word and `cargo fmt` here")]);
+
+    assert!(shows(&mut tui, "a loud word and cargo fmt here"));
+    assert_eq!(tui.colour_of("cargo fmt"), Color::Magenta);
 }
 
 #[test]
@@ -215,8 +265,9 @@ fn o_toggles_full_results_until_the_subagent_is_left() {
     backlog(&mut tui, entries.clone());
 
     tui.keys("o");
+    assert!(shows(&mut tui, "out 01"));
     assert!(shows(&mut tui, "out 08"));
-    assert!(!shows(&mut tui, "more lines"));
+    assert!(!shows(&mut tui, "8 lines"));
 
     tui.keys("o");
     assert!(!shows(&mut tui, "out 08"));
@@ -225,7 +276,7 @@ fn o_toggles_full_results_until_the_subagent_is_left() {
     tui.keys("KJ");
     backlog(&mut tui, entries);
     assert!(!shows(&mut tui, "out 08"));
-    assert!(shows(&mut tui, "… 3 more lines"));
+    assert!(shows(&mut tui, "⎿ 8 lines"));
 }
 
 #[test]
