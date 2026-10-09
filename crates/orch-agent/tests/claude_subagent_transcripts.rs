@@ -266,3 +266,21 @@ fn a_subagent_is_described_by_the_metadata_beside_its_transcript() {
         Some("Find the login redirect")
     );
 }
+
+#[test]
+fn a_background_subagents_hand_back_reads_as_its_text() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    append(
+        file.path(),
+        &[
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_09", "name": "SubagentHandback", "input": {"message": "Found it in login.rs."}}]}})
+                .to_string(),
+            json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_09", "content": "{\"success\":true}"}]}})
+                .to_string(),
+        ],
+    );
+    assert_eq!(
+        reader().read(file.path()).entries,
+        [text("Found it in login.rs.")]
+    );
+}
