@@ -14,6 +14,7 @@ enum Activity {
     Opened(Size),
     Resized(Size),
     Typed,
+    Reported,
 }
 
 pub(crate) async fn serve(
@@ -85,6 +86,7 @@ pub(crate) async fn serve(
         while let Ok(Some(message)) = read_frame_async::<ToDaemon>(&mut reader).await {
             let (forward, activity) = match message {
                 ToDaemon::Input { bytes } => (Some(ToHolder::Input { bytes }), Activity::Typed),
+                ToDaemon::Report { bytes } => (Some(ToHolder::Input { bytes }), Activity::Reported),
                 ToDaemon::Paste { text } => (Some(ToHolder::Paste { text }), Activity::Typed),
                 ToDaemon::Resize(size) => (None, Activity::Resized(size)),
                 _ => continue,
@@ -134,7 +136,7 @@ impl Daemon {
         };
         let size = match activity {
             Activity::Opened(size) | Activity::Resized(size) => Some(size),
-            Activity::Typed => None,
+            Activity::Typed | Activity::Reported => None,
         };
         live.panes.touch(pane, size);
         live.apply_pane_size();

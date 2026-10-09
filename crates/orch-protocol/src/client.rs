@@ -194,6 +194,11 @@ impl Pane {
         self.connection.send(&ToDaemon::Input { bytes }).await
     }
 
+    pub async fn report(&mut self, bytes: impl Into<Vec<u8>>) -> io::Result<()> {
+        let bytes = bytes.into();
+        self.connection.send(&ToDaemon::Report { bytes }).await
+    }
+
     pub async fn paste(&mut self, text: impl Into<String>) -> io::Result<()> {
         let text = text.into();
         self.connection.send(&ToDaemon::Paste { text }).await

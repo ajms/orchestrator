@@ -335,6 +335,19 @@ fn focus_changes_reach_an_agent_that_asked_for_them() {
 }
 
 #[test]
+fn focus_changes_and_mouse_events_reach_the_agent_as_reports_not_typing() {
+    let mut tui = agent_with("\x1b[?1004h\x1b[?1000h\x1b[?1006h");
+    sent(&mut tui);
+    tui.daemon().reports.clear();
+    focus(&mut tui, false);
+    click_pane(&mut tui, 1, 1);
+
+    let reported = String::from_utf8_lossy(&std::mem::take(&mut tui.daemon().reports)).into_owned();
+    assert!(reported.starts_with("\x1b[O\x1b[<0;"));
+    assert_eq!(reported, sent(&mut tui));
+}
+
+#[test]
 fn focus_changes_are_not_sent_to_an_agent_that_did_not_ask() {
     let mut tui = agent_with("hello");
     focus(&mut tui, false);

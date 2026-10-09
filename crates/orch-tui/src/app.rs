@@ -44,6 +44,7 @@ pub(crate) enum Call {
     OpenPane(PaneId, SessionId, Size),
     ClosePane,
     Input(Vec<u8>),
+    Report(Vec<u8>),
     Paste(String),
     ResizePane(Size),
     Local(Effect),
@@ -545,7 +546,7 @@ impl App {
             pane.told_focused = false;
         } else if pane.told_focused != focused {
             pane.told_focused = focused;
-            self.calls.push(Call::Input(focus_report(focused)));
+            self.calls.push(Call::Report(focus_report(focused)));
         }
     }
 
@@ -1394,7 +1395,7 @@ impl App {
         }
         if let Some(left) = self.pane.take() {
             if left.told_focused {
-                self.calls.push(Call::Input(focus_report(false)));
+                self.calls.push(Call::Report(focus_report(false)));
             }
             self.calls.push(Call::ClosePane);
         }

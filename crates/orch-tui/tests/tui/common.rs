@@ -31,6 +31,7 @@ pub struct FakeDaemon {
     pub closed: usize,
     pub input: Vec<u8>,
     pub input_by_session: Vec<(Option<String>, Vec<u8>)>,
+    pub reports: Vec<u8>,
     shown: Option<String>,
     pub pastes: Vec<String>,
     pub resizes: Vec<Size>,
@@ -143,6 +144,11 @@ impl DaemonLink for FakeDaemon {
         self.input_by_session
             .push((self.shown.clone(), bytes.clone()));
         self.input.extend(bytes);
+    }
+
+    fn report(&mut self, bytes: Vec<u8>) {
+        self.reports.extend(bytes.iter().copied());
+        self.input(bytes);
     }
 
     fn paste(&mut self, text: String) {

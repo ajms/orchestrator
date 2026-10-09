@@ -95,6 +95,13 @@ async fn the_socket_link_speaks_the_daemon_protocol_on_control_and_pane_connecti
                 bytes: b"x".to_vec()
             }
         );
+        let report: ToDaemon = read_frame_async(&mut pane_in).await.unwrap().unwrap();
+        assert_eq!(
+            report,
+            ToDaemon::Report {
+                bytes: b"\x1b[I".to_vec()
+            }
+        );
         let paste: ToDaemon = read_frame_async(&mut pane_in).await.unwrap().unwrap();
         assert_eq!(paste, ToDaemon::Paste { text: "p".into() });
         let resize: ToDaemon = read_frame_async(&mut pane_in).await.unwrap().unwrap();
@@ -121,6 +128,7 @@ async fn the_socket_link_speaks_the_daemon_protocol_on_control_and_pane_connecti
 
     link.open_pane(PaneId(3), &id("first"), PANE);
     link.input(b"x".to_vec());
+    link.report(b"\x1b[I".to_vec());
     link.paste("p".into());
     link.resize_pane(Size { rows: 11, cols: 41 });
     match next(&mut rx).await {
