@@ -697,6 +697,14 @@ impl PaneView {
             .await;
     }
 
+    // A resize turns soft wraps into line breaks, so a long line printed before it may be split.
+    pub async fn wait_for_long_line(&mut self, needle: &str) {
+        self.wait_for(needle, |pane| {
+            pane.text().replace('\n', "").contains(needle)
+        })
+        .await;
+    }
+
     pub async fn type_line(&mut self, line: &str) {
         self.pane
             .input(format!("{line}\r").into_bytes())
