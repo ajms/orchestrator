@@ -62,7 +62,7 @@ The settings that apply to one Repo: those committed in the Repo itself, layered
 _Avoid_: Project settings, repo file
 
 **Trust**:
-The user's approval to run the scripts a Repo config brings from the Repo itself; it lapses when those scripts change.
+The user's approval of what a Repo config brings from the Repo itself that loosens what may run: its scripts, Agents, loosening Presets and the paths it makes writable in the Sandbox. It lapses when any of those change.
 _Avoid_: Allow-list, permission, workspace trust (agy's screen asking whether to trust a folder)
 
 **Session**:
@@ -138,7 +138,7 @@ The Orchestrator's own syntax for a Preset's allow and deny rules, naming comman
 _Avoid_: Agent rule syntax, permission syntax
 
 **Sandbox**:
-An enclosure the operating system puts around a Session's Agent and everything it runs, limiting which files it can change. Unlike a Guard it never asks: an action outside it simply fails.
+An enclosure the operating system puts around a Session's Agent and everything it runs, limiting which files it can change and hiding the user's secrets from it. Unlike a Guard it never asks: an action outside it simply fails.
 _Avoid_: Jail, container
 
 **Guard**:
