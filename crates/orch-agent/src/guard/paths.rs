@@ -2,7 +2,7 @@ use std::path::{Component, Path, PathBuf};
 
 const HARMLESS_TARGETS: [&str; 4] = ["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"];
 
-pub(super) fn resolve(cwd: &Path, raw: &str) -> PathBuf {
+pub(crate) fn resolve(cwd: &Path, raw: &str) -> PathBuf {
     let expanded = match raw.strip_prefix('~') {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => std::env::home_dir()
             .map(|home| home.join(rest.trim_start_matches('/')))
@@ -12,13 +12,24 @@ pub(super) fn resolve(cwd: &Path, raw: &str) -> PathBuf {
     resolve_symlinks(&normalize(&cwd.join(expanded)))
 }
 
-pub(super) fn is_harmless(path: &Path) -> bool {
+pub(crate) fn widest(pattern: &str) -> String {
+    pattern
+        .split('/')
+        .map(|part| {
+            let climbs = part.starts_with('.') && part.contains(['*', '?', '[']);
+            if climbs { ".." } else { part }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+pub(crate) fn is_harmless(path: &Path) -> bool {
     HARMLESS_TARGETS
         .iter()
         .any(|target| path == Path::new(target))
 }
 
-pub(super) fn is_temp(path: &Path) -> bool {
+pub(crate) fn is_temp(path: &Path) -> bool {
     [PathBuf::from("/tmp"), std::env::temp_dir()]
         .iter()
         .map(|root| resolve(Path::new("/"), &root.to_string_lossy()))
@@ -30,6 +41,7 @@ fn normalize(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::ParentDir => {
+                normal = resolve_symlinks(&normal);
                 normal.pop();
             }
             Component::CurDir => {}

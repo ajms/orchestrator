@@ -7,6 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
+use orch_protocol::DefaultPreset;
+
 use crate::new_form::{Field, NewForm};
 use crate::repo_picker::{PickerRow, RepoPicker};
 use crate::sessions::repo_name;
@@ -15,6 +17,13 @@ use crate::text_input::TextInput;
 const STACKED_BELOW: u16 = 100;
 const FIELDS_WIDTH: u16 = 40;
 const ROW_LABEL: usize = 7;
+const FORM_FIELDS: [Field; 5] = [
+    Field::Repo,
+    Field::Branch,
+    Field::Base,
+    Field::Agent,
+    Field::Preset,
+];
 
 pub(super) fn draw(frame: &mut Frame, form: &NewForm, home: Option<&Path>) {
     let screen = frame.area();
@@ -55,7 +64,7 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
         None => {
             let mut lines = Vec::new();
             let mut cursor = None;
-            for field in [Field::Repo, Field::Branch, Field::Base, Field::Preset] {
+            for field in FORM_FIELDS {
                 lines.push(Line::from(label(
                     form,
                     field,
@@ -83,7 +92,7 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
 fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -> Option<Position> {
     let rows = match form.repo.picker() {
         Some(_) => body.height / 2,
-        None => 4 + u16::from(form.error.is_some()) + 1,
+        None => FORM_FIELDS.len() as u16 + u16::from(form.error.is_some()) + 1,
     };
     let [fields, head, text] = Layout::vertical([
         Constraint::Length(rows),
@@ -96,7 +105,7 @@ fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
         None => {
             let mut lines = Vec::new();
             let mut cursor = None;
-            for field in [Field::Repo, Field::Branch, Field::Base, Field::Preset] {
+            for field in FORM_FIELDS {
                 let at = Rect {
                     x: fields.x + ROW_LABEL as u16 + 3,
                     y: fields.y + lines.len() as u16,
@@ -132,7 +141,9 @@ fn hints(form: &NewForm) -> Line<'static> {
         (None, Field::Repo) => "Enter pick Repo · Tab next · Ctrl+s create · Esc cancel",
         (None, Field::Branch) => "Ctrl+u clear · Enter next · Ctrl+s create · Esc cancel",
         (None, Field::Base) => "↑/↓ other Branches · Enter next · Ctrl+s create · Esc cancel",
-        (None, Field::Preset) => "←/→ choose · Enter next · Ctrl+s create · Esc cancel",
+        (None, Field::Agent | Field::Preset) => {
+            "←/→ choose · Enter next · Ctrl+s create · Esc cancel"
+        }
     };
     Line::from(format!(" {keys} ")).dark_gray()
 }
@@ -143,6 +154,7 @@ fn label(form: &NewForm, field: Field, width: usize) -> Span<'static> {
         Field::Prompt => "Prompt",
         Field::Branch => "Branch",
         Field::Base => "Base",
+        Field::Agent => "Agent",
         Field::Preset => "Preset",
     };
     let style = match form.field == field && form.repo.picker().is_none() {
@@ -178,16 +190,36 @@ fn value(
             return (Line::from(format!(" {default}")).dark_gray(), cursor);
         }
         Field::Base => return single_line(&form.base, focused, area, Style::new()),
-        Field::Preset => Line::from(match form.preset {
-            Some(at) => format!(" ◂ {} ▸", form.presets[at]),
-            None => match &form.default_preset {
-                Some(default) => format!(" ◂ {default} (Repo default) ▸"),
-                None => " ◂ (Repo default) ▸".to_string(),
-            },
-        }),
+        Field::Agent => match form.agent.map(|at| &form.agents[at]) {
+            Some(agent) if agent.unavailable.is_some() => {
+                Line::from(format!(" ◂ {} (unavailable) ▸", agent.name)).red()
+            }
+            Some(agent) => Line::from(format!(" ◂ {} ▸", agent.name)),
+            None => Line::from(" ◂ (Repo default) ▸"),
+        },
+        Field::Preset => Line::from(preset(form)),
         Field::Prompt => Line::default(),
     };
     (line, None)
+}
+
+fn preset(form: &NewForm) -> String {
+    let agent = form.chosen_agent();
+    let marked = |name: &str| match agent.filter(|_| form.lacks_rules(name)) {
+        Some(agent) => format!("{name} (no {} rules)", agent.name),
+        None => name.to_string(),
+    };
+    if let Some(at) = form.preset {
+        return format!(" ◂ {} ▸", marked(&form.presets[at].name));
+    }
+    match agent.and_then(|agent| agent.default_preset.as_ref()) {
+        Some(DefaultPreset {
+            name,
+            unsupported: Some(configured),
+        }) => format!(" ◂ {} (default {configured} unsupported) ▸", marked(name)),
+        Some(DefaultPreset { name, .. }) => format!(" ◂ {} (Repo default) ▸", marked(name)),
+        None => " ◂ (Repo default) ▸".to_string(),
+    }
 }
 
 fn single_line(

@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use orch_agent::Presets;
 use orch_protocol::DisplayVars;
 
 const DEFAULT_REVIEW_COMMAND: &str = r#"git -p diff "$ORCH_MERGE_BASE" "$ORCH_REVIEW_TREE""#;
@@ -10,7 +9,6 @@ pub struct TuiConfig {
     pub repos: Vec<PathBuf>,
     pub cwd_repo: Option<PathBuf>,
     pub home: Option<PathBuf>,
-    pub presets: Presets,
     pub branch_prefix: String,
     pub review_command: String,
     pub display: DisplayVars,
@@ -22,7 +20,6 @@ impl Default for TuiConfig {
             repos: Vec::new(),
             cwd_repo: None,
             home: None,
-            presets: Presets::default(),
             branch_prefix: orch_git::DEFAULT_BRANCH_PREFIX.into(),
             review_command: DEFAULT_REVIEW_COMMAND.into(),
             display: DisplayVars::default(),

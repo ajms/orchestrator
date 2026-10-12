@@ -7,11 +7,12 @@ mod stacking;
 mod status;
 mod subagent;
 mod transcript;
+mod turn_gate;
 
 pub use agent_state::AgentState;
 pub use event::{
-    AgentEvent, ConversationId, FailureKind, InvalidSessionId, Observation, PermissionMode,
-    RateLimit, SessionId, SubagentId, UsageSample,
+    AgentEvent, ConversationId, FailureKind, GuardedAction, InvalidSessionId, Observation,
+    PermissionMode, SessionId, SubagentId, UsageSample, UsageWindow,
 };
 pub use flags::{
     Attention, ChecksState, DEFAULT_STALLED_AFTER, Effect, Flags, PrState, PrStatus, ReviewDecision,

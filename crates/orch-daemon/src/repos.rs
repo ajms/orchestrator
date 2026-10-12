@@ -1,10 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use orch_agent::built_in_names;
+use orch_config::{PresetError, RepoConfig};
 use orch_core::SessionId;
-use orch_protocol::{Reply, RepoSettings, RequestError, StaleOverrides};
+use orch_protocol::{
+    AgentChoice, DefaultPreset, PresetChoice, Reply, RepoSettings, RequestError, StaleOverrides,
+};
 use orch_store::RepoRoot;
 
+use crate::agents::{installed_adapter, modes};
 use crate::lifecycle::{Busy, refused, trust_needed, with_git};
 use crate::reconcile::Pass;
 use crate::state::Daemon;
@@ -38,8 +43,8 @@ impl Daemon {
             false => trust_needed(&config),
         };
         Ok(Reply::RepoSettings(RepoSettings {
-            presets: config.presets().names().map(String::from).collect(),
-            default_preset: config.default_preset().map(String::from),
+            agents: agent_choices(&config, &repo),
+            default_agent: config.default_agent().into(),
             default_base,
             review_command: config.review_command().map(String::from),
             branch_prefix: self.branch_prefix().await,
@@ -158,4 +163,44 @@ impl Daemon {
             },
         }
     }
+}
+
+fn agent_choices(config: &RepoConfig, repo: &Path) -> Vec<AgentChoice> {
+    let mut names = built_in_names().collect::<Vec<_>>();
+    if !names.contains(&config.default_agent()) {
+        names.push(config.default_agent());
+    }
+    let presets = config.presets();
+    names
+        .into_iter()
+        .map(|name| AgentChoice {
+            name: name.into(),
+            unavailable: config
+                .agent(name)
+                .ok()
+                .and_then(|agent| installed_adapter(&agent, repo).err()),
+            presets: presets
+                .offered(modes(name))
+                .map(|preset| PresetChoice {
+                    name: preset.name.clone(),
+                    lacks_rules: preset.lacks_rules(name),
+                })
+                .collect(),
+            default_preset: default_preset(config, name),
+        })
+        .collect()
+}
+
+fn default_preset(config: &RepoConfig, agent: &str) -> Option<DefaultPreset> {
+    let configured = config.default_preset()?;
+    let name = match config.select_preset(None, modes(agent)) {
+        Ok(preset) => preset.name,
+        Err(
+            PresetError::Unknown(name)
+            | PresetError::Untrusted(name)
+            | PresetError::Unsupported(name),
+        ) => name,
+    };
+    let unsupported = (name != configured).then(|| configured.to_string());
+    Some(DefaultPreset { name, unsupported })
 }

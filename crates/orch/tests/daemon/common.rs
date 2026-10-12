@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 use orch_core::SessionId;
 use orch_git::ENV_REDIRECTING_GIT;
 use orch_protocol::{
-    Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport, Reply, Request,
-    RequestError, SessionView, Size, SubagentTranscript, daemon_socket, open_control,
+    AgentUsageWindows, Client, CreateSession, DisplayVars, Fix, FromDaemon, Pane, ReconcileReport,
+    Reply, Request, RequestError, SessionView, Size, SubagentTranscript, daemon_socket,
+    open_control,
 };
 use tempfile::TempDir;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
@@ -55,8 +56,13 @@ impl Env {
             std::fs::create_dir_all(dir.path().join(sub)).unwrap();
         }
         let env = Self { dir };
+        std::fs::write(env.claude_script(), "draft -p --resume\n").unwrap();
         env.write_config("");
         env
+    }
+
+    fn claude_script(&self) -> PathBuf {
+        self.path("claude.script")
     }
 
     pub fn path(&self, name: &str) -> PathBuf {
@@ -76,8 +82,9 @@ impl Env {
     }
 
     pub fn write_config_with_agent(&self, extra: &str, binary: &str) {
+        let script = self.claude_script();
         let config = format!(
-            "{extra}\n[defaults.agent]\nbinary = {binary:?}\nargs = [\"fake-agent\", \"--\"]\n"
+            "{extra}\n[defaults.agents.claude]\nbinary = {binary:?}\nargs = [\"fake-agent\", \"--script\", {script:?}, \"--\"]\n"
         );
         std::fs::write(self.path("config/orchestrator/config.toml"), config).unwrap();
     }
@@ -426,12 +433,6 @@ pub struct Ring {
     pub body: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RateLimits {
-    pub five_hour: Option<f64>,
-    pub seven_day: Option<f64>,
-}
-
 pub struct TestClient {
     pub client: Client,
     pub sessions: HashMap<SessionId, SessionView>,
@@ -441,7 +442,7 @@ pub struct TestClient {
     pub reports: Vec<ReconcileReport>,
     pub rings: Vec<Ring>,
     pub focused: Vec<SessionId>,
-    pub rate_limits: Vec<RateLimits>,
+    pub usage_windows: Vec<Vec<AgentUsageWindows>>,
     pub copies: Vec<(SessionId, String)>,
     pub transcripts: Vec<SubagentTranscript>,
     session_in_view: Option<SessionId>,
@@ -459,7 +460,7 @@ impl From<Client> for TestClient {
             reports: Vec::new(),
             rings: Vec::new(),
             focused: Vec::new(),
-            rate_limits: Vec::new(),
+            usage_windows: Vec::new(),
             copies: Vec::new(),
             transcripts: Vec::new(),
             session_in_view: None,
@@ -477,7 +478,15 @@ impl TestClient {
     }
 
     pub async fn request(&mut self, request: Request) -> Result<Reply, RequestError> {
-        tokio::time::timeout(WAIT, self.client.request(request))
+        self.request_within(request, WAIT).await
+    }
+
+    pub async fn request_within(
+        &mut self,
+        request: Request,
+        wait: Duration,
+    ) -> Result<Reply, RequestError> {
+        tokio::time::timeout(wait, self.client.request(request))
             .await
             .expect("no response in time")
             .unwrap()
@@ -551,13 +560,7 @@ impl TestClient {
                 body: body.clone(),
             }),
             FromDaemon::Focus { session } => self.focused.push(session.clone()),
-            FromDaemon::RateLimits {
-                five_hour,
-                seven_day,
-            } => self.rate_limits.push(RateLimits {
-                five_hour: *five_hour,
-                seven_day: *seven_day,
-            }),
+            FromDaemon::UsageWindows { agents } => self.usage_windows.push(agents.clone()),
             FromDaemon::Clipboard { session, text } => {
                 self.copies.push((session.clone(), text.clone()))
             }
@@ -608,7 +611,17 @@ impl TestClient {
         what: &str,
         predicate: impl Fn(&SessionView) -> bool,
     ) -> SessionView {
-        let deadline = Instant::now() + WAIT;
+        self.until_within(session, what, WAIT, predicate).await
+    }
+
+    pub async fn until_within(
+        &mut self,
+        session: &SessionId,
+        what: &str,
+        wait: Duration,
+        predicate: impl Fn(&SessionView) -> bool,
+    ) -> SessionView {
+        let deadline = Instant::now() + wait;
         loop {
             if let Some(view) = self.sessions.get(session)
                 && predicate(view)
@@ -677,7 +690,16 @@ impl PaneView {
     }
 
     pub async fn wait_for(&mut self, what: &str, predicate: impl Fn(&Self) -> bool) {
-        let deadline = Instant::now() + WAIT;
+        self.wait_for_within(what, WAIT, predicate).await
+    }
+
+    pub async fn wait_for_within(
+        &mut self,
+        what: &str,
+        wait: Duration,
+        predicate: impl Fn(&Self) -> bool,
+    ) {
+        let deadline = Instant::now() + wait;
         while !predicate(self) {
             assert!(
                 self.closed.is_none(),

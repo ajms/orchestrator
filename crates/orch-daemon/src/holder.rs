@@ -7,11 +7,12 @@ use std::time::{Duration, Instant};
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use orch_agent::{
-    AgentAdapter, Capabilities, GuardAnswer, GuardContext, GuardDecision, TitleWatch,
-    evaluate_guard,
+    Capabilities, GuardAnswer, GuardContext, GuardOutcome, TitleWatch, evaluate_guard,
+    guard_outcome,
 };
 use orch_core::{
-    AgentEvent, AgentState, ConversationId, Effect, Observation, PhaseEvent, SessionId,
+    AgentEvent, AgentState, ConversationId, Effect, GuardedAction, Observation, PhaseEvent,
+    SessionId,
 };
 use orch_holder::{
     AgentExit, AgentStatus, FromHolder, HolderClient, HolderEvent, HolderReader, ToHolder,
@@ -48,7 +49,7 @@ impl Daemon {
         let (reader, mut writer) = client.into_split();
         let (outbox, inbox) = mpsc::channel(HOLDER_QUEUE);
         let (closed, closed_watch) = watch::channel(false);
-        let generation = {
+        let attached = {
             let mut state = self.lock();
             match state.sessions.get_mut(id) {
                 Some(live) if !live.status.phase().is_terminal() => {
@@ -66,8 +67,11 @@ impl Daemon {
                         (Attach::Adopt, Some(persisted)) => {
                             live.status.restore_agent(persisted, running)
                         }
-                        _ => {
+                        (Attach::Adopt, None) => {
                             live.status.observe(Observation::Spawned, now);
+                        }
+                        (Attach::Fresh, _) => {
+                            live.agent_spawned(now);
                         }
                     }
                     if let AgentStatus::Exited(exit) = &hello.agent
@@ -80,13 +84,14 @@ impl Daemon {
                     }
                     live.apply_pane_size();
                     live.deliver_prompt();
+                    let agent = live.record.agent.clone();
                     state.changed(id);
-                    Some(generation)
+                    Some((generation, agent))
                 }
                 _ => None,
             }
         };
-        let Some(generation) = generation else {
+        let Some((generation, agent)) = attached else {
             let _ = write_frame_async(&mut writer, &ToHolder::Shutdown).await;
             return Err(io::Error::other("the Session has ended"));
         };
@@ -97,7 +102,7 @@ impl Daemon {
         tokio::spawn(write_loop(writer, inbox));
         tokio::spawn(
             self.clone()
-                .consume(id.clone(), reader, generation, last_seq, closed),
+                .consume(id.clone(), agent, reader, generation, last_seq, closed),
         );
         Ok(())
     }
@@ -105,6 +110,7 @@ impl Daemon {
     async fn consume(
         self: Arc<Self>,
         id: SessionId,
+        agent: String,
         mut reader: HolderReader,
         generation: u64,
         mut last_seq: u64,
@@ -115,9 +121,13 @@ impl Daemon {
             match message {
                 FromHolder::Event { seq, event } if seq > last_seq => {
                     last_seq = seq;
+                    if event.agent().is_some_and(|from| from != agent) {
+                        self.skip_holder_event(&id, generation, &event, seq);
+                        continue;
+                    }
                     if let (
                         Some(titles),
-                        HolderEvent::Hook { payload, .. } | HolderEvent::Tap { payload },
+                        HolderEvent::Hook { payload, .. } | HolderEvent::Tap { payload, .. },
                     ) = (&titles, &event)
                     {
                         let _ = titles.try_send(payload.clone());
@@ -142,8 +152,7 @@ impl Daemon {
             .lock()
             .sessions
             .get(id)
-            .filter(|live| live.adapter.capabilities().titles)
-            .and_then(|live| live.adapter.title_watch())?;
+            .and_then(|live| live.title_watch())?;
         let (payloads, followed) = mpsc::channel(HOLDER_QUEUE);
         tokio::spawn(self.clone().follow_titles(id.clone(), watch, followed));
         Some(payloads)
@@ -256,16 +265,16 @@ impl Daemon {
         let mut conversations = Vec::new();
         let mut usage = Vec::new();
         let effects = match event {
-            HolderEvent::Spawned { .. } => live.status.observe(Observation::Spawned, now),
+            HolderEvent::Spawned { .. } => live.agent_spawned(now),
             HolderEvent::Exited(exit) => {
                 live.prompts.clear();
                 live.status.observe(exit_observation(&exit), now)
             }
-            HolderEvent::Hook { payload, guard } => {
+            HolderEvent::Hook { payload, guard, .. } => {
                 if let Some(transcripts) = &mut live.transcripts {
                     transcripts.follow(&payload);
                 }
-                let events = live.adapter.map_hook(&payload).unwrap_or_default();
+                let events = live.hook_events(&payload);
                 let effects = observe(live, &events, now, &mut conversations, &mut usage);
                 describe_subagents(live, &events);
                 if let Some(guard) = guard {
@@ -273,8 +282,8 @@ impl Daemon {
                 }
                 effects
             }
-            HolderEvent::Tap { payload } => {
-                let events = live.adapter.map_tap(&payload).unwrap_or_default();
+            HolderEvent::Tap { payload, .. } => {
+                let events = live.tap_events(&payload);
                 observe(live, &events, now, &mut conversations, &mut usage)
             }
         };
@@ -285,10 +294,11 @@ impl Daemon {
                 live.record.conversations.push(conversation.clone());
             }
         }
-        let ack = live.holder_outbox();
+        let outbox = live.holder_outbox();
+        let agent = live.record.agent.clone();
         state.changed(id);
         for sample in &usage {
-            state.note_rate_limits(sample);
+            state.note_usage_windows(&agent, sample);
         }
         let session = id.clone();
         let prompt = self.session_dir(id).join(PROMPT_FILE);
@@ -304,11 +314,32 @@ impl Daemon {
             if first_conversation {
                 let _ = std::fs::remove_file(prompt);
             }
-            if let Some(ack) = ack {
-                let _ = ack.try_send(ToHolder::Ack { through: seq });
-            }
+            ack(outbox, seq);
         });
         effects
+    }
+
+    fn skip_holder_event(&self, id: &SessionId, generation: u64, event: &HolderEvent, seq: u64) {
+        let state = self.lock();
+        let Some(live) = state
+            .sessions
+            .get(id)
+            .filter(|live| live.is_current(generation))
+        else {
+            return;
+        };
+        if let HolderEvent::Hook {
+            guard: Some(guard), ..
+        } = event
+        {
+            live.send_to_holder(ToHolder::GuardAnswer {
+                id: *guard,
+                answer: GuardAnswer::Ask,
+            });
+        }
+        let outbox = live.holder_outbox();
+        drop(state);
+        self.store.write(move |_| ack(outbox, seq));
     }
 
     pub(crate) fn answer_guard(
@@ -325,10 +356,10 @@ impl Daemon {
                 .ok_or("no such Guard prompt is pending")?;
             let pending = live.prompts.remove(at);
             let answer = match choice {
-                GuardChoice::AllowOnce => GuardAnswer::Proceed,
+                GuardChoice::AllowOnce => pending.on_allow,
                 GuardChoice::AllowForSession => {
                     live.record.guard_allowances.push(pending.hit);
-                    GuardAnswer::Proceed
+                    pending.on_allow
                 }
                 GuardChoice::Deny => GuardAnswer::Deny {
                     reason: DENIED_BY_USER.into(),
@@ -346,6 +377,12 @@ impl Daemon {
             Ok(())
         })?;
         Ok(Reply::Done)
+    }
+}
+
+fn ack(outbox: Option<Sender<ToHolder>>, through: u64) {
+    if let Some(outbox) = outbox {
+        let _ = outbox.try_send(ToHolder::Ack { through });
     }
 }
 
@@ -376,9 +413,9 @@ fn retitle(live: &mut Live, title: &str) {
 }
 
 fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
-    let check = guard_check(live.adapter.capabilities(), events);
-    let agent_dirs = guard_dirs(live.adapter.as_ref(), &live.record.worktree);
-    let decision = check.map(|(tool, input_json, cwd)| {
+    let check = guard_check(live.capabilities(), events);
+    let agent_dirs = guard_dirs(live.agent_dirs(), &live.record.worktree);
+    let outcome = check.map(|check| {
         let context = GuardContext {
             worktree: &live.record.worktree,
             branch: &live.record.branch,
@@ -387,20 +424,28 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
             allowed: &live.record.guard_allowances,
             agent_dirs: &agent_dirs,
         };
-        let decision = evaluate_guard(tool, input_json, cwd.as_deref().map(Path::new), &context);
-        (tool.clone(), decision)
+        let decision = evaluate_guard(check.action, check.cwd, &context);
+        let outcome = match live.rule_verdict(check.action, check.cwd) {
+            Ok(verdict) => guard_outcome(decision, verdict),
+            Err(_) => GuardOutcome::Answer(GuardAnswer::Ask),
+        };
+        (check.tool.to_owned(), outcome)
     });
-    match decision {
-        Some((tool, GuardDecision::Ask(hit))) => {
+    match outcome {
+        Some((tool, GuardOutcome::Prompt { hit, on_allow })) => {
             live.send_to_holder(ToHolder::GuardHeld { id: guard });
             live.prompts.push(PendingGuard {
                 id: guard,
                 tool,
                 hit,
+                on_allow,
             });
             live.status.observe(Observation::GuardPrompted, now);
         }
-        _ => {
+        Some((_, GuardOutcome::Answer(answer))) => {
+            live.send_to_holder(ToHolder::GuardAnswer { id: guard, answer });
+        }
+        None => {
             live.send_to_holder(ToHolder::GuardAnswer {
                 id: guard,
                 answer: GuardAnswer::Proceed,
@@ -409,24 +454,27 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
     }
 }
 
-fn guard_dirs(adapter: &dyn AgentAdapter, worktree: &Path) -> Vec<PathBuf> {
-    let mut dirs = adapter.agent_dirs(&orch_config::xdg::process_env);
+fn guard_dirs(mut dirs: Vec<PathBuf>, worktree: &Path) -> Vec<PathBuf> {
     dirs.push(orch_git::subagent_worktrees_dir(worktree));
     dirs
 }
 
-type GuardCheck<'a> = (&'a String, &'a String, &'a Option<String>);
+struct GuardCheck<'a> {
+    tool: &'a str,
+    action: &'a GuardedAction,
+    cwd: Option<&'a Path>,
+}
 
 fn guard_check(capabilities: Capabilities, events: &[AgentEvent]) -> Option<GuardCheck<'_>> {
     if !capabilities.guards_available() {
         return None;
     }
     events.iter().find_map(|event| match event {
-        AgentEvent::GuardCheck {
+        AgentEvent::GuardCheck { tool, action, cwd } => Some(GuardCheck {
             tool,
-            input_json,
-            cwd,
-        } => Some((tool, input_json, cwd)),
+            action,
+            cwd: cwd.as_deref().map(Path::new),
+        }),
         _ => None,
     })
 }
@@ -477,7 +525,9 @@ mod tests {
     fn check() -> Vec<AgentEvent> {
         vec![AgentEvent::GuardCheck {
             tool: "Bash".into(),
-            input_json: "{}".into(),
+            action: GuardedAction::Shell {
+                command: "ls".into(),
+            },
             cwd: None,
         }]
     }
@@ -494,10 +544,7 @@ mod tests {
 
     #[test]
     fn the_guard_counts_the_sessions_subagent_worktrees_as_its_own() {
-        let dirs = guard_dirs(
-            &orch_agent::ClaudeCode::default(),
-            Path::new("/repo/.orchestrator/worktrees/work"),
-        );
+        let dirs = guard_dirs(Vec::new(), Path::new("/repo/.orchestrator/worktrees/work"));
         assert!(dirs.contains(&PathBuf::from("/repo/.orchestrator/subagents/work")));
         assert!(!dirs.contains(&PathBuf::from("/repo/.orchestrator/subagents")));
     }

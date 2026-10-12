@@ -1,4 +1,4 @@
-use orch_agent::{AgentAdapter, ClaudeCode, LaunchSpec, Preset, Presets};
+use orch_agent::{AgentAdapter, ClaudeCode, DraftInput, LaunchSpec, Preset, Presets, Rules};
 use orch_core::{ConversationId, PermissionMode, SessionId};
 use serde_json::Value;
 
@@ -36,10 +36,10 @@ fn hook_commands(settings: &Value, event: &str) -> Vec<String> {
 }
 
 #[test]
-fn launch_routes_every_observed_hook_to_the_orch_hook_shim() {
+fn launch_routes_every_observed_hook_to_the_orch_hook_shim_as_claude() {
     let argv = ClaudeCode::default().launch(&spec(Preset::inherit()));
     let settings = settings(&argv.args);
-    let shim = format!("'/opt/orch/bin/orch' hook --session '{SESSION}'");
+    let shim = format!("'/opt/orch/bin/orch' hook --agent claude --session '{SESSION}'");
     for event in [
         "SessionStart",
         "UserPromptSubmit",
@@ -73,13 +73,13 @@ fn guard_hook_waits_for_the_users_answer_instead_of_timing_out() {
 }
 
 #[test]
-fn launch_taps_the_statusline_with_the_session_id_in_its_command() {
+fn launch_taps_the_statusline_as_claude_with_the_session_id_in_its_command() {
     let argv = ClaudeCode::default().launch(&spec(Preset::inherit()));
     let status_line = &settings(&argv.args)["statusLine"];
     assert_eq!(status_line["type"], "command");
     assert_eq!(
         status_line["command"],
-        format!("'/opt/orch/bin/orch' tap --session '{SESSION}'")
+        format!("'/opt/orch/bin/orch' tap --agent claude --session '{SESSION}'")
     );
 }
 
@@ -93,7 +93,7 @@ fn orch_program_paths_are_shell_quoted_in_injected_commands() {
     let argv = ClaudeCode::default().launch(&spec);
     assert_eq!(
         settings(&argv.args)["statusLine"]["command"],
-        format!("'/home/me/it'\\''s here/orch' tap --session '{SESSION}'")
+        format!("'/home/me/it'\\''s here/orch' tap --agent claude --session '{SESSION}'")
     );
 }
 
@@ -119,12 +119,25 @@ fn inherit_leaves_the_users_own_default_mode_alone() {
 }
 
 #[test]
-fn launch_adds_the_presets_rules_to_the_users_permissions() {
+fn launch_adds_the_presets_claude_rules_to_the_users_permissions() {
+    let agy_rules = Rules {
+        allow: vec!["command(ls)".into()],
+        deny: vec!["command(rm)".into()],
+    };
     let preset = Preset {
         name: "locked".into(),
         mode: Some(PermissionMode::DontAsk),
-        allow: vec!["Bash(cargo test *)".into()],
-        deny: vec!["WebFetch".into(), "Bash(rm *)".into()],
+        rules: [
+            ("antigravity".to_string(), agy_rules),
+            (
+                "claude".to_string(),
+                Rules {
+                    allow: vec!["Bash(cargo test *)".into()],
+                    deny: vec!["WebFetch".into(), "Bash(rm *)".into()],
+                },
+            ),
+        ]
+        .into(),
     };
     let argv = ClaudeCode::default().launch(&spec(preset));
     assert_eq!(flag(&argv.args, "--permission-mode"), Some("dontAsk"));
@@ -169,13 +182,22 @@ fn resume_comes_back_in_the_given_mode_rather_than_the_presets() {
 #[test]
 fn draft_forks_the_conversation_in_print_mode_without_our_hooks() {
     let draft = ClaudeCode::default()
-        .draft(&conversation())
+        .draft(Some(&conversation()))
         .expect("claude can draft");
-    assert_eq!(draft.program, "claude");
-    assert!(draft.args.contains(&"-p".to_string()));
-    assert!(draft.args.contains(&"--fork-session".to_string()));
-    assert_eq!(flag(&draft.args, "--resume"), Some(conversation().as_str()));
-    assert_eq!(flag(&draft.args, "--settings"), None);
+    assert_eq!(draft.argv.program, "claude");
+    assert!(draft.argv.args.contains(&"-p".to_string()));
+    assert!(draft.argv.args.contains(&"--fork-session".to_string()));
+    assert_eq!(
+        flag(&draft.argv.args, "--resume"),
+        Some(conversation().as_str())
+    );
+    assert_eq!(flag(&draft.argv.args, "--settings"), None);
+    assert_eq!(draft.input, DraftInput::Instruction);
+}
+
+#[test]
+fn claude_cannot_draft_before_it_has_a_conversation() {
+    assert_eq!(ClaudeCode::default().draft(None), None);
 }
 
 #[test]
