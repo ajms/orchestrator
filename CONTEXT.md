@@ -130,12 +130,16 @@ A per-Repo command run in a Worktree just before it is removed.
 _Avoid_: Cleanup hook, archive script
 
 **Preset**:
-A named level of Agent autonomy, chosen per Session: a permission mode from a shared vocabulary, plus allow and deny rules per Agent, in the Agent's own syntax where the Agent enforces them, or in the Rule language where the Orchestrator enforces them for it. Not every mode works for every Agent, so a Session is only offered the Presets its Agent can express.
+A named level of Agent autonomy, chosen per Session: a permission mode from a shared vocabulary, plus allow and deny rules per Agent, in the Agent's own syntax where the Agent enforces them, or in the Rule language where the Orchestrator enforces them for it, and whether its Agent runs in the Sandbox. Not every mode works for every Agent, so a Session is only offered the Presets its Agent can express.
 _Avoid_: Profile, policy, autonomy level
 
 **Rule language**:
 The Orchestrator's own syntax for a Preset's allow and deny rules, naming commands, file writes, external tools and Agent tools, shared by every Agent whose rules the Orchestrator enforces.
 _Avoid_: Agent rule syntax, permission syntax
+
+**Sandbox**:
+An enclosure the operating system puts around a Session's Agent and everything it runs, limiting which files it can change. Unlike a Guard it never asks: an action outside it simply fails.
+_Avoid_: Jail, container
 
 **Guard**:
 An Orchestrator rule that stops an Agent from acting outside its Session (its Worktree and Branch), or through tools that reach beyond it, unless the user allows it.
