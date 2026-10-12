@@ -1,0 +1,108 @@
+{
+  "type": "tool_execution_update",
+  "toolCallId": "call_sub_explorer",
+  "toolName": "subagent",
+  "args": {
+    "agent": "explorer",
+    "taskName": "Find readme",
+    "task": "Locate the README file and summarise it. [[scenario:child-read]]",
+    "model": "fake/fake-model"
+  },
+  "partialResult": {
+    "content": [
+      {
+        "type": "text",
+        "text": "(running...)"
+      }
+    ],
+    "details": {
+      "agent": "explorer",
+      "sessionLabel": "explorer1: Find readme",
+      "agentSource": "user",
+      "task": "Locate the README file and summarise it. [[scenario:child-read]]",
+      "exitCode": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "",
+          "sections": {
+            "preamble": "<elided 1302 chars>",
+            "cwd": "<cwd>\n/home/dev/repo\n</cwd>"
+          },
+          "timestamp": 1791797565133,
+          "toolsAdded": [
+            {
+              "name": "read",
+              "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+              "parameters": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to read (relative or absolute)"
+                  },
+                  "offset": {
+                    "type": "number",
+                    "description": "Line number to start reading from (1-indexed)"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum number of lines to read"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "question",
+              "description": "<elided 757 chars>",
+              "parameters": {
+                "type": "object",
+                "required": [
+                  "question"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "description": "<elided 457 chars>"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Optional list of choices. If provided, the user picks one of these strings; an 'Other…' entry is appended automatically so they can always type a freeform answer instead. Omit for a free-text question.",
+                    "minItems": 2,
+                    "maxItems": 10
+                  },
+                  "multiSelect": {
+                    "type": "boolean",
+                    "description": "If true and options are provided, the user can select multiple options (presented as a checklist) and submit them together. Default is false (single selection).",
+                    "default": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "stderr": "",
+      "usage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": 0,
+        "contextTokens": 0,
+        "turns": 0
+      },
+      "model": "fake/fake-model"
+    }
+  }
+}

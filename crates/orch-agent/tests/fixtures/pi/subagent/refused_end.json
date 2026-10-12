@@ -1,0 +1,36 @@
+{
+  "type": "tool_execution_end",
+  "toolCallId": "call_sub_refused",
+  "toolName": "subagent",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Agent refused: [builder] refused: I implement; I don't explore. Have the planner spawn an `explorer` first, then hand me a scoped change with concrete file paths."
+      }
+    ],
+    "details": {
+      "agent": "builder",
+      "agentSource": "user",
+      "task": "Explore the repository layout. [[scenario:child-text]]",
+      "exitCode": 1,
+      "messages": [],
+      "stderr": "[builder] refused: I implement; I don't explore. Have the planner spawn an `explorer` first, then hand me a scoped change with concrete file paths.",
+      "usage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": 0,
+        "contextTokens": 0,
+        "turns": 0
+      },
+      "stopReason": "refused",
+      "errorMessage": "[builder] refused: I implement; I don't explore. Have the planner spawn an `explorer` first, then hand me a scoped change with concrete file paths.",
+      "sessionLabel": "builder1: Survey code"
+    },
+    "isError": true
+  },
+  "isError": true,
+  "durationMs": 4
+}

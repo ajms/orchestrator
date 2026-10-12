@@ -1,0 +1,2 @@
+{"id":"req-1","type":"prompt","message":"Pick a db [[scenario:question-single]]"}
+{"type":"extension_ui_response","id":"36872d12-4b83-42c4-a1fc-35a775d4ee1f","value":"Postgres"}

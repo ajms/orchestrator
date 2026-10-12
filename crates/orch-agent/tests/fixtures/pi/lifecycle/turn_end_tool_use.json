@@ -1,0 +1,79 @@
+{
+  "type": "turn_end",
+  "turnIndex": 0,
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "Writing the file."
+      },
+      {
+        "type": "toolCall",
+        "id": "call_bash_1",
+        "name": "bash",
+        "arguments": {
+          "command": "echo hello > hello.txt && ls"
+        }
+      }
+    ],
+    "api": "openai-completions",
+    "provider": "fake",
+    "model": "fake-model",
+    "usage": {
+      "input": 1097,
+      "output": 18,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "totalTokens": 1115,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "stopReason": "toolUse",
+    "timestamp": 1791797547587,
+    "responseId": "chatcmpl-fake",
+    "rawStopReason": "tool_calls",
+    "durationMs": 28,
+    "thinkingLevel": "off"
+  },
+  "toolResults": [
+    {
+      "role": "toolResult",
+      "toolCallId": "call_bash_1",
+      "toolName": "bash",
+      "content": [
+        {
+          "type": "text",
+          "text": "greet.py\nhello.txt\nREADME.md\n"
+        }
+      ],
+      "isError": false,
+      "durationMs": 9,
+      "timestamp": 1791797547627
+    }
+  ],
+  "messageEntryId": "5bd993d0",
+  "toolResultEntryIds": [
+    "8fcd89ac"
+  ],
+  "outcome": "completed",
+  "entries": [],
+  "continue": false,
+  "context": {
+    "elided": "BoundaryContextPreview",
+    "keys": [
+      "canContinue",
+      "contextEntries",
+      "contextMessages",
+      "llmMessages",
+      "pendingMessages"
+    ],
+    "canContinue": true
+  }
+}

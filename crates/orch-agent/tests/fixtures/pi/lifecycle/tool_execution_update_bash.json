@@ -1,0 +1,11 @@
+{
+  "type": "tool_execution_update",
+  "toolCallId": "call_bash_1",
+  "toolName": "bash",
+  "args": {
+    "command": "echo hello > hello.txt && ls"
+  },
+  "partialResult": {
+    "content": []
+  }
+}

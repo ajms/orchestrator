@@ -1,0 +1,15 @@
+{
+  "type": "tool_execution_end",
+  "toolCallId": "call_q_3",
+  "toolName": "question",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Aurora"
+      }
+    ]
+  },
+  "isError": false,
+  "durationMs": 3
+}

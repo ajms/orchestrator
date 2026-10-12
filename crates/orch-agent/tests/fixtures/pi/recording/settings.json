@@ -1,0 +1,7 @@
+{
+  "defaultProvider": "fake",
+  "defaultModel": "fake-model",
+  "defaultThinkingLevel": "off",
+  "quietStartup": true,
+  "packages": []
+}

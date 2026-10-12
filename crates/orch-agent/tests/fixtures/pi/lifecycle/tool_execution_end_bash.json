@@ -1,0 +1,21 @@
+{
+  "type": "tool_execution_end",
+  "toolCallId": "call_bash_1",
+  "toolName": "bash",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "greet.py\nhello.txt\nREADME.md\n"
+      }
+    ],
+    "structuredContent": {
+      "output": "greet.py\nhello.txt\nREADME.md\n",
+      "truncated": false,
+      "exit_code": 0,
+      "wall_time_seconds": 0
+    }
+  },
+  "isError": false,
+  "durationMs": 9
+}

@@ -1,0 +1,211 @@
+{
+  "type": "tool_execution_end",
+  "toolCallId": "call_sub_asker",
+  "toolName": "subagent",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Scope answer: Yes"
+      }
+    ],
+    "details": {
+      "agent": "planner",
+      "sessionLabel": "planner1: Ask scope",
+      "agentSource": "user",
+      "task": "Plan the change, asking the user for scope. [[scenario:child-question]]",
+      "exitCode": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "",
+          "sections": {
+            "preamble": "<elided 1402 chars>",
+            "cwd": "<cwd>\n/home/dev/repo\n</cwd>"
+          },
+          "timestamp": 1791797611847,
+          "toolsAdded": [
+            {
+              "name": "read",
+              "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+              "parameters": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to read (relative or absolute)"
+                  },
+                  "offset": {
+                    "type": "number",
+                    "description": "Line number to start reading from (1-indexed)"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum number of lines to read"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "question",
+              "description": "<elided 757 chars>",
+              "parameters": {
+                "type": "object",
+                "required": [
+                  "question"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "description": "<elided 457 chars>"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Optional list of choices. If provided, the user picks one of these strings; an 'Other…' entry is appended automatically so they can always type a freeform answer instead. Omit for a free-text question.",
+                    "minItems": 2,
+                    "maxItems": 10
+                  },
+                  "multiSelect": {
+                    "type": "boolean",
+                    "description": "If true and options are provided, the user can select multiple options (presented as a checklist) and submit them together. Default is false (single selection).",
+                    "default": false
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Task: Plan the change, asking the user for scope. [[scenario:child-question]]"
+            }
+          ],
+          "timestamp": 1791797611847
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "toolCall",
+              "id": "call_child_q",
+              "name": "question",
+              "arguments": {
+                "question": "Should the plan cover tests too?",
+                "options": [
+                  "Yes",
+                  "No"
+                ]
+              }
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "fake",
+          "model": "fake-model",
+          "usage": {
+            "input": 422,
+            "output": 18,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 440,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1791797611857,
+          "responseId": "chatcmpl-fake",
+          "rawStopReason": "tool_calls",
+          "durationMs": 28,
+          "thinkingLevel": "off"
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "call_child_q",
+          "toolName": "question",
+          "content": [
+            {
+              "type": "text",
+              "text": "Yes"
+            }
+          ],
+          "isError": false,
+          "durationMs": 5,
+          "timestamp": 1791797611892
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Scope answer: Yes"
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "fake",
+          "model": "fake-model",
+          "usage": {
+            "input": 497,
+            "output": 7,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 504,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "stopReason": "stop",
+          "timestamp": 1791797611894,
+          "responseId": "chatcmpl-fake",
+          "rawStopReason": "stop",
+          "durationMs": 3,
+          "thinkingLevel": "off"
+        }
+      ],
+      "stderr": "",
+      "usage": {
+        "input": 919,
+        "output": 25,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": 0,
+        "contextTokens": 504,
+        "turns": 2
+      },
+      "model": "fake/fake-model",
+      "stopReason": "stop",
+      "modelAttempts": [
+        {
+          "model": "fake/fake-model",
+          "exitCode": 0,
+          "succeeded": true,
+          "stopReason": "stop"
+        }
+      ]
+    }
+  },
+  "isError": false,
+  "durationMs": 30330
+}

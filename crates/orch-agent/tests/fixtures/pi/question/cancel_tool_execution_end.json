@@ -1,0 +1,15 @@
+{
+  "type": "tool_execution_end",
+  "toolCallId": "call_q_1",
+  "toolName": "question",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "User dismissed question. Proceed with a reasonable default."
+      }
+    ]
+  },
+  "isError": false,
+  "durationMs": 3
+}

@@ -1,0 +1,2 @@
+{"id":"req-1","type":"prompt","message":"Sleep [[scenario:slow-bash]]"}
+{"id":"req-abort","type":"abort"}

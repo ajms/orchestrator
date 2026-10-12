@@ -1,0 +1,16 @@
+{
+  "type": "tool_execution_end",
+  "toolCallId": "call_bash_slow",
+  "toolName": "bash",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Command aborted"
+      }
+    ],
+    "details": {}
+  },
+  "isError": true,
+  "durationMs": 2006
+}

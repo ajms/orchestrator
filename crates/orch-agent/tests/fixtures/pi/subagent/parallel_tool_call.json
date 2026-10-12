@@ -1,0 +1,11 @@
+{
+  "type": "tool_call",
+  "toolName": "subagent",
+  "toolCallId": "call_sub_explorer",
+  "input": {
+    "agent": "explorer",
+    "taskName": "Find readme",
+    "task": "Locate the README file and summarise it. [[scenario:child-read]]",
+    "model": "fake/fake-model"
+  }
+}

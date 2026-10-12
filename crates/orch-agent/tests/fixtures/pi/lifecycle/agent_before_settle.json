@@ -1,0 +1,17 @@
+{
+  "type": "agent_before_settle",
+  "outcome": "completed",
+  "entries": [],
+  "continue": false,
+  "context": {
+    "elided": "BoundaryContextPreview",
+    "keys": [
+      "canContinue",
+      "contextEntries",
+      "contextMessages",
+      "llmMessages",
+      "pendingMessages"
+    ],
+    "canContinue": false
+  }
+}

@@ -1,0 +1,2 @@
+Warning: No project session found with id 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; creating a new session with that id.
+400: {"message":"fake upstream rejected the request","type":"invalid_request_error"}

@@ -1,0 +1,15 @@
+{
+  "type": "tool_execution_end",
+  "toolCallId": "call_q_1",
+  "toolName": "question",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Postgres"
+      }
+    ]
+  },
+  "isError": false,
+  "durationMs": 3
+}

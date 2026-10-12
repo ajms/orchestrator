@@ -1,0 +1,15 @@
+{
+  "type": "tool_execution_end",
+  "toolCallId": "call_q_2",
+  "toolName": "question",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "aborted Proceed with a reasonable default."
+      }
+    ]
+  },
+  "isError": false,
+  "durationMs": 4004
+}
