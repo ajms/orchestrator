@@ -2,8 +2,14 @@
 
 use std::path::{Path, PathBuf};
 
+use orch_agent::{AgentAdapter, ClaudeCode};
 use orch_config::{ConfigLoader, REPO_FILE, RepoConfig};
+use orch_core::PermissionMode;
 use tempfile::TempDir;
+
+pub fn claude() -> &'static [PermissionMode] {
+    ClaudeCode::default().modes()
+}
 
 pub struct Fixture {
     pub dir: TempDir,

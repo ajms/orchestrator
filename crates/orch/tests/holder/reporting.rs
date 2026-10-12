@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use orch_agent::ClaudeCode;
 use orch_holder::HolderEvent;
 
 use crate::common::*;
@@ -76,6 +77,22 @@ fn tap_output_is_identical_to_the_users_own_statusline() {
 }
 
 #[test]
+fn tap_for_another_agent_prints_nothing() {
+    let sandbox = Sandbox::new();
+    sandbox.write_claude_settings(r#"{"statusLine":{"type":"command","command":"echo mine"}}"#);
+
+    let output = run_with_stdin(
+        sandbox
+            .orch()
+            .args(["tap", "--agent", "antigravity", "--session", "gone"]),
+        STATUS,
+    );
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty(), "{output:?}");
+}
+
+#[test]
 fn tap_rereads_the_users_statusline_on_every_call() {
     let sandbox = Sandbox::new();
     let tap = || {
@@ -103,10 +120,59 @@ async fn tap_forwards_the_statusline_payload_to_the_holder() {
     assert_eq!(
         next_hook_or_tap(&mut client).await,
         HolderEvent::Tap {
+            agent: Some(ClaudeCode::NAME.into()),
             payload: STATUS.into()
         }
     );
     wait_for_screen(&mut client, |text| text.contains("tap> Opus · 42%")).await;
+}
+
+#[tokio::test]
+async fn a_global_hook_reports_to_the_session_named_by_orch_session() {
+    let sandbox = Sandbox::new();
+    let held = sandbox.hold("s1", "");
+    let (mut client, _) = held.attach().await;
+    let stop = r#"{"conversationId":"c1","fullyIdle":true}"#;
+
+    let mut hook = sandbox.orch();
+    hook.args(["hook", "--agent", "antigravity"])
+        .env("ORCH_SESSION", "s1");
+    let output = run_with_stdin(&mut hook, stop);
+
+    assert!(output.status.success());
+    assert_eq!(
+        next_hook_or_tap(&mut client).await,
+        HolderEvent::Hook {
+            agent: Some("antigravity".into()),
+            payload: stop.into(),
+            guard: None,
+        }
+    );
+}
+
+#[tokio::test]
+async fn an_untagged_agy_tool_call_that_is_not_a_guard_still_gets_a_decision_and_is_reported() {
+    let sandbox = Sandbox::new();
+    let held = sandbox.hold("s1", "");
+    let (mut client, _) = held.attach().await;
+    let tool_call =
+        r#"{"conversationId":"c1","error":"","toolCall":{"name":"run_command","args":{}}}"#;
+
+    let mut hook = sandbox.orch();
+    hook.args(["hook", "--agent", "antigravity", "--session", "s1"]);
+    let output = run_with_stdin(&mut hook, tool_call);
+
+    assert!(output.status.success());
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer, serde_json::json!({ "decision": "ask" }));
+    assert_eq!(
+        next_hook_or_tap(&mut client).await,
+        HolderEvent::Hook {
+            agent: Some("antigravity".into()),
+            payload: tool_call.into(),
+            guard: None,
+        }
+    );
 }
 
 #[test]

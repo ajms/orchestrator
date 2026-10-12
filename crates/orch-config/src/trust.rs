@@ -3,6 +3,8 @@ use std::fmt;
 use orch_agent::{Preset, mode_name};
 use sha2::{Digest, Sha256};
 
+use crate::repo::TOP_LEVEL_RULES_AGENT;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TrustHash(String);
 
@@ -27,6 +29,7 @@ pub enum TrustItem {
     SetupScript(String),
     TeardownScript(String),
     Agent {
+        name: String,
         binary: Option<String>,
         args: Vec<String>,
     },
@@ -84,8 +87,8 @@ fn fields(item: &TrustItem) -> Vec<String> {
     match item {
         TrustItem::SetupScript(script) => vec!["setup".into(), script.clone()],
         TrustItem::TeardownScript(script) => vec!["teardown".into(), script.clone()],
-        TrustItem::Agent { binary, args } => {
-            let mut fields = vec!["agent".into()];
+        TrustItem::Agent { name, binary, args } => {
+            let mut fields = vec!["agent".into(), name.clone()];
             fields.extend(list("binary", binary.as_slice()));
             fields.extend(list("args", args));
             fields
@@ -97,8 +100,21 @@ fn fields(item: &TrustItem) -> Vec<String> {
             };
             let mode = preset.mode.map_or("inherit", mode_name);
             let mut fields = vec![tag.into(), preset.name.clone(), mode.into()];
-            fields.extend(list("allow", &preset.allow));
-            fields.extend(list("deny", &preset.deny));
+            let top_level = preset
+                .rules_for(TOP_LEVEL_RULES_AGENT)
+                .cloned()
+                .unwrap_or_default();
+            let others = preset
+                .rules
+                .iter()
+                .filter(|(agent, _)| *agent != TOP_LEVEL_RULES_AGENT);
+            fields.extend(list("allow", &top_level.allow));
+            fields.extend(list("deny", &top_level.deny));
+            for (agent, rules) in others {
+                fields.extend(["agent".into(), agent.clone()]);
+                fields.extend(list("allow", &rules.allow));
+                fields.extend(list("deny", &rules.deny));
+            }
             fields
         }
     }

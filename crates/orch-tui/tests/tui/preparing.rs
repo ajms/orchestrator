@@ -143,8 +143,8 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
     tui.sessions(vec![session("webshop", "existing")]);
     tui.daemon().settings = vec![RepoSettings {
         repo: PathBuf::from("/home/me/webshop"),
-        presets: vec!["careful".into(), "plan".into()],
-        default_preset: None,
+        agents: vec![agent_offering("claude", &["careful", "plan"], None)],
+        default_agent: "claude".into(),
         default_base: None,
         review_command: None,
         branch_prefix: "orch/".into(),
@@ -160,6 +160,7 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
     tui.keys("-v2");
     tui.press(KeyCode::Tab);
     tui.keys("release/1.2");
+    tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Right);
     tui.press(KeyCode::Right);

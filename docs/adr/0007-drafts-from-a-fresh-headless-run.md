@@ -2,6 +2,8 @@
 
 Landing drafts a commit message or PR text with a headless one-shot of the Session's Agent, and this must never add turns to the Session's live Conversation. Claude Code forks the Conversation (`-p --resume <id> --fork-session`), so its Draft sees the whole history. Antigravity has no fork: `agy -p --conversation <id>` appends to the live Conversation. Its adapter therefore drafts with a fresh `agy -p` in the Worktree, and the Daemon pipes in the Draft instruction plus the diff against the Base branch (uncommitted and untracked files included). The adapter declares that its `draft` needs the diff as input.
 
+Amended: the fresh `agy -p` run takes its input as one stream-json user event on stdin (`--input-format stream-json --output-format stream-json`).
+
 ## Considered options
 
 - **Resuming the live Conversation headlessly.** This pollutes the Session's history and races the live TUI.

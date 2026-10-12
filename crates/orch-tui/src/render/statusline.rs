@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use orch_protocol::AgentStateView;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -90,23 +92,44 @@ fn summary(app: &App) -> Line<'static> {
             Style::new().fg(Color::Yellow),
         ));
     }
-    let limits = [
-        ("5h", app.rate_limits.five_hour),
-        ("7d", app.rate_limits.seven_day),
-    ];
-    for (window, used) in limits {
-        let Some(used) = used.filter(|used| *used > BADGE_FROM) else {
-            continue;
-        };
-        let colour = match used >= BADGE_RED_FROM {
-            true => Color::Red,
-            false => Color::Yellow,
-        };
+    let now = unix_now();
+    let live = app.usage_windows.iter().filter_map(|group| {
+        let windows: Vec<_> = group
+            .windows
+            .iter()
+            .filter(|window| window.resets_at_unix.is_none_or(|at| at > now))
+            .collect();
+        (!windows.is_empty()).then_some((&group.agent, windows))
+    });
+    for (index, (agent, windows)) in live.enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("│ "));
+        }
         spans.push(Span::styled(
-            format!("{window} {used:.0}%"),
-            Style::new().fg(colour).add_modifier(Modifier::BOLD),
+            format!("{agent} "),
+            Style::new().fg(Color::DarkGray),
         ));
-        spans.push(Span::raw(" "));
+        for window in windows {
+            spans.push(Span::styled(
+                format!("{} {:.0}%", window.label, window.used_percent),
+                window_style(window.used_percent),
+            ));
+            spans.push(Span::raw(" "));
+        }
     }
     Line::from(spans)
+}
+
+fn window_style(used: f64) -> Style {
+    match used {
+        used if used >= BADGE_RED_FROM => Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+        used if used > BADGE_FROM => Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        _ => Style::new(),
+    }
+}
+
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs() as i64)
 }
