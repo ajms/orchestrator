@@ -129,6 +129,10 @@ _Avoid_: Profile, policy, autonomy level
 An OS enclosure around a Session's Agent and everything it runs, limiting which files it can change and hiding secrets. An action outside it fails; it never asks.
 _Avoid_: Jail, container
 
+**Broker**:
+The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: pushing its Branch, managing its pull request and reading its Repo on GitHub, with the user's credentials, which never enter the Sandbox.
+_Avoid_: Proxy, relay, credential helper
+
 **Guard**:
 An Orchestrator rule that stops an Agent from acting outside its Session (its Worktree and Branch), or through tools that reach beyond it, unless the user allows it.
 _Avoid_: Sandbox, restriction, deny rule
