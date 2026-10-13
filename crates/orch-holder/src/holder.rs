@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
-use orch_agent::GuardAnswer;
+use orch_agent::{BWRAP, GuardAnswer};
 use orch_config::PortBlock;
 use orch_core::SessionId;
 use orch_term::keys::encode_paste;
@@ -28,7 +28,6 @@ use crate::{
 
 const FINAL_OUTPUT_GRACE: Duration = Duration::from_secs(2);
 const KILL_GRACE: Duration = Duration::from_secs(1);
-const BWRAP: &str = "bwrap";
 const IGNORING_HANGUP: &str = r#"trap '' HUP; exec 3>"$1"; shift; exec "$0" "$@""#;
 const STATUS_FD: &str = "3";
 const EARLY_OUTPUT_LIMIT: usize = 4096;
@@ -41,8 +40,7 @@ pub struct HoldConfig {
     pub socket: PathBuf,
     pub cwd: PathBuf,
     pub argv: Vec<String>,
-    pub sandbox: Option<Vec<String>>,
-    pub warning: Option<String>,
+    pub sandbox: Option<HoldSandbox>,
     pub env: Vec<(String, String)>,
     pub base: Option<String>,
     pub port_block: Option<PortBlock>,
@@ -50,6 +48,12 @@ pub struct HoldConfig {
     pub guard_timeout: Duration,
     pub event_capacity: usize,
     pub scrollback: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct HoldSandbox {
+    pub args: Vec<String>,
+    pub warning: Option<String>,
 }
 
 impl HoldConfig {
@@ -64,7 +68,6 @@ impl HoldConfig {
             cwd,
             argv,
             sandbox: None,
-            warning: None,
             env: Vec::new(),
             base: None,
             port_block: None,
@@ -176,12 +179,12 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
         .as_ref()
         .map(|_| config.socket.with_extension("status"));
     let mut command = match (&config.sandbox, &status) {
-        (Some(policy), Some(status)) => {
+        (Some(sandbox), Some(status)) => {
             let mut command = CommandBuilder::new("sh");
             command.args(["-c", IGNORING_HANGUP, BWRAP]);
             command.arg(status);
             command.args(["--json-status-fd", STATUS_FD]);
-            command.args(policy);
+            command.args(&sandbox.args);
             command.arg("--");
             command.arg(program);
             command
@@ -204,7 +207,11 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
 
     let (input, keystrokes) = mpsc::channel::<Vec<u8>>();
     let mut emulator = Emulator::new(config.size, config.scrollback);
-    if let Some(warning) = &config.warning {
+    if let Some(warning) = config
+        .sandbox
+        .as_ref()
+        .and_then(|sandbox| sandbox.warning.as_ref())
+    {
         emulator.process(&notice(warning));
     }
     let mut log = EventLog::new(config.event_capacity);

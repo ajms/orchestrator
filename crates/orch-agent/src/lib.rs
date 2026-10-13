@@ -13,5 +13,7 @@ pub use agent::{
 pub use claude::{ClaudeCode, mode_from_name, mode_name};
 pub use guard::{GuardAnswer, GuardContext, GuardDecision, GuardHit, GuardKind, evaluate_guard};
 pub use preset::{INHERIT, Preset, PresetSelection, Presets, ReservedPresetName, UnknownPreset};
-pub use sandbox::{Placeholder, SandboxLayout, SandboxNeeds, sandbox_carve_outs, sandbox_policy};
+pub use sandbox::{
+    BWRAP, Placeholder, SandboxLayout, SandboxNeeds, sandbox_args, sandbox_carve_outs,
+};
 pub use sandbox_failure::{SandboxFailure, sandbox_refusal};

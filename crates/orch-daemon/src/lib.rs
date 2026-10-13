@@ -68,11 +68,15 @@ impl DaemonConfig {
     pub const DEFAULT_RECONCILE: Duration = Duration::from_secs(3 * 60);
 }
 
-pub fn run(config: DaemonConfig) -> io::Result<()> {
+pub(crate) fn private_dir(dir: &Path) -> io::Result<()> {
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(&config.runtime_dir)?;
+        .create(dir)
+}
+
+pub fn run(config: DaemonConfig) -> io::Result<()> {
+    private_dir(&config.runtime_dir)?;
     let Some(_lock) = lock(&config.runtime_dir)? else {
         return Ok(());
     };

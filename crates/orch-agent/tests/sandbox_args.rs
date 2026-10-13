@@ -1,4 +1,4 @@
-use orch_agent::{Placeholder, SandboxLayout, SandboxNeeds, sandbox_carve_outs, sandbox_policy};
+use orch_agent::{Placeholder, SandboxLayout, SandboxNeeds, sandbox_args, sandbox_carve_outs};
 
 const HOME: &str = "/home/dev";
 const REPO: &str = "/home/dev/shop";
@@ -33,8 +33,8 @@ fn needs() -> SandboxNeeds {
     }
 }
 
-fn policy() -> Vec<String> {
-    sandbox_policy(&layout(), &needs())
+fn bwrap_args() -> Vec<String> {
+    sandbox_args(&layout(), &needs())
 }
 
 fn find(args: &[String], words: &[&str]) -> Option<usize> {
@@ -66,7 +66,7 @@ fn writable(path: &str) -> [&str; 3] {
 
 #[test]
 fn the_root_is_read_only_with_a_fresh_dev_and_proc() {
-    let args = policy();
+    let args = bwrap_args();
     assert_eq!(
         args[..7],
         ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
@@ -75,7 +75,7 @@ fn the_root_is_read_only_with_a_fresh_dev_and_proc() {
 
 #[test]
 fn nothing_is_mounted_inside_proc_and_no_flag_breaks_a_nested_sandbox() {
-    let args = policy();
+    let args = bwrap_args();
     assert!(
         !args
             .iter()
@@ -94,7 +94,7 @@ fn nothing_is_mounted_inside_proc_and_no_flag_breaks_a_nested_sandbox() {
 
 #[test]
 fn home_is_a_private_tmpfs_with_only_the_allowlist_bound_back_read_only() {
-    let args = policy();
+    let args = bwrap_args();
     at(&args, &["--tmpfs", HOME]);
     for path in [
         "/home/dev/.gitconfig",
@@ -116,7 +116,7 @@ fn home_is_a_private_tmpfs_with_only_the_allowlist_bound_back_read_only() {
 
 #[test]
 fn the_worktree_its_subagent_worktrees_and_the_git_common_dir_are_writable() {
-    let args = policy();
+    let args = bwrap_args();
     at(&args, &["--ro-bind", REPO, REPO]);
     for path in [WORKTREE, SUBAGENTS, GIT] {
         assert!(at(&args, &writable(path)) > at(&args, &["--ro-bind", REPO, REPO]));
@@ -137,7 +137,7 @@ fn the_worktree_its_subagent_worktrees_and_the_git_common_dir_are_writable() {
 
 #[test]
 fn git_hooks_and_config_and_the_agents_carve_outs_stay_read_only() {
-    let args = policy();
+    let args = bwrap_args();
     let git_writable = at(&args, &writable(GIT));
     assert!(at(&args, &carved("/home/dev/shop/.git/hooks")) > git_writable);
     assert!(at(&args, &carved("/home/dev/shop/.git/config")) > git_writable);
@@ -152,7 +152,7 @@ fn git_hooks_and_config_and_the_agents_carve_outs_stay_read_only() {
 
 #[test]
 fn mounts_go_root_then_home_then_allowlist_then_writable_then_carve_outs_then_masks() {
-    let args = policy();
+    let args = bwrap_args();
     let order = [
         at(&args, &["--ro-bind", "/", "/"]),
         at(&args, &["--tmpfs", HOME]),
@@ -166,20 +166,20 @@ fn mounts_go_root_then_home_then_allowlist_then_writable_then_carve_outs_then_ma
 
 #[test]
 fn tmp_is_the_sessions_own_dir_and_tmpdir_points_at_it() {
-    let args = policy();
+    let args = bwrap_args();
     at(&args, &["--bind", TMP, "/tmp"]);
     at(&args, &["--setenv", "TMPDIR", "/tmp"]);
 }
 
 #[test]
 fn the_runtime_dir_is_private_and_holds_only_the_holder_socket() {
-    let args = policy();
+    let args = bwrap_args();
     assert!(at(&args, &writable(SOCKET)) > at(&args, &["--tmpfs", RUNTIME]));
 }
 
 #[test]
 fn without_a_runtime_dir_the_holder_socket_is_still_bound_in() {
-    let args = sandbox_policy(
+    let args = sandbox_args(
         &SandboxLayout {
             runtime_dir: None,
             ..layout()
@@ -192,7 +192,7 @@ fn without_a_runtime_dir_the_holder_socket_is_still_bound_in() {
 
 #[test]
 fn agent_forwarding_and_desktop_sessions_are_unset_and_the_agents_env_is_set() {
-    let args = policy();
+    let args = bwrap_args();
     for var in [
         "SSH_AUTH_SOCK",
         "DISPLAY",
@@ -206,13 +206,13 @@ fn agent_forwarding_and_desktop_sessions_are_unset_and_the_agents_env_is_set() {
 
 #[test]
 fn the_agent_starts_in_its_worktree() {
-    let args = policy();
+    let args = bwrap_args();
     at(&args, &["--chdir", WORKTREE]);
 }
 
 #[test]
 fn other_homes_are_hidden() {
-    let args = policy();
+    let args = bwrap_args();
     assert!(at(&args, &["--tmpfs", "/home/other"]) > at(&args, &writable(WORKTREE)));
 }
 
@@ -220,7 +220,7 @@ fn other_homes_are_hidden() {
 fn paths_bound_inside_a_hidden_dir_come_back_after_it_is_masked() {
     let repo = "/mnt/data/shop";
     let worktree = "/mnt/data/shop/.orchestrator/worktrees/fix";
-    let args = sandbox_policy(
+    let args = sandbox_args(
         &SandboxLayout {
             main_checkout: repo.into(),
             worktree: worktree.into(),

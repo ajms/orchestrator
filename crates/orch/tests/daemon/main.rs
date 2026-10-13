@@ -1,4 +1,6 @@
 mod broker;
+#[path = "../shared/bwrap.rs"]
+mod bwrap;
 mod cli;
 mod clipboard;
 mod common;

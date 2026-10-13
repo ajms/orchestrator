@@ -95,6 +95,7 @@ pub(crate) struct Live {
     pub(crate) recheck: Recheck,
     pub(crate) launching: bool,
     pub(crate) sandboxed: bool,
+    pub(crate) preset_sandboxed: bool,
     pub(crate) repo_missing: bool,
     pub(crate) transcripts: Option<Box<dyn SubagentTranscripts>>,
     end_noticed: bool,
@@ -208,6 +209,7 @@ impl Live {
             recheck: Recheck::default(),
             launching: false,
             sandboxed: false,
+            preset_sandboxed: true,
             repo_missing: false,
             transcripts,
             end_noticed: false,
@@ -356,6 +358,10 @@ impl Live {
             setup_output: self.setup_output.clone(),
             error: self.last_error.clone(),
             holder_pid: self.holder.as_ref().map(|link| link.pid),
+            unsandboxed: match self.holder {
+                Some(_) => !self.sandboxed,
+                None => !self.preset_sandboxed,
+            },
             guards_enabled: record.guards_enabled,
             guard_prompts: self
                 .prompts

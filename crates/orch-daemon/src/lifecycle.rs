@@ -218,6 +218,7 @@ impl Daemon {
             .repo(root.path(), approval.as_ref())
             .map_err(refused)?;
         let preset = select_preset(root.path(), &config, create.preset.as_deref())?;
+        let preset_sandboxed = preset.sandboxed();
         if config.setup_script().is_err() {
             return Err(untrusted(root.path(), &config));
         }
@@ -292,7 +293,9 @@ impl Daemon {
         if let Err(err) = written {
             eprintln!("orch daemon: storing the prompt of {}: {err}", id.as_str());
         }
-        Ok(Live::new(record, repo.path, adapter))
+        let mut live = Live::new(record, repo.path, adapter);
+        live.preset_sandboxed = preset_sandboxed;
+        Ok(live)
     }
 
     pub(crate) async fn check_launch(
@@ -414,6 +417,7 @@ impl Daemon {
         let mut restart = false;
         let mut replaced = None;
         self.update(id, |live| {
+            live.preset_sandboxed = preset.sandboxed();
             live.record.preset = preset.name;
             live.record.last_mode = None;
             live.status.forget_permission_mode();
@@ -479,6 +483,7 @@ impl Daemon {
                 };
                 let _ = self.update(id, |live| {
                     live.adapter = launch.adapter;
+                    live.preset_sandboxed = launch.sandboxed;
                     Ok(())
                 });
                 match sandbox {
@@ -521,12 +526,8 @@ impl Daemon {
         let (record, repo, adapter) = (record.clone(), repo.to_path_buf(), adapter.clone());
         tokio::task::spawn_blocking(move || {
             let warning = daemon.probe_sandbox(Some(&record), &repo, adapter.as_ref())?;
-            let (policy, env) = daemon.sandbox_policy(&record, &repo, adapter.as_ref())?;
-            Ok(Some(SandboxLaunch {
-                policy,
-                warning,
-                env,
-            }))
+            let (args, env) = daemon.sandbox_args(&record, &repo, adapter.as_ref())?;
+            Ok(Some(SandboxLaunch { args, warning, env }))
         })
         .await
         .map_err(|err| err.to_string())?
@@ -591,14 +592,9 @@ impl Daemon {
                 .arg(block.size.to_string());
         }
         let mut broker_env = Vec::new();
-        if let Some(SandboxLaunch {
-            policy,
-            warning,
-            env,
-        }) = sandbox
-        {
-            let policy = serde_json::to_string(&policy).map_err(|err| err.to_string())?;
-            command.arg("--sandbox").arg(policy);
+        if let Some(SandboxLaunch { args, warning, env }) = sandbox {
+            let args = serde_json::to_string(&args).map_err(|err| err.to_string())?;
+            command.arg("--sandbox").arg(args);
             if let Some(warning) = warning {
                 command.arg("--warning").arg(warning);
             }
@@ -682,6 +678,12 @@ impl Daemon {
         suspended
     }
 
+    pub(crate) async fn preset_sandboxed(&self, repo: &Path, preset: &str) -> bool {
+        self.repo_config(repo).await.map_or(true, |config| {
+            select_preset(repo, &config, Some(preset)).map_or(true, |preset| preset.sandboxed())
+        })
+    }
+
     pub(crate) async fn repo_adapter(&self, repo: &Path) -> Adapter {
         match self.repo_config(repo).await {
             Ok(config) => config
@@ -713,7 +715,9 @@ impl Daemon {
             };
             let adapter = self.repo_adapter(&repo.path).await;
             let id = record.id.clone();
+            let preset_sandboxed = self.preset_sandboxed(&repo.path, &record.preset).await;
             let mut live = Live::new(record, repo.path.clone(), adapter);
+            live.preset_sandboxed = preset_sandboxed;
             live.setup_output = self.read_setup_log(&id).await;
             known.push((id, live.status.phase()));
             self.lock().insert(live);
@@ -723,8 +727,8 @@ impl Daemon {
 }
 
 struct SandboxLaunch {
-    policy: Vec<String>,
-    warning: Option<String>,
+    args: Vec<String>,
+    warning: Option<crate::sandbox::SandboxWarning>,
     env: Vec<(String, String)>,
 }
 

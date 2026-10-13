@@ -25,6 +25,7 @@ const UNSET: [&str; 4] = [
     "DBUS_SESSION_BUS_ADDRESS",
 ];
 const SANDBOX_TMP: &str = "/tmp";
+pub const BWRAP: &str = "bwrap";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SandboxNeeds {
@@ -117,7 +118,7 @@ pub fn sandbox_carve_outs(
     agents.chain(git).collect()
 }
 
-pub fn sandbox_policy(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String> {
+pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String> {
     let mut mounts = vec![Mount {
         kind: Kind::Bind,
         source: layout.tmp.clone(),

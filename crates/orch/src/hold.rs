@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::Args;
 use orch_config::PortBlock;
 use orch_core::SessionId;
-use orch_holder::{HoldConfig, Size, default_runtime_dir, socket_path};
+use orch_holder::{HoldConfig, HoldSandbox, Size, default_runtime_dir, socket_path};
 
 #[derive(Args)]
 pub struct HoldArgs {
@@ -15,8 +15,8 @@ pub struct HoldArgs {
     runtime_dir: Option<PathBuf>,
     #[arg(long)]
     cwd: Option<PathBuf>,
-    #[arg(long, value_parser = parse_policy)]
-    sandbox: Option<Policy>,
+    #[arg(long, value_parser = parse_sandbox_args)]
+    sandbox: Option<SandboxArgs>,
     #[arg(long, requires = "sandbox")]
     warning: Option<String>,
     #[arg(long = "env", value_parser = parse_env)]
@@ -46,11 +46,11 @@ fn parse_session(id: &str) -> Result<SessionId, String> {
 }
 
 #[derive(Clone)]
-struct Policy(Vec<String>);
+struct SandboxArgs(Vec<String>);
 
-fn parse_policy(json: &str) -> Result<Policy, String> {
+fn parse_sandbox_args(json: &str) -> Result<SandboxArgs, String> {
     serde_json::from_str(json)
-        .map(Policy)
+        .map(SandboxArgs)
         .map_err(|err| format!("expected a JSON list of bwrap args: {err}"))
 }
 
@@ -71,8 +71,10 @@ pub fn run(args: HoldArgs) -> ExitCode {
     };
     let socket = socket_path(&runtime_dir, &args.session);
     let mut config = HoldConfig::new(args.session, socket, cwd, args.argv);
-    config.sandbox = args.sandbox.map(|Policy(args)| args);
-    config.warning = args.warning;
+    config.sandbox = args.sandbox.map(|SandboxArgs(sandbox_args)| HoldSandbox {
+        args: sandbox_args,
+        warning: args.warning,
+    });
     config.env = args.env;
     config.base = args.base;
     config.port_block = args

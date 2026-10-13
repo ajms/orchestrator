@@ -9,7 +9,7 @@ use orch_holder::{BrokerReply, BrokerRequest, GuardId, RefUpdate, RemoteRef, ToH
 use orch_store::SessionRecord;
 use tokio::sync::oneshot;
 
-use crate::broker_gh::{GitHubRepo, Limits, PrChange, gh_call};
+use crate::broker_gh::{GitHubRepo, Limits, PrChange, gh_call, not_this_sessions_pr};
 use crate::lifecycle::{select_preset, with_git};
 use crate::pr::{gh_brokered, open_pr_of, pr_number};
 use crate::state::{Daemon, PendingGuard};
@@ -229,10 +229,7 @@ impl Daemon {
                     if let PrChange::Edit { pr: Some(number) } = change
                         && open_pr_of(&repo, &record.branch).await != Some(*number)
                     {
-                        return Err(format!(
-                            "the Broker edits only this Session's PR, for {}",
-                            record.branch
-                        ));
+                        return Err(not_this_sessions_pr(&record.branch));
                     }
                     if self.change_asks(&record, &repo).await {
                         let tool = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");

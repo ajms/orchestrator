@@ -3,9 +3,6 @@ use orch_protocol::{AgentStateView as State, CreateSession, Reply, Request, Requ
 
 use crate::common::*;
 
-const PRESETS: &str =
-    "[defaults.presets.boxed]\nsandbox = true\n\n[defaults.presets.open]\nsandbox = false\n";
-
 fn refusal(reply: Result<Reply, RequestError>) -> String {
     match reply {
         Err(RequestError::Refused { message }) => message,
@@ -13,18 +10,16 @@ fn refusal(reply: Result<Reply, RequestError>) -> String {
     }
 }
 
-fn boxed(env: &Env, prompt: &str) -> CreateSession {
+fn sandboxed(env: &Env, prompt: &str) -> CreateSession {
     let repo = env.path("repos/app");
     if !repo.exists() {
         env.repo("app");
     }
-    let mut create = CreateSession::new(&repo, prompt);
-    create.preset = Some("boxed".into());
-    create
+    CreateSession::new(&repo, prompt)
 }
 
-async fn running_boxed(env: &Env, client: &mut TestClient) -> SessionId {
-    let id = client.create(boxed(env, "Boxed")).await;
+async fn running_sandboxed(env: &Env, client: &mut TestClient) -> SessionId {
+    let id = client.create(sandboxed(env, "Boxed")).await;
     client
         .until(&id, "running", |view| view.agent.is_some())
         .await;
@@ -41,21 +36,20 @@ async fn set_preset(client: &mut TestClient, id: &SessionId, preset: &str) {
     assert_eq!(reply, Ok(Reply::Done));
 }
 
-fn sandboxed_env() -> Env {
+fn fake_sandbox_env() -> Env {
     let env = Env::new();
-    env.write_config(PRESETS);
-    env.fake_bwrap();
+    env.write_config(OPEN_PRESET);
     env
 }
 
 #[tokio::test]
 async fn a_new_session_is_refused_before_its_worktree_when_the_sandbox_cannot_run() {
-    let env = sandboxed_env();
+    let env = fake_sandbox_env();
     env.bwrap_switch("outer-fails", true);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
 
-    let create = boxed(&env, "Boxed");
+    let create = sandboxed(&env, "Boxed");
     let message = refusal(client.request(Request::CreateSession(create)).await);
 
     assert!(message.starts_with("The Sandbox can't run"), "{message}");
@@ -67,10 +61,10 @@ async fn a_new_session_is_refused_before_its_worktree_when_the_sandbox_cannot_ru
 
 #[tokio::test]
 async fn resuming_into_a_sandbox_that_cannot_run_is_refused() {
-    let env = sandboxed_env();
+    let env = fake_sandbox_env();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let id = running_boxed(&env, &mut client).await;
+    let id = running_sandboxed(&env, &mut client).await;
     let mut pane = env.pane(&id, PANE).await;
     pane.type_line("exit 0").await;
     client
@@ -85,13 +79,13 @@ async fn resuming_into_a_sandbox_that_cannot_run_is_refused() {
 
 #[tokio::test]
 async fn a_relaunch_into_a_broken_sandbox_errors_and_an_opted_out_preset_recovers() {
-    let env = sandboxed_env();
+    let env = fake_sandbox_env();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (id, _pane) = idle_session(&env, &mut client, "Open").await;
+    let (id, _pane) = idle_session(&env, &mut client, "Boxed").await;
     env.bwrap_switch("outer-fails", true);
 
-    set_preset(&mut client, &id, "boxed").await;
+    set_preset(&mut client, &id, "plan").await;
     let errored = client
         .until(&id, "Errored", |view| view.agent == Some(State::Errored))
         .await;
@@ -112,11 +106,11 @@ async fn a_relaunch_into_a_broken_sandbox_errors_and_an_opted_out_preset_recover
 
 #[tokio::test]
 async fn a_broken_nested_sandbox_warns_in_the_pane_and_still_runs_the_agent() {
-    let env = sandboxed_env();
+    let env = fake_sandbox_env();
     env.bwrap_switch("nested-fails", true);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let id = running_boxed(&env, &mut client).await;
+    let id = running_sandboxed(&env, &mut client).await;
 
     let mut pane = env.pane(&id, PANE).await;
     pane.wait_for_text("Claude's own Bash sandbox won't work")
@@ -127,11 +121,11 @@ async fn a_broken_nested_sandbox_warns_in_the_pane_and_still_runs_the_agent() {
 
 #[tokio::test]
 async fn a_sandbox_that_fails_to_start_errors_the_agent_with_what_bwrap_said() {
-    let env = sandboxed_env();
+    let env = fake_sandbox_env();
     env.bwrap_switch("start-fails", true);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let id = client.create(boxed(&env, "Boxed")).await;
+    let id = client.create(sandboxed(&env, "Boxed")).await;
 
     let errored = client
         .until(&id, "Errored", |view| view.agent == Some(State::Errored))

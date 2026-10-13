@@ -1,22 +1,21 @@
 use std::io;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use orch_agent::{
-    AgentAdapter, Placeholder, SandboxFailure, SandboxLayout, SandboxNeeds, sandbox_carve_outs,
-    sandbox_policy, sandbox_refusal,
+    AgentAdapter, BWRAP, Placeholder, SandboxFailure, SandboxLayout, SandboxNeeds, sandbox_args,
+    sandbox_carve_outs, sandbox_refusal,
 };
 use orch_config::xdg;
 use orch_store::SessionRecord;
 
 use crate::agents::default_adapter;
 use crate::broker::{EnvVars, SHIMS_DIR, install_shims};
+use crate::private_dir;
 use crate::state::Daemon;
 
 const TMP_DIR: &str = "tmp";
 const ALWAYS_HIDDEN: [&str; 3] = ["/mnt", "/media", "/root"];
-const BWRAP: &str = "bwrap";
 const NESTED: [&str; 9] = [
     BWRAP,
     "--unshare-user",
@@ -29,7 +28,8 @@ const NESTED: [&str; 9] = [
     "true",
 ];
 
-pub type ProbeResult = Result<Option<String>, String>;
+pub type SandboxWarning = String;
+pub type ProbeResult = Result<Option<SandboxWarning>, String>;
 
 struct SessionPaths {
     worktree: PathBuf,
@@ -41,7 +41,7 @@ struct SessionPaths {
 }
 
 impl Daemon {
-    pub(crate) fn sandbox_policy(
+    pub(crate) fn sandbox_args(
         &self,
         record: &SessionRecord,
         repo: &Path,
@@ -52,8 +52,8 @@ impl Daemon {
         let env = install_shims(&shims, &self.config.orch_program)?;
         let mut layout = layout(paths, self.config.orch_program.clone())?;
         layout.read_only.push(shims);
-        let policy = carved_policy(&layout, &adapter.sandbox_needs(&xdg::process_env))?;
-        Ok((policy, env))
+        let args = carved_args(&layout, &adapter.sandbox_needs(&xdg::process_env))?;
+        Ok((args, env))
     }
 
     pub(crate) fn probe_sandbox(
@@ -73,7 +73,7 @@ impl Daemon {
             },
         };
         let layout = layout(paths, self.config.orch_program.clone())?;
-        probe(&carved_policy(
+        probe(&carved_args(
             &layout,
             &adapter.sandbox_needs(&xdg::process_env),
         )?)
@@ -104,10 +104,10 @@ pub fn probe_host_sandbox(orch_program: PathBuf) -> ProbeResult {
     let layout = layout(scratch.paths()?, orch_program)?;
     let mut needs = default_adapter().sandbox_needs(&xdg::process_env);
     needs.carve_outs.retain(|path| path.exists());
-    probe(&carved_policy(&layout, &needs)?)
+    probe(&carved_args(&layout, &needs)?)
 }
 
-fn carved_policy(layout: &SandboxLayout, needs: &SandboxNeeds) -> Result<Vec<String>, String> {
+fn carved_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Result<Vec<String>, String> {
     for (path, placeholder) in sandbox_carve_outs(layout, needs) {
         if path.symlink_metadata().is_ok() {
             continue;
@@ -121,28 +121,22 @@ fn carved_policy(layout: &SandboxLayout, needs: &SandboxNeeds) -> Result<Vec<Str
         };
         made.map_err(|err| format!("creating {}: {err}", path.display()))?;
     }
-    Ok(sandbox_policy(layout, needs))
+    Ok(sandbox_args(layout, needs))
 }
 
-fn probe(policy: &[String]) -> ProbeResult {
-    run_bwrap(policy, &["true"]).map_err(|failure| sandbox_refusal(&failure, sysctl))?;
-    match run_bwrap(policy, &NESTED) {
+fn probe(args: &[String]) -> ProbeResult {
+    run_bwrap(args, &["true"]).map_err(|failure| sandbox_refusal(&failure, sysctl))?;
+    match run_bwrap(args, &NESTED) {
         Ok(()) => Ok(None),
-        Err(failure) => {
-            let said = match failure {
-                SandboxFailure::Missing => "bwrap is not installed".into(),
-                SandboxFailure::Failed(stderr) => stderr,
-            };
-            Ok(Some(format!(
-                "The Sandbox can't nest, so Claude's own Bash sandbox won't work here: {said}"
-            )))
-        }
+        Err(failure) => Ok(Some(format!(
+            "The Sandbox can't nest, so Claude's own Bash sandbox won't work here: {failure}"
+        ))),
     }
 }
 
-fn run_bwrap(policy: &[String], command: &[&str]) -> Result<(), SandboxFailure> {
+fn run_bwrap(args: &[String], command: &[&str]) -> Result<(), SandboxFailure> {
     let output = Command::new(BWRAP)
-        .args(policy)
+        .args(args)
         .arg("--")
         .args(command)
         .stdin(Stdio::null())
@@ -190,11 +184,7 @@ fn git_common_dir(repo: &Path) -> Result<PathBuf, String> {
 
 fn private_dirs(dirs: &[&Path]) -> Result<(), String> {
     for dir in dirs {
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)
-            .map_err(|err| format!("creating {}: {err}", dir.display()))?;
+        private_dir(dir).map_err(|err| format!("creating {}: {err}", dir.display()))?;
     }
     Ok(())
 }
@@ -210,10 +200,7 @@ impl Scratch {
         getrandom::fill(&mut bytes).map_err(|err| io::Error::other(err.to_string()))?;
         let name: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
         let dir = parent.join(format!("sandbox-probe-{name}"));
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&dir)?;
+        private_dir(&dir)?;
         let socket = dir.join("socket");
         std::fs::write(&socket, "")?;
         Ok(Self { dir, socket })

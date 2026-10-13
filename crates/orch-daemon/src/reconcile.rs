@@ -262,7 +262,10 @@ impl Daemon {
             .await?
             .map_err(refused)?;
         let adapter = self.repo_adapter(&repo).await;
-        self.lock().insert(Live::new(record.clone(), repo, adapter));
+        let preset_sandboxed = self.preset_sandboxed(&repo, &record.preset).await;
+        let mut live = Live::new(record.clone(), repo, adapter);
+        live.preset_sandboxed = preset_sandboxed;
+        self.lock().insert(live);
         Ok(record)
     }
 

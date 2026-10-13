@@ -27,7 +27,7 @@ impl Preset {
     }
 
     pub fn sandboxed(&self) -> bool {
-        self.sandbox.unwrap_or(false)
+        self.sandbox.unwrap_or(true)
     }
 
     pub fn loosens(&self) -> bool {

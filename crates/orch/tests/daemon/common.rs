@@ -14,6 +14,8 @@ use orch_protocol::{
 use tempfile::TempDir;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
+pub const UNSANDBOXED: &str = "[defaults]\nsandbox = false\n";
+pub const OPEN_PRESET: &str = "[defaults.presets.open]\nsandbox = false\n";
 pub const WAIT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(20);
 pub const PANE: Size = Size {
@@ -56,6 +58,7 @@ impl Env {
         }
         let env = Self { dir };
         env.write_config("");
+        env.fake_bwrap();
         env
     }
 
@@ -262,6 +265,10 @@ exec "$@"
         std::fs::write(&bwrap, script).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&bwrap, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    pub fn real_bwrap(&self) {
+        std::fs::remove_file(self.path("bin/bwrap")).unwrap();
     }
 
     pub fn bwrap_switch(&self, name: &str, on: bool) {
@@ -709,7 +716,16 @@ impl PaneView {
     }
 
     pub async fn wait_for(&mut self, what: &str, predicate: impl Fn(&Self) -> bool) {
-        let deadline = Instant::now() + WAIT;
+        self.wait_for_within(WAIT, what, predicate).await;
+    }
+
+    pub async fn wait_for_within(
+        &mut self,
+        within: Duration,
+        what: &str,
+        predicate: impl Fn(&Self) -> bool,
+    ) {
+        let deadline = Instant::now() + within;
         while !predicate(self) {
             assert!(
                 self.closed.is_none(),

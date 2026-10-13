@@ -35,6 +35,12 @@ cargo install --path crates/orch --root ~/.local   # installs ~/.local/bin/orch
 
 Make sure `~/.local/bin` is on your `PATH` (e.g. `export PATH="$HOME/.local/bin:$PATH"` in your shell profile). To upgrade, run the same command again; running Agents are not interrupted.
 
+**Upgrading to the Sandbox.** From this release every Claude Session runs in the [Sandbox](#sandbox) unless its Preset opts out. Running Agents keep running unsandboxed; each Session is sandboxed the next time its Agent starts (resume, restart or `:preset`), with no exemption for Sessions created before the upgrade. Restart the Daemon when the TUI offers it, since the old Daemon keeps spawning unsandboxed. Then:
+
+1. Run `orch doctor`. If the Sandbox can't run (no `bwrap`, user namespaces off, Ubuntu's AppArmor restriction), fix the host, or turn the Sandbox off for every Preset that doesn't say otherwise with `sandbox = false` under `[defaults]` in `~/.config/orchestrator/config.toml`. Until then, `orch` refuses to start sandboxed Agents rather than run them unsandboxed.
+2. Expect writes outside the Worktree to fail. Most visible are tool caches in `$HOME`: `~/.cargo`, `~/.rustup`, `~/.local/share/uv`, `~/.nvm` and the other toolchain dirs are read-only, so `cargo` can't download crates and `rustup`, `uv` or `nvm` can't install anything, and other caches such as `~/.cache` or `~/.npm` start empty in the Sandbox's private `$HOME` and are thrown away when the Agent stops. Fetch dependencies in the Repo's Setup script (it runs outside the Sandbox), e.g. `cargo fetch`, `npm ci` or `uv sync`, or give the Session a Preset with `sandbox = false`.
+3. `git push` and `gh` keep working through the [Broker](#broker), but only for the Session's own Branch, its own PR and reads of its Repo. Your ssh keys, `gh` token and cloud credentials are not visible inside.
+
 The Daemon starts automatically the first time you run `orch`, and exits after a few idle minutes once no Client, Holder or open PR needs it. If you'd rather have it start with your login:
 
 ```sh
@@ -178,9 +184,9 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `base` | Base branch for new Sessions; unset means origin's default branch, else the Repo's current branch |
 | `preset` | Default Preset for new Sessions (built-in default: `edits`) |
 | `review_command` | Command shown when reviewing a Session; not allowed in `.orchestrator.toml` |
-| `sandbox` | Sandbox for Presets that don't set `sandbox` themselves (built-in default: `false` for now); not allowed in `.orchestrator.toml` |
+| `sandbox` | The global switch: whether Presets that don't set `sandbox` themselves run in the Sandbox (default `true`); not allowed in `.orchestrator.toml` |
 | `[agent]` | `name` (default `claude`), `binary`, `args` |
-| `[presets.<name>]` | `mode`, `allow`, `deny`, `sandbox` (run the Agent in the Sandbox; default `false` for now) |
+| `[presets.<name>]` | `mode`, `allow`, `deny`, `sandbox` (run the Agent in the Sandbox; default `true`) |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
 
 **Setup and Teardown scripts** run with `sh -c` in the Worktree, with stdin closed. Setup output streams into the TUI; a non-zero exit puts the Session in *Setup failed*. Both scripts get these variables:
@@ -191,17 +197,35 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `ORCH_WORKTREE` | Absolute path of the Worktree |
 | `ORCH_PORT_BASE` | First port of the Session's block (see `ports`), e.g. `PORT=$((ORCH_PORT_BASE + 1))` |
 
-**Sandbox:** a Preset with `sandbox = true` runs its Agent as `bwrap <policy> -- claude …` (needs [bubblewrap](https://github.com/containers/bubblewrap) 0.3.3 or later). Inside, `$HOME` is a private tmpfs with only Claude's own paths, your git config and common toolchains (`~/.cargo`, `~/.rustup`, `~/.nvm`, …) bound back read-only, so ssh keys, the `gh` token and cloud credentials are invisible. `~/.claude` and `~/.claude.json` stay writable, except Claude's settings, hooks, skills, agents, commands, rules, plugins and `CLAUDE.md`. The rest of the system is read-only, and other homes, `/mnt` and `/media` are hidden. The Agent can write its Worktree, its Subagent worktrees and the git common dir, but not `.git/hooks` or `.git/config`. `/tmp` is the Session's own directory, removed when the Session is Landed or Discarded. In a sandboxed Session the Guard for writes outside the Worktree no longer asks, and the git Guards stay.
+State lives in `~/.local/state/orchestrator/state.db`. Runtime sockets live under `$XDG_RUNTIME_DIR/orchestrator`.
 
-The Sandbox fails closed: before each sandboxed spawn, `orch` runs the Session's policy around `true`, and if that fails, it never runs the Agent unsandboxed. A new Session, a resume and *start anyway* are refused, and a restart leaves the Agent Errored. The message names the cause (`bwrap` missing, `kernel.unprivileged_userns_clone` or `user.max_user_namespaces` at 0, or Ubuntu's AppArmor restriction) and the ways out: fix the host, set `sandbox = false` under `[defaults]` in your global config, or `:preset` to a Preset with `sandbox = false`. A Preset's own `sandbox` setting wins over `[defaults] sandbox`. `orch` also runs a nested `bwrap` inside the policy; if that fails, the Agent still starts and its pane warns that Claude's own Bash sandbox won't work. If `bwrap` fails while starting the Agent, the error reads "The Sandbox failed to start: …".
+### Sandbox
 
-**Broker:** a sandboxed Agent gets none of your GitHub credentials, so `orch` pushes for it ([ADR 0010](docs/adr/0010-sandboxed-agents-reach-github-through-the-broker.md)). Inside the Sandbox, origin's push URL is `orch::origin`, which a `git-remote-orch` helper on `PATH` forwards over the Session's Holder socket to the Daemon, so the Agent keeps typing `git push`. The Daemon pushes from the main checkout with your credentials, but only this Session's Branch, to origin under the same name. `--force-with-lease` works; a plain `--force`, other branches, tags, deletions, `--all`, `--mirror` and the Base branch are refused with a reason. It runs with `--no-verify`, `core.hooksPath=/dev/null`, and `core.sshCommand` taken from your global git config (or `ssh`), so nothing the Agent plants in the repo runs. With the `plan` and `ask` Presets (or any Preset whose `mode` is `plan` or `default`) each push asks first, like a Guard; *allow for Session* stops the asking. Every brokered push, and every refusal, shows in the Session's pane. Unsandboxed Sessions push with your own credentials as before.
+Every Preset, built-in or your own, runs its Agent in the Sandbox unless it sets `sandbox = false` ([ADR 0008](docs/adr/0008-sandbox-on-by-default.md)). A sandboxed Agent runs as `bwrap <Sandbox args> -- claude …` (needs [bubblewrap](https://github.com/containers/bubblewrap) 0.3.3 or later), and so does everything it runs. Drafts and the Setup and Teardown scripts are not sandboxed. The setting applies the next time the Agent starts, and `:preset` restarts it. Sandboxed is the normal case, so only a Session whose Agent runs unsandboxed is marked, with `unsandboxed` in its sidebar row and pane title. While the Agent's Holder runs, the marker shows how that Agent was started; once the Holder is gone, it shows whether the Session's Preset would run it unsandboxed. A write the Sandbox blocks shows only as the Agent's own error.
+
+Inside, `$HOME` is a private tmpfs with only an allowlist bound back ([ADR 0009](docs/adr/0009-sandbox-home-is-an-allowlist.md)), so ssh keys, the `gh` token, cloud credentials and keyrings are invisible without you listing them. The allowlist is Claude's own paths (`~/.claude`, `~/.claude.json`, and read-only `~/.local/share/claude` and `~/.local/bin`), your git config (`~/.gitconfig`, `~/.config/git`) and these toolchains, read-only: `~/.cargo`, `~/.rustup`, `~/.local/share/uv`, `~/.nvm`, `~/.pyenv`, `~/.rbenv`, `~/.volta`, `~/.bun`, `~/.deno`, `~/.local/share/mise`, `~/.local/share/fnm`, `~/.asdf`, `~/.sdkman` and `~/go`. Anything else written under `$HOME` lands in the tmpfs and is gone when the Agent stops. `~/.claude` and `~/.claude.json` stay writable, except Claude's settings, hooks, skills, agents, commands, rules, plugins and `CLAUDE.md`. The rest of the system is read-only, and other homes, `/mnt` and `/media` are hidden. The Agent can write its Worktree, its Subagent worktrees and the git common dir, but not `.git/hooks` or `.git/config`. If one of these read-only paths in `~/.claude` or `.git` doesn't exist yet, `orch` creates it empty before the Agent starts, so the Agent can't plant it. `/tmp` is the Session's own directory, removed when the Session is Landed or Discarded. In a sandboxed Session the Guard for writes outside the Worktree no longer asks, and the git Guards stay. The network stays open.
+
+**Opting out:** give a Preset `sandbox = false` and pick it with `:preset open`, or make it the default with `preset = "open"`:
+
+```toml
+[defaults.presets.open]
+mode = "edits"
+sandbox = false
+```
+
+In `.orchestrator.toml` that opt-out needs your Trust. `sandbox = false` under `[defaults]` in your global config is the global switch, for hosts where bubblewrap can't run: it turns the Sandbox off for every Preset that doesn't set `sandbox` itself.
+
+The Sandbox fails closed: before each sandboxed spawn, `orch` runs `bwrap` with the Session's Sandbox args around `true`, and if that fails, it never runs the Agent unsandboxed. A new Session, a resume and *start anyway* are refused, and a restart leaves the Agent Errored. The message names the cause (`bwrap` missing, `kernel.unprivileged_userns_clone` or `user.max_user_namespaces` at 0, or Ubuntu's AppArmor restriction) and the ways out: fix the host, set `sandbox = false` under `[defaults]` in your global config, or `:preset` to a Preset with `sandbox = false`. A Preset's own `sandbox` setting wins over `[defaults] sandbox`. `orch` also runs a nested `bwrap` inside that Sandbox; if that fails, the Agent still starts and its pane warns that Claude's own Bash sandbox won't work. If `bwrap` fails while starting the Agent, the error reads "The Sandbox failed to start: …".
+
+### Broker
+
+A sandboxed Agent gets none of your GitHub credentials, so `orch` pushes for it ([ADR 0010](docs/adr/0010-sandboxed-agents-reach-github-through-the-broker.md)). Inside the Sandbox, origin's push URL is `orch::origin`, which a `git-remote-orch` helper on `PATH` forwards over the Session's Holder socket to the Daemon, so the Agent keeps typing `git push`. The Daemon pushes from the main checkout with your credentials, but only this Session's Branch, to origin under the same name. `--force-with-lease` works; a plain `--force`, other branches, tags, deletions, `--all`, `--mirror` and the Base branch are refused with a reason. It runs with `--no-verify`, `core.hooksPath=/dev/null`, and `core.sshCommand` taken from your global git config (or `ssh`), so nothing the Agent plants in the repo runs. With the `plan` and `ask` Presets (or any Preset whose `mode` is `plan` or `default`) each push asks first, like a Guard; *allow for Session* stops the asking. Every brokered push, and every refusal, shows in the Session's pane. Unsandboxed Sessions push with your own credentials as before.
 
 A `gh` shim on the Sandbox's `PATH` forwards `gh` the same way, for this Repo's GitHub remote only (origin, passed to `gh` as `--repo`). Reads go through: `issue view/list`, `pr view/list/diff/checks`, `run view/list`, and GET-only `gh api` under `repos/<owner>/<repo>`. The Agent can also `pr create` for its own Branch and `pr edit` its title and body or `pr ready [--undo]` its draft state; the base is always the Session's Base branch, and `--body-file` is read inside the Sandbox. A PR the Agent creates is followed like one from `:land`: the Session moves to PR open and `orch` polls it. The Daemon rebuilds every call from an allowlist of flags, so anything else (merge, close, comment, labels, another repo, a changed base, `--web`, `gh api` with `-X POST`, `-f` or `--input`, or a jq query that reads the environment) fails with a reason. PR changes ask first under `plan` and `ask`, like a push; reads never ask. Each call shows in the pane.
 
-**Trust:** scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets (including a Preset with `sandbox = false`) that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
+### Trust
 
-State lives in `~/.local/state/orchestrator/state.db`. Runtime sockets live under `$XDG_RUNTIME_DIR/orchestrator`.
+Scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets (including a Preset with `sandbox = false`) that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
 
 ## Development
 
@@ -223,6 +247,8 @@ To let CI run on the release PR, add a `RELEASE_PLZ_TOKEN` secret (a fine-graine
 
 - [ADR 0001](docs/adr/0001-embed-agent-tui.md): embed the Agent's own TUI instead of rendering the conversation.
 - [ADR 0002](docs/adr/0002-daemon-with-session-holders.md): a Daemon plus one Holder per Session, not tmux.
+- [ADR 0008](docs/adr/0008-sandbox-on-by-default.md): every Preset runs its Agent in the Sandbox unless it opts out.
+- [ADR 0009](docs/adr/0009-sandbox-home-is-an-allowlist.md): the Sandbox's `$HOME` is an allowlist.
 - [ADR 0010](docs/adr/0010-sandboxed-agents-reach-github-through-the-broker.md): sandboxed Agents reach GitHub through the Broker.
 - [Agent adapters](docs/agent-adapters.md): the adapter trait, capabilities, and a checklist for adding another Agent.
 

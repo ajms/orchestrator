@@ -201,7 +201,7 @@ async fn an_idle_agent_is_still_idle_after_a_daemon_restart_without_new_events()
 async fn resuming_after_a_failed_launch_starts_fresh_with_the_initial_prompt() {
     let env = Env::new();
     let repo = env.repo("app");
-    env.write_config_with_agent("", "/nonexistent/agent");
+    env.write_config_with_agent(UNSANDBOXED, "/nonexistent/agent");
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = client.create(CreateSession::new(&repo, "Try again")).await;
@@ -211,7 +211,7 @@ async fn resuming_after_a_failed_launch_starts_fresh_with_the_initial_prompt() {
     assert_eq!(failed.agent, Some(State::Errored));
     assert_eq!(failed.holder_pid, None);
 
-    env.write_config("");
+    env.write_config(UNSANDBOXED);
     let resumed = client
         .request(Request::Resume {
             session: id.clone(),

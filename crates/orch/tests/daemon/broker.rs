@@ -7,18 +7,13 @@ use orch_protocol::{
 
 use crate::common::*;
 
-const BOXED: &str = "[defaults.presets.boxed]\nsandbox = true\n";
-const ALL_SANDBOXED: &str = "[defaults]\nsandbox = true\n\n";
-
 struct Pushing {
     env: Env,
     remote: PathBuf,
 }
 
-fn pushing(extra: &str) -> Pushing {
+fn pushing() -> Pushing {
     let env = Env::new();
-    env.write_config(&format!("{extra}{BOXED}"));
-    env.fake_bwrap();
     let repo = env.repo("app");
     let remote = env.remote(&repo);
     Pushing { env, remote }
@@ -77,10 +72,10 @@ fn remote_tip(remote: &std::path::Path, branch: &str) -> Option<String> {
 
 #[tokio::test]
 async fn a_sandboxed_agent_pushes_its_own_branch_through_the_broker() {
-    let Pushing { env, remote } = pushing("");
+    let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
     commit(&view.worktree, "feature.rs", "feature\n");
 
     let push = format!("git push -u origin {}", view.branch);
@@ -94,10 +89,10 @@ async fn a_sandboxed_agent_pushes_its_own_branch_through_the_broker() {
 
 #[tokio::test]
 async fn a_rewritten_branch_goes_through_with_a_lease_but_not_with_a_plain_force() {
-    let Pushing { env, remote } = pushing("");
+    let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
     commit(&view.worktree, "feature.rs", "feature\n");
     let push = format!("git push -u origin {}", view.branch);
     assert_eq!(shell(&mut pane, &push).await, "exit 0");
@@ -120,10 +115,10 @@ async fn a_rewritten_branch_goes_through_with_a_lease_but_not_with_a_plain_force
 
 #[tokio::test]
 async fn other_refs_tags_and_the_base_branch_are_refused() {
-    let Pushing { env, remote } = pushing("");
+    let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
     commit(&view.worktree, "feature.rs", "feature\n");
     let main_before = remote_tip(&remote, "main");
 
@@ -149,7 +144,7 @@ async fn other_refs_tags_and_the_base_branch_are_refused() {
 
 #[tokio::test]
 async fn hooks_and_an_ssh_command_planted_in_the_repo_do_not_run_in_the_daemon() {
-    let Pushing { env, remote } = pushing("");
+    let Pushing { env, remote } = pushing();
     let users_ssh = script(env.path("user/ssh"), r#"exec sh -c "$2""#);
     let global = env.path("user/gitconfig");
     let user_config = format!(
@@ -166,7 +161,7 @@ async fn hooks_and_an_ssh_command_planted_in_the_repo_do_not_run_in_the_daemon()
         .env_remove("GIT_SSH_COMMAND");
     let _daemon = env.spawn_daemon(&mut daemon_command).await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
     commit(&view.worktree, "feature.rs", "feature\n");
 
     let ran = env.path("planted-ran");
@@ -203,7 +198,7 @@ async fn hooks_and_an_ssh_command_planted_in_the_repo_do_not_run_in_the_daemon()
 
 #[tokio::test]
 async fn git_config_the_user_passes_in_the_environment_still_reaches_the_agent() {
-    let Pushing { env, .. } = pushing("");
+    let Pushing { env, .. } = pushing();
     let mut daemon_command = env.daemon_command(std::time::Duration::from_secs(600));
     daemon_command
         .env("GIT_CONFIG_COUNT", "1")
@@ -211,7 +206,7 @@ async fn git_config_the_user_passes_in_the_environment_still_reaches_the_agent()
         .env("GIT_CONFIG_VALUE_0", "From The User");
     let _daemon = env.spawn_daemon(&mut daemon_command).await;
     let mut client = env.client().await;
-    let (_, _, mut pane) = session(&env, &mut client, "boxed").await;
+    let (_, _, mut pane) = session(&env, &mut client, "inherit").await;
 
     let check = r#"test "$(git config user.name)" = "From The User""#;
     assert_eq!(shell(&mut pane, check).await, "exit 0");
@@ -254,7 +249,7 @@ async fn answer_broker(
 
 #[tokio::test]
 async fn an_ask_session_prompts_before_each_push_and_a_denial_pushes_nothing() {
-    let Pushing { env, remote } = pushing(ALL_SANDBOXED);
+    let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let (id, view, mut pane) = session(&env, &mut client, "ask").await;
@@ -275,7 +270,7 @@ async fn an_ask_session_prompts_before_each_push_and_a_denial_pushes_nothing() {
 
 #[tokio::test]
 async fn a_plan_session_prompts_before_a_push() {
-    let Pushing { env, remote } = pushing(ALL_SANDBOXED);
+    let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let (id, view, mut pane) = session(&env, &mut client, "plan").await;
@@ -290,10 +285,11 @@ async fn a_plan_session_prompts_before_a_push() {
 
 #[tokio::test]
 async fn an_unsandboxed_agent_pushes_straight_to_origin_as_before() {
-    let Pushing { env, remote } = pushing("");
+    let Pushing { env, remote } = pushing();
+    env.write_config(OPEN_PRESET);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (_, view, mut pane) = session(&env, &mut client, "open").await;
     commit(&view.worktree, "feature.rs", "feature\n");
 
     let push = "git push origin HEAD:refs/heads/other";
@@ -305,10 +301,8 @@ async fn an_unsandboxed_agent_pushes_straight_to_origin_as_before() {
     assert!(!pane.text().contains("Broker"));
 }
 
-fn on_github(extra: &str) -> Env {
+fn on_github() -> Env {
     let env = Env::new();
-    env.write_config(&format!("{extra}{BOXED}"));
-    env.fake_bwrap();
     env.fake_gh();
     let repo = env.repo("app");
     git(
@@ -336,10 +330,10 @@ fn args(line: &str) -> Vec<String> {
 
 #[tokio::test]
 async fn a_sandboxed_agent_reads_its_repo_through_gh() {
-    let env = on_github("");
+    let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
     let out = view.worktree.join("out");
 
     let read = format!("gh issue view 7 --json title -q .title > {}", out.display());
@@ -356,10 +350,10 @@ async fn a_sandboxed_agent_reads_its_repo_through_gh() {
 
 #[tokio::test]
 async fn a_sandboxed_agent_creates_and_edits_its_own_pr_with_the_base_fixed() {
-    let env = on_github("");
+    let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
     let (body, out) = (view.worktree.join("body.md"), view.worktree.join("out"));
     std::fs::write(&body, "Why").unwrap();
     let branch = view.branch.as_str();
@@ -396,10 +390,10 @@ async fn a_sandboxed_agent_creates_and_edits_its_own_pr_with_the_base_fixed() {
 
 #[tokio::test]
 async fn merges_other_repos_and_a_changed_base_are_refused_with_a_message() {
-    let env = on_github("");
+    let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
     let err = view.worktree.join("err");
 
     for (call, says) in [
@@ -429,7 +423,7 @@ async fn merges_other_repos_and_a_changed_base_are_refused_with_a_message() {
 
 #[tokio::test]
 async fn an_ask_session_prompts_before_a_pr_change_but_never_for_a_read() {
-    let env = on_github(ALL_SANDBOXED);
+    let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let (id, _, mut pane) = session(&env, &mut client, "ask").await;
@@ -452,7 +446,7 @@ async fn an_ask_session_prompts_before_a_pr_change_but_never_for_a_read() {
 
 #[tokio::test]
 async fn a_plan_session_prompts_before_a_pr_edit() {
-    let env = on_github(ALL_SANDBOXED);
+    let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let (id, _, mut pane) = session(&env, &mut client, "plan").await;
@@ -466,10 +460,10 @@ async fn a_plan_session_prompts_before_a_pr_edit() {
 
 #[tokio::test]
 async fn a_pr_the_agent_creates_puts_the_session_in_pr_open() {
-    let env = on_github("");
+    let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (id, _, mut pane) = session(&env, &mut client, "boxed").await;
+    let (id, _, mut pane) = session(&env, &mut client, "inherit").await;
 
     assert_eq!(
         shell(&mut pane, "gh pr create -t Title -b Why").await,

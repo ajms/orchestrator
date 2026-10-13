@@ -1,3 +1,5 @@
+#[path = "../shared/bwrap.rs"]
+mod bwrap;
 mod clipboard;
 mod common;
 mod events;

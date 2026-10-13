@@ -1,29 +1,9 @@
 use orch_holder::ToHolder;
 
+use crate::bwrap::bwrap_runs;
 use crate::common::*;
 
-const MINIMAL_POLICY: &str = r#"["--ro-bind","/","/","--dev","/dev","--proc","/proc"]"#;
-
-fn bwrap_runs() -> bool {
-    let runs = std::process::Command::new("bwrap")
-        .args([
-            "--ro-bind",
-            "/",
-            "/",
-            "--dev",
-            "/dev",
-            "--proc",
-            "/proc",
-            "true",
-        ])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if !runs {
-        eprintln!("skipped: bubblewrap cannot run here");
-    }
-    runs
-}
+const MINIMAL_ARGS: &str = r#"["--ro-bind","/","/","--dev","/dev","--proc","/proc"]"#;
 
 #[tokio::test]
 async fn a_sandboxed_agent_says_so_and_still_reaches_its_holder() {
@@ -34,7 +14,7 @@ async fn a_sandboxed_agent_says_so_and_still_reaches_its_holder() {
     let held = sandbox.hold_with(
         "s1",
         "print boxed\nhook {\"hook_event_name\":\"Stop\"}\n",
-        &["--sandbox", MINIMAL_POLICY],
+        &["--sandbox", MINIMAL_ARGS],
     );
     let (mut client, hello) = held.attach().await;
     assert!(hello.sandboxed);
@@ -50,7 +30,7 @@ async fn stopping_a_sandboxed_agent_lets_it_exit_cleanly() {
         return;
     }
     let sandbox = Sandbox::new();
-    let held = sandbox.hold_with("s1", "exit-on-hangup\n", &["--sandbox", MINIMAL_POLICY]);
+    let held = sandbox.hold_with("s1", "exit-on-hangup\n", &["--sandbox", MINIMAL_ARGS]);
     let (mut client, _) = held.attach().await;
     wait_for_screen(&mut client, |text| text.contains("hangup handled")).await;
 
@@ -75,7 +55,7 @@ async fn a_sandbox_that_cannot_start_is_told_apart_from_an_agent_crash() {
     }
     let sandbox = Sandbox::new();
     let missing = sandbox.path("gone");
-    let policy = serde_json::to_string(&[
+    let args = serde_json::to_string(&[
         "--ro-bind",
         "/",
         "/",
@@ -84,7 +64,7 @@ async fn a_sandbox_that_cannot_start_is_told_apart_from_an_agent_crash() {
         "/mnt",
     ])
     .unwrap();
-    let held = sandbox.hold_with("s1", "", &["--sandbox", &policy]);
+    let held = sandbox.hold_with("s1", "", &["--sandbox", &args]);
     let (mut client, _) = held.attach().await;
 
     let exit = wait_for_exit(&mut client).await;
@@ -98,7 +78,7 @@ async fn an_agent_failing_inside_the_sandbox_is_not_a_sandbox_failure() {
         return;
     }
     let sandbox = Sandbox::new();
-    let held = sandbox.hold_with("s1", "exit 3\n", &["--sandbox", MINIMAL_POLICY]);
+    let held = sandbox.hold_with("s1", "exit 3\n", &["--sandbox", MINIMAL_ARGS]);
     let (mut client, _) = held.attach().await;
 
     let exit = wait_for_exit(&mut client).await;

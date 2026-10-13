@@ -4,32 +4,72 @@ pub(crate) struct GitHubRepo {
     name: String,
 }
 
+struct Named<'a> {
+    host: Option<&'a str>,
+    owner: &'a str,
+    name: &'a str,
+    rest: &'a str,
+}
+
+impl<'a> Named<'a> {
+    fn parse(text: &'a str) -> Option<Self> {
+        let text = text.trim().trim_end_matches('/');
+        let (host, path) = match text.split_once("://") {
+            Some((_, rest)) => rest
+                .split_once('/')
+                .map(|(host, path)| (Some(host), path))?,
+            None => match text.split_once(':') {
+                Some((host, path)) if !host.contains('/') => (Some(host), path),
+                _ => (None, text),
+            },
+        };
+        let host = host.and_then(|host| host.rsplit('@').next()?.split(':').next());
+        let mut parts = path.trim_start_matches('/').splitn(3, '/');
+        let first = parts.next()?;
+        let (host, owner) = match host {
+            None if first.contains('.') => (Some(first), parts.next()?),
+            host => (host, first),
+        };
+        let name = parts.next()?;
+        Some(Named {
+            host: host.map(|host| host.trim_start_matches("www.")),
+            owner,
+            name: name.strip_suffix(".git").unwrap_or(name),
+            rest: parts.next().unwrap_or_default(),
+        })
+    }
+
+    fn on_github(&self) -> bool {
+        self.host.is_none_or(|host| {
+            ["github.com", "ssh.github.com"]
+                .iter()
+                .any(|github| host.eq_ignore_ascii_case(github))
+        })
+    }
+
+    fn names(&self, repo: &GitHubRepo) -> bool {
+        self.on_github()
+            && self.owner.eq_ignore_ascii_case(&repo.owner)
+            && self.name.eq_ignore_ascii_case(&repo.name)
+    }
+}
+
 impl GitHubRepo {
     pub(crate) fn from_remote(url: &str) -> Option<Self> {
-        let url = url.trim().trim_end_matches('/');
-        let url = url.strip_suffix(".git").unwrap_or(url);
-        let (host, path) = match url.split_once("://") {
-            Some((_, rest)) => rest.split_once('/')?,
-            None => url.split_once(':')?,
-        };
-        let host = host.rsplit('@').next()?;
-        let host = host.split(':').next()?;
-        let on_github = ["github.com", "ssh.github.com", "www.github.com"]
-            .iter()
-            .any(|github| host.eq_ignore_ascii_case(github));
-        if host.contains('.') && !on_github {
+        let named = Named::parse(url)?;
+        let host = named.host?;
+        if host.contains('.') && !named.on_github() || !named.rest.is_empty() {
             return None;
         }
-        let (owner, name) = path.trim_start_matches('/').split_once('/')?;
         let valid = |part: &str| {
             !part.is_empty()
                 && part
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         };
-        (valid(owner) && valid(name)).then(|| GitHubRepo {
-            owner: owner.into(),
-            name: name.into(),
+        (valid(named.owner) && valid(named.name)).then(|| GitHubRepo {
+            owner: named.owner.into(),
+            name: named.name.into(),
         })
     }
 
@@ -38,28 +78,11 @@ impl GitHubRepo {
     }
 
     fn is(&self, named: &str) -> bool {
-        let named = named.trim_end_matches('/');
-        let named = named.strip_suffix(".git").unwrap_or(named);
-        let named = named
-            .split_once("://")
-            .map_or(named, |(_, rest)| rest)
-            .trim_start_matches("www.");
-        let named = named.strip_prefix("github.com/").unwrap_or(named);
-        named.eq_ignore_ascii_case(&self.slug())
+        Named::parse(named).is_some_and(|named| named.rest.is_empty() && named.names(self))
     }
 
     fn owns_url(&self, url: &str) -> bool {
-        let Some(rest) = url.split_once("://").map(|(_, rest)| rest) else {
-            return false;
-        };
-        let rest = rest.trim_start_matches("www.");
-        let Some(path) = rest.strip_prefix("github.com/") else {
-            return false;
-        };
-        let mut parts = path.splitn(3, '/');
-        let owner = parts.next().unwrap_or_default();
-        let name = parts.next().unwrap_or_default();
-        owner.eq_ignore_ascii_case(&self.owner) && name.eq_ignore_ascii_case(&self.name)
+        Named::parse(url).is_some_and(|named| named.host.is_some() && named.names(self))
     }
 }
 
@@ -396,12 +419,13 @@ fn own_pr(target: Option<String>, limits: &Limits) -> Result<Option<u64>, String
             .and_then(|(_, number)| number.parse().ok()),
         Err(_) => None,
     };
-    number.map(Some).ok_or_else(|| {
-        format!(
-            "the Broker edits only this Session's PR, for {}",
-            limits.branch
-        )
-    })
+    number
+        .map(Some)
+        .ok_or_else(|| not_this_sessions_pr(limits.branch))
+}
+
+pub(crate) fn not_this_sessions_pr(branch: &str) -> String {
+    format!("the Broker edits only this Session's PR, for {branch}")
 }
 
 fn api(args: &[String], repo: &GitHubRepo) -> Result<GhCall, String> {

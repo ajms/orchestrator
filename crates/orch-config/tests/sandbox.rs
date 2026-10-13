@@ -4,15 +4,30 @@ use common::Fixture;
 use orch_config::{PresetError, TrustItem};
 
 #[test]
-fn a_preset_runs_in_the_sandbox_only_when_it_says_so() {
+fn every_preset_runs_in_the_sandbox_unless_it_opts_out() {
     let fx = Fixture::new();
-    fx.global("[defaults.presets.boxed]\nmode = \"plan\"\nsandbox = true\n");
-    fx.repo_file("[presets.open]\nmode = \"plan\"\n");
+    fx.global(
+        "[defaults.presets.mine]\nmode = \"plan\"\n\n[defaults.presets.open]\nsandbox = false\n",
+    );
+    fx.repo_file("[presets.committed]\nmode = \"plan\"\n");
 
     let config = fx.untrusted();
-    assert!(config.select_preset(Some("boxed")).unwrap().sandboxed());
+    for name in [
+        "plan",
+        "ask",
+        "edits",
+        "auto",
+        "inherit",
+        "mine",
+        "committed",
+    ] {
+        assert!(
+            config.select_preset(Some(name)).unwrap().sandboxed(),
+            "{name}"
+        );
+    }
+    assert!(config.select_preset(None).unwrap().sandboxed());
     assert!(!config.select_preset(Some("open")).unwrap().sandboxed());
-    assert!(!config.select_preset(Some("plan")).unwrap().sandboxed());
 }
 
 #[test]
@@ -66,22 +81,13 @@ fn approval_lapses_when_a_committed_preset_starts_leaving_the_sandbox() {
 }
 
 #[test]
-fn the_global_switch_sets_the_sandbox_of_presets_that_do_not_say() {
-    let fx = Fixture::new();
-    fx.global("[defaults]\nsandbox = true\n\n[defaults.presets.open]\nsandbox = false\n");
-    let config = fx.untrusted();
-    assert!(config.select_preset(Some("plan")).unwrap().sandboxed());
-    assert!(config.select_preset(None).unwrap().sandboxed());
-    assert!(!config.select_preset(Some("open")).unwrap().sandboxed());
-}
-
-#[test]
-fn a_preset_that_asks_for_the_sandbox_keeps_it_when_the_global_switch_is_off() {
+fn the_global_switch_turns_off_the_sandbox_for_presets_that_do_not_say() {
     let fx = Fixture::new();
     fx.global("[defaults]\nsandbox = false\n\n[defaults.presets.boxed]\nsandbox = true\n");
     let config = fx.untrusted();
     assert!(config.select_preset(Some("boxed")).unwrap().sandboxed());
     assert!(!config.select_preset(Some("plan")).unwrap().sandboxed());
+    assert!(!config.select_preset(None).unwrap().sandboxed());
 }
 
 #[test]

@@ -4,6 +4,15 @@ pub enum SandboxFailure {
     Failed(String),
 }
 
+impl std::fmt::Display for SandboxFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SandboxFailure::Missing => f.write_str("bwrap is not installed"),
+            SandboxFailure::Failed(stderr) => f.write_str(stderr.trim()),
+        }
+    }
+}
+
 const WAYS_OUT: &str = "set [defaults] sandbox = false in your global config, \
     or :preset to a Preset with sandbox = false";
 
@@ -22,7 +31,7 @@ pub fn sandbox_refusal(
     sysctl: impl Fn(&str) -> Option<String>,
 ) -> String {
     let (cause, fix) = match failure {
-        SandboxFailure::Missing => ("bwrap is not installed".to_string(), "install bubblewrap"),
+        SandboxFailure::Missing => (failure.to_string(), "install bubblewrap"),
         SandboxFailure::Failed(stderr) => {
             let set = |(key, value, _): &&(&str, &str, &str)| {
                 sysctl(key).is_some_and(|actual| actual.trim() == *value)

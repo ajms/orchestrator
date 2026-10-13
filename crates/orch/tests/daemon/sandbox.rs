@@ -1,37 +1,16 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use orch_core::SessionId;
+use orch_holder::{HolderClient, ToHolder};
 use orch_protocol::{AgentStateView as State, CreateSession, PhaseView, Reply, Request};
 
+use crate::bwrap::bwrap_runs;
 use crate::common::*;
 
-const BOXED: &str = "[defaults.presets.boxed]\nsandbox = true\n";
-
-fn bwrap_runs() -> bool {
-    let runs = std::process::Command::new("bwrap")
-        .args([
-            "--ro-bind",
-            "/",
-            "/",
-            "--dev",
-            "/dev",
-            "--proc",
-            "/proc",
-            "true",
-        ])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if !runs {
-        eprintln!("skipped: bubblewrap cannot run here");
-    }
-    runs
-}
-
-async fn boxed_session(env: &Env, client: &mut TestClient) -> (SessionId, PaneView) {
+async fn sandboxed_session(env: &Env, client: &mut TestClient) -> (SessionId, PaneView) {
     let repo = env.repo("app");
-    let mut create = CreateSession::new(&repo, "Boxed");
-    create.preset = Some("boxed".into());
+    let create = CreateSession::new(&repo, "Boxed");
     let id = client.create(create).await;
     client
         .until(&id, "running", |view| view.agent.is_some())
@@ -67,11 +46,11 @@ async fn a_sandboxed_agent_writes_its_worktree_and_nothing_else_of_the_users() {
         return;
     }
     let env = Env::new();
-    env.write_config(BOXED);
+    env.real_bwrap();
     let settings = seed(env.path("home/.claude/settings.json"), "{}");
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (id, mut pane) = boxed_session(&env, &mut client).await;
+    let (id, mut pane) = sandboxed_session(&env, &mut client).await;
     let view = client.sessions[&id].clone();
 
     let inside = view.worktree.join("inside.txt");
@@ -100,10 +79,10 @@ async fn a_sandboxed_agent_commits_but_cannot_change_git_hooks_or_config() {
         return;
     }
     let env = Env::new();
-    env.write_config(BOXED);
+    env.real_bwrap();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (id, mut pane) = boxed_session(&env, &mut client).await;
+    let (id, mut pane) = sandboxed_session(&env, &mut client).await;
     let worktree = client.sessions[&id].worktree.clone();
     let git_dir = env.path("repos/app/.git");
 
@@ -121,17 +100,52 @@ async fn a_sandboxed_agent_commits_but_cannot_change_git_hooks_or_config() {
 }
 
 #[tokio::test]
+async fn a_sandboxed_agent_cannot_plant_a_missing_skills_dir_or_git_hooks_dir() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.real_bwrap();
+    seed(env.path("home/.claude/settings.json"), "{}");
+    let repo = env.repo("app");
+    std::fs::remove_dir_all(repo.join(".git/hooks")).unwrap();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = client.create(CreateSession::new(&repo, "Boxed")).await;
+    client
+        .until(&id, "running", |view| view.agent.is_some())
+        .await;
+    let mut pane = env.pane(&id, PANE).await;
+
+    let skills = env.path("home/.claude/skills");
+    let skill = format!(
+        "mkdir -p {0}/evil && echo evil > {0}/evil/SKILL.md",
+        skills.display()
+    );
+    assert_ne!(shell(&mut pane, &skill).await, "exit 0");
+    assert!(!skills.join("evil").exists());
+
+    let hooks = repo.join(".git/hooks");
+    let hook = format!(
+        "mkdir -p {0} && echo evil > {0}/pre-commit",
+        hooks.display()
+    );
+    assert_ne!(shell(&mut pane, &hook).await, "exit 0");
+    assert!(!hooks.join("pre-commit").exists());
+}
+
+#[tokio::test]
 async fn secrets_in_home_are_invisible_to_a_sandboxed_agent() {
     if !bwrap_runs() {
         return;
     }
     let env = Env::new();
-    env.write_config(BOXED);
+    env.real_bwrap();
     seed(env.path("home/.ssh/id_ed25519"), "private key");
     seed(env.path("home/.gitconfig"), "[user]\n\tname = Dev\n");
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, mut pane) = boxed_session(&env, &mut client).await;
+    let (_, mut pane) = sandboxed_session(&env, &mut client).await;
 
     assert_eq!(run(&mut pane, "exists", &env.path("home/.ssh")).await, "no");
     assert_eq!(
@@ -146,11 +160,11 @@ async fn claude_json_saves_from_inside_the_sandbox_persist() {
         return;
     }
     let env = Env::new();
-    env.write_config(BOXED);
+    env.real_bwrap();
     let config = seed(env.path("home/.claude.json"), "before");
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, mut pane) = boxed_session(&env, &mut client).await;
+    let (_, mut pane) = sandboxed_session(&env, &mut client).await;
 
     assert_eq!(run(&mut pane, "save", &config).await, "ok");
     assert_eq!(std::fs::read_to_string(config).unwrap(), "saved");
@@ -162,10 +176,10 @@ async fn a_sandboxed_agent_reports_through_its_holder_and_is_not_asked_about_out
         return;
     }
     let env = Env::new();
-    env.write_config(BOXED);
+    env.real_bwrap();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (id, mut pane) = boxed_session(&env, &mut client).await;
+    let (id, mut pane) = sandboxed_session(&env, &mut client).await;
     let worktree = client.sessions[&id].worktree.clone();
 
     pane.hook(&hook("SessionStart", r#""source":"startup""#))
@@ -199,10 +213,10 @@ async fn a_sandboxed_agents_tmp_is_its_sessions_own_and_goes_when_the_session_is
         return;
     }
     let env = Env::new();
-    env.write_config(BOXED);
+    env.real_bwrap();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (id, mut pane) = boxed_session(&env, &mut client).await;
+    let (id, mut pane) = sandboxed_session(&env, &mut client).await;
     let session_tmp = env
         .path("state/orchestrator/sessions")
         .join(id.as_str())
@@ -229,6 +243,7 @@ async fn a_sandboxed_agents_tmp_is_its_sessions_own_and_goes_when_the_session_is
 #[tokio::test]
 async fn an_unsandboxed_preset_runs_the_agent_as_before() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = running_session(&env, &mut client, "Open").await;
@@ -245,10 +260,10 @@ async fn a_sandboxed_agent_pushes_its_branch_through_the_broker() {
         return;
     }
     let env = Env::new();
-    env.write_config(BOXED);
+    env.real_bwrap();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (id, mut pane) = boxed_session(&env, &mut client).await;
+    let (id, mut pane) = sandboxed_session(&env, &mut client).await;
     let view = client.sessions[&id].clone();
     let remote = env.remote(&env.path("repos/app"));
 
@@ -262,4 +277,152 @@ async fn a_sandboxed_agent_pushes_its_branch_through_the_broker() {
         "boxed"
     );
     pane.wait_for_text("Broker: pushed").await;
+}
+
+#[tokio::test]
+async fn only_a_session_whose_preset_opts_out_is_marked_unsandboxed() {
+    let env = Env::new();
+    env.write_config(&format!(
+        "[defaults.presets.mine]\nmode = \"plan\"\n\n{OPEN_PRESET}"
+    ));
+    let repo = env.repo("app");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+
+    for (preset, unsandboxed) in [
+        ("plan", false),
+        ("ask", false),
+        ("edits", false),
+        ("auto", false),
+        ("inherit", false),
+        ("mine", false),
+        ("open", true),
+    ] {
+        let mut create = CreateSession::new(&repo, preset);
+        create.preset = Some(preset.into());
+        let id = client.create(create).await;
+        let view = client
+            .until(&id, "running", |view| view.holder_pid.is_some())
+            .await;
+        assert_eq!(view.unsandboxed, unsandboxed, "{preset}");
+    }
+}
+
+#[tokio::test]
+async fn an_opted_out_session_stays_marked_once_its_holder_is_gone() {
+    let env = Env::new();
+    env.write_config(OPEN_PRESET);
+    let repo = env.repo("app");
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let mut ids = Vec::new();
+    for preset in ["open", "plan"] {
+        let mut create = CreateSession::new(&repo, preset);
+        create.preset = Some(preset.into());
+        let id = client.create(create).await;
+        let holder = client
+            .until(&id, "running", |view| view.holder_pid.is_some())
+            .await
+            .holder_pid
+            .unwrap();
+        std::process::Command::new("kill")
+            .args(["-9", &holder.to_string()])
+            .status()
+            .unwrap();
+        let gone = client
+            .until(&id, "the Holder gone", |view| view.holder_pid.is_none())
+            .await;
+        assert_eq!(gone.unsandboxed, preset == "open", "{preset}");
+        ids.push((id, preset));
+    }
+    daemon.kill();
+
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    for (id, preset) in ids {
+        let view = client.until(&id, "loaded", |_| true).await;
+        assert_eq!(view.unsandboxed, preset == "open", "{preset}");
+    }
+}
+
+#[tokio::test]
+async fn a_session_from_before_the_upgrade_resumes_sandboxed() {
+    let env = Env::new();
+    env.write_config(UNSANDBOXED);
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = running_session(&env, &mut client, "Old").await;
+    let old_holder = client.holder_pid(&id).unwrap() as u32;
+    assert!(client.sessions[&id].unsandboxed);
+    let mut pane = env.pane(&id, PANE).await;
+    pane.type_line("exit 0").await;
+    client
+        .until(&id, "Exited", |view| view.agent == Some(State::Exited))
+        .await;
+    daemon.kill();
+
+    env.write_config("");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let reply = client
+        .request(Request::Resume {
+            session: id.clone(),
+        })
+        .await;
+    assert_eq!(reply, Ok(Reply::Done));
+    let resumed = client
+        .until(&id, "a fresh Holder", |view| {
+            view.holder_pid.is_some_and(|pid| pid != old_holder)
+        })
+        .await;
+    assert!(!resumed.unsandboxed);
+}
+
+#[tokio::test]
+#[ignore = "runs the real Claude Code in the real Sandbox: needs bwrap and a logged-in claude"]
+async fn real_claude_runs_sandboxed_writes_its_worktree_and_stops_cleanly() {
+    assert!(bwrap_runs(), "bubblewrap cannot run here");
+    let env = Env::new();
+    env.real_bwrap();
+    std::fs::write(env.path("config/orchestrator/config.toml"), "").unwrap();
+    let repo = env.repo("app");
+    let mut command = env.daemon_command(Duration::from_secs(600));
+    command.env("HOME", std::env::var_os("HOME").unwrap());
+    let _daemon = env.spawn_daemon(&mut command).await;
+    let mut client = env.client().await;
+
+    let mut create = CreateSession::new(
+        &repo,
+        "Create a file named smoke.txt in the current directory containing the word ok. Do nothing else.",
+    );
+    create.preset = Some("edits".into());
+    let id = client.create(create).await;
+    let view = client
+        .until(&id, "running", |view| view.holder_pid.is_some())
+        .await;
+    assert!(!view.unsandboxed);
+    let written = view.worktree.join("smoke.txt");
+
+    let mut pane = env.pane(&id, PANE).await;
+    pane.wait_for_within(Duration::from_secs(60), "Claude to start", |pane| {
+        pane.text().contains("trust this folder") || written.exists()
+    })
+    .await;
+    if !written.exists() {
+        pane.type_line("").await;
+    }
+    pane.wait_for_within(Duration::from_secs(180), "smoke.txt", |_| written.exists())
+        .await;
+
+    let mut stopper = HolderClient::connect(&env.holder_socket(&id))
+        .await
+        .unwrap();
+    stopper.attach().await.unwrap();
+    stopper.send(&ToHolder::Kill).await.unwrap();
+    let stopped = client
+        .until(&id, "Claude to stop", |view| {
+            matches!(view.agent, Some(State::Exited | State::Errored))
+        })
+        .await;
+    assert_eq!(stopped.agent, Some(State::Exited), "{:?}", stopped.error);
 }
