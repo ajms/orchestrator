@@ -88,6 +88,73 @@ ALTER TABLE sessions ADD COLUMN queued_prompt TEXT;
     "
 ALTER TABLE sessions ADD COLUMN title TEXT;
 ",
+    "
+ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude';
+",
+    "
+ALTER TABLE usage RENAME TO usage_before_agents;
+CREATE TABLE usage (
+    seq INTEGER PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL,
+    segment INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (session_id, conversation_id, segment)
+);
+INSERT INTO usage SELECT * FROM usage_before_agents;
+DROP TABLE usage_before_agents;
+ALTER TABLE usage_daily RENAME TO usage_daily_before_agents;
+CREATE TABLE usage_daily (
+    repo_path TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    day TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    PRIMARY KEY (repo_path, agent, day)
+);
+INSERT INTO usage_daily
+    SELECT repo_path, 'claude', day, input_tokens, output_tokens, cost_usd
+    FROM usage_daily_before_agents;
+DROP TABLE usage_daily_before_agents;
+",
+    "
+DELETE FROM sessions WHERE agent != 'claude';
+ALTER TABLE sessions DROP COLUMN agent;
+ALTER TABLE usage RENAME TO usage_with_agents;
+CREATE TABLE usage (
+    seq INTEGER PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL,
+    segment INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd REAL NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (session_id, conversation_id, segment)
+);
+INSERT INTO usage
+    SELECT seq, session_id, conversation_id, segment, input_tokens, output_tokens,
+        COALESCE(cost_usd, 0), updated_at
+    FROM usage_with_agents;
+DROP TABLE usage_with_agents;
+ALTER TABLE usage_daily RENAME TO usage_daily_with_agents;
+CREATE TABLE usage_daily (
+    repo_path TEXT NOT NULL,
+    day TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd REAL NOT NULL,
+    PRIMARY KEY (repo_path, day)
+);
+INSERT INTO usage_daily
+    SELECT repo_path, day, input_tokens, output_tokens, COALESCE(cost_usd, 0)
+    FROM usage_daily_with_agents WHERE agent = 'claude';
+DROP TABLE usage_daily_with_agents;
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
