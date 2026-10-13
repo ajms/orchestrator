@@ -3,6 +3,7 @@ name = "orch-tui"
 description = "The TUI Client: sidebar, live pane, keymap and popups over the Daemon protocol."
 version.workspace = true
 edition.workspace = true
+publish.workspace = true
 
 [dependencies]
 orch-agent.workspace = true

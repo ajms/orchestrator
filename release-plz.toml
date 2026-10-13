@@ -1,0 +1,18 @@
+[workspace]
+git_only = true
+publish = false
+release_always = false
+semver_check = false
+features_always_increment_minor = true
+git_tag_name = "v{{ version }}"
+git_tag_enable = false
+git_release_enable = false
+changelog_update = false
+
+[[package]]
+name = "orch"
+git_tag_enable = true
+git_release_enable = true
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+changelog_include = ["orch-agent", "orch-config", "orch-core", "orch-daemon", "orch-git", "orch-holder", "orch-notify", "orch-protocol", "orch-store", "orch-term", "orch-tui"]

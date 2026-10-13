@@ -2,6 +2,7 @@
 name = "orch-notify"
 version.workspace = true
 edition.workspace = true
+publish.workspace = true
 description = "Notification policy and sinks: desktop (freedesktop D-Bus) and terminal bell / OSC 777."
 
 [dependencies]

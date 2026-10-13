@@ -3,6 +3,7 @@ name = "orch-holder"
 description = "The Holder: owns one Session's Agent PTY, screen and socket."
 version.workspace = true
 edition.workspace = true
+publish.workspace = true
 
 [dependencies]
 orch-agent.workspace = true
