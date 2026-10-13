@@ -6,7 +6,7 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRe
 
 pub(crate) struct Stored<T>(pub(crate) T);
 
-trait Named: Sized + Copy + 'static {
+pub(crate) trait Named: Sized + Copy + 'static {
     const ALL: &'static [Self];
     fn name(self) -> &'static str;
 }
@@ -124,13 +124,19 @@ impl<T: Named> ToSql for Stored<T> {
     }
 }
 
-impl<T: Named> FromSql for Stored<T> {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        let text = value.as_str()?;
+impl<T: Named> Stored<T> {
+    pub(crate) fn named(text: &str) -> Option<Self> {
         T::ALL
             .iter()
             .find(|candidate| candidate.name() == text)
             .map(|found| Stored(*found))
+    }
+}
+
+impl<T: Named> FromSql for Stored<T> {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let text = value.as_str()?;
+        Self::named(text)
             .ok_or_else(|| FromSqlError::Other(format!("unknown stored value {text:?}").into()))
     }
 }
