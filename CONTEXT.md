@@ -62,7 +62,7 @@ The settings that apply to one Repo: those committed in the Repo itself, layered
 _Avoid_: Project settings, repo file
 
 **Trust**:
-The user's approval to run the scripts a Repo config brings from the Repo itself; it lapses when those scripts change.
+The user's approval of what a Repo's committed config would run or loosen: its scripts, its Agent, Presets that loosen autonomy or leave the Sandbox, and paths it opens in the Sandbox. It lapses when any of those change.
 _Avoid_: Allow-list, permission
 
 **Session**:
