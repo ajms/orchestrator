@@ -8,6 +8,7 @@ pub struct Preset {
     pub mode: Option<PermissionMode>,
     pub allow: Vec<String>,
     pub deny: Vec<String>,
+    pub sandbox: Option<bool>,
 }
 
 impl Preset {
@@ -21,7 +22,12 @@ impl Preset {
             mode,
             allow: Vec::new(),
             deny: Vec::new(),
+            sandbox: None,
         }
+    }
+
+    pub fn sandboxed(&self) -> bool {
+        self.sandbox.unwrap_or(false)
     }
 
     pub fn loosens(&self) -> bool {
@@ -33,7 +39,7 @@ impl Preset {
                     | PermissionMode::BypassPermissions
             )
         );
-        permissive_mode || !self.allow.is_empty()
+        permissive_mode || !self.allow.is_empty() || self.sandbox == Some(false)
     }
 }
 

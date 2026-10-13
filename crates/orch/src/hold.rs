@@ -15,6 +15,8 @@ pub struct HoldArgs {
     runtime_dir: Option<PathBuf>,
     #[arg(long)]
     cwd: Option<PathBuf>,
+    #[arg(long, value_parser = parse_policy)]
+    sandbox: Option<Policy>,
     #[arg(long = "env", value_parser = parse_env)]
     env: Vec<(String, String)>,
     #[arg(long)]
@@ -41,6 +43,15 @@ fn parse_session(id: &str) -> Result<SessionId, String> {
     SessionId::parse(id).map_err(|_| format!("invalid session id {id:?}"))
 }
 
+#[derive(Clone)]
+struct Policy(Vec<String>);
+
+fn parse_policy(json: &str) -> Result<Policy, String> {
+    serde_json::from_str(json)
+        .map(Policy)
+        .map_err(|err| format!("expected a JSON list of bwrap args: {err}"))
+}
+
 fn parse_env(pair: &str) -> Result<(String, String), String> {
     pair.split_once('=')
         .map(|(key, value)| (key.into(), value.into()))
@@ -58,6 +69,7 @@ pub fn run(args: HoldArgs) -> ExitCode {
     };
     let socket = socket_path(&runtime_dir, &args.session);
     let mut config = HoldConfig::new(args.session, socket, cwd, args.argv);
+    config.sandbox = args.sandbox.map(|Policy(args)| args);
     config.env = args.env;
     config.base = args.base;
     config.port_block = args

@@ -14,6 +14,7 @@ mod rate_limits;
 mod recency;
 mod reconcile;
 mod repos;
+mod sandbox;
 mod setup;
 mod state;
 mod store;

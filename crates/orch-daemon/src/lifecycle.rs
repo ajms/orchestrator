@@ -452,12 +452,22 @@ impl Daemon {
             Err(err) => Err(err.to_string()),
         };
         let spawned = match launch {
-            Ok((adapter, argv)) => {
+            Ok(launch) => {
+                let policy = match launch.sandboxed {
+                    true => {
+                        self.blocking_sandbox_policy(&record, &repo, &launch.adapter)
+                            .await
+                    }
+                    false => Ok(None),
+                };
                 let _ = self.update(id, |live| {
-                    live.adapter = adapter;
+                    live.adapter = launch.adapter;
                     Ok(())
                 });
-                self.spawn_holder(&record, argv).await
+                match policy {
+                    Ok(policy) => self.spawn_holder(&record, launch.argv, policy).await,
+                    Err(message) => Err(message),
+                }
             }
             Err(message) => Err(message),
         };
@@ -484,6 +494,20 @@ impl Daemon {
         });
     }
 
+    async fn blocking_sandbox_policy(
+        self: &Arc<Self>,
+        record: &SessionRecord,
+        repo: &Path,
+        adapter: &Adapter,
+    ) -> Result<Option<Vec<String>>, String> {
+        let daemon = self.clone();
+        let (record, repo, adapter) = (record.clone(), repo.to_path_buf(), adapter.clone());
+        tokio::task::spawn_blocking(move || daemon.sandbox_policy(&record, &repo, adapter.as_ref()))
+            .await
+            .map_err(|err| err.to_string())?
+            .map(Some)
+    }
+
     fn agent_argv(
         &self,
         repo: &Path,
@@ -491,11 +515,12 @@ impl Daemon {
         record: &SessionRecord,
         prompt: Option<String>,
         resume: bool,
-    ) -> Result<(Adapter, Vec<String>), String> {
+    ) -> Result<AgentLaunch, String> {
         let agent = config.agent().map_err(|err| err.to_string())?;
         let adapter = adapter_for(agent)?;
         let preset =
             select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
+        let sandboxed = preset.sandboxed();
         let mut spec = LaunchSpec::new(
             record.id.clone(),
             self.config.orch_program.to_string_lossy(),
@@ -510,10 +535,19 @@ impl Daemon {
             _ => None,
         };
         let argv = agent_command(adapter.as_ref(), &agent.args, spec, resume);
-        Ok((adapter, argv))
+        Ok(AgentLaunch {
+            adapter,
+            argv,
+            sandboxed,
+        })
     }
 
-    async fn spawn_holder(&self, record: &SessionRecord, argv: Vec<String>) -> Result<(), String> {
+    async fn spawn_holder(
+        &self,
+        record: &SessionRecord,
+        argv: Vec<String>,
+        sandbox: Option<Vec<String>>,
+    ) -> Result<(), String> {
         let mut command = crate::subprocess::command(&self.config.orch_program);
         command
             .arg("hold")
@@ -531,6 +565,10 @@ impl Daemon {
                 .arg(block.base.to_string())
                 .arg("--port-size")
                 .arg(block.size.to_string());
+        }
+        if let Some(policy) = sandbox {
+            let policy = serde_json::to_string(&policy).map_err(|err| err.to_string())?;
+            command.arg("--sandbox").arg(policy);
         }
         let display = self.lock().display.pairs();
         for (key, value) in session_env(record).into_iter().chain(display) {
@@ -644,6 +682,12 @@ impl Daemon {
         }
         known
     }
+}
+
+struct AgentLaunch {
+    adapter: Adapter,
+    argv: Vec<String>,
+    sandboxed: bool,
 }
 
 pub(crate) fn select_preset(

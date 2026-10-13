@@ -99,6 +99,9 @@ fn fields(item: &TrustItem) -> Vec<String> {
             let mut fields = vec![tag.into(), preset.name.clone(), mode.into()];
             fields.extend(list("allow", &preset.allow));
             fields.extend(list("deny", &preset.deny));
+            if let Some(sandbox) = preset.sandbox {
+                fields.extend(["sandbox".into(), sandbox.to_string()]);
+            }
             fields
         }
     }

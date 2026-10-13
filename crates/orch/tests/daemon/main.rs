@@ -15,6 +15,7 @@ mod preset;
 mod reconcile;
 mod recovery;
 mod repo_settings;
+mod sandbox;
 mod setup;
 mod stacking;
 mod status;

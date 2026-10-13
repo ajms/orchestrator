@@ -7,6 +7,7 @@ fn user_preset(name: &str, mode: Option<PermissionMode>, allow: &[&str], deny: &
         mode,
         allow: allow.iter().map(|rule| rule.to_string()).collect(),
         deny: deny.iter().map(|rule| rule.to_string()).collect(),
+        sandbox: None,
     }
 }
 

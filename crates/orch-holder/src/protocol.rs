@@ -96,6 +96,8 @@ pub struct Hello {
     pub holder_pid: u32,
     pub agent_pid: Option<u32>,
     pub agent: AgentStatus,
+    #[serde(default)]
+    pub sandboxed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

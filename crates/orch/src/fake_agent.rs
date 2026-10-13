@@ -1,6 +1,7 @@
 use std::io::{BufRead, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitCode};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use base64::Engine;
@@ -124,6 +125,28 @@ fn execute(line: &str) -> Option<ExitCode> {
             let _ = unsafe { signal(Signal::SIGHUP, SigHandler::SigIgn) };
             say("hangup ignored");
         }
+        "exit-on-hangup" => exit_on_hangup(),
+        "write" | "exists" | "save" => {
+            let path = Path::new(rest);
+            let outcome = match command {
+                "write" => std::fs::write(path, "x").map(|()| "ok"),
+                "save" => save(path).map(|()| "ok"),
+                _ => Ok(if path.exists() { "yes" } else { "no" }),
+            };
+            let outcome = outcome.map_or_else(|err| err.to_string(), String::from);
+            say(&format!("{line} -> {outcome}"));
+        }
+        "sh" => {
+            let status = Command::new("sh")
+                .args(["-c", rest])
+                .stdin(std::process::Stdio::null())
+                .output()
+                .map(|output| output.status.code().unwrap_or(-1));
+            match status {
+                Ok(code) => say(&format!("{line} -> exit {code}")),
+                Err(err) => say(&format!("{line} -> {err}")),
+            }
+        }
         "size" => {
             let _ = Command::new("stty").arg("size").status();
             let _ = std::io::stdout().flush();
@@ -136,6 +159,33 @@ fn execute(line: &str) -> Option<ExitCode> {
         _ => say(&format!("unknown> {}", line.escape_debug())),
     }
     None
+}
+
+static HUNG_UP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn note_hangup(_: i32) {
+    HUNG_UP.store(true, Ordering::Relaxed);
+}
+
+fn exit_on_hangup() {
+    let _ = unsafe { signal(Signal::SIGHUP, SigHandler::Handler(note_hangup)) };
+    std::thread::spawn(|| {
+        while !HUNG_UP.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::process::exit(0);
+    });
+    say("hangup handled");
+}
+
+fn save(path: &Path) -> std::io::Result<()> {
+    let staged = path.with_extension("staged");
+    std::fs::write(&staged, "saved")?;
+    if std::fs::rename(&staged, path).is_err() {
+        let _ = std::fs::remove_file(&staged);
+        std::fs::write(path, "saved")?;
+    }
+    Ok(())
 }
 
 fn enable_mouse(request: &str) {

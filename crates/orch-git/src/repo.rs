@@ -44,6 +44,12 @@ impl Repo {
         &self.root
     }
 
+    pub fn common_dir(&self) -> Result<PathBuf, Error> {
+        self.git(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+            .run()
+            .map(PathBuf::from)
+    }
+
     pub fn default_base(&self, configured: Option<&str>) -> Result<String, Error> {
         if let Some(base) = configured {
             return Ok(base.to_string());

@@ -14,6 +14,7 @@ fn context(worktree: &Path) -> GuardContext<'_> {
         enabled: true,
         allowed: &[],
         agent_dirs: &[],
+        sandboxed: false,
     }
 }
 
@@ -132,6 +133,40 @@ fn guards_that_are_off_allow_everything() {
             "{command}"
         );
     }
+}
+
+#[test]
+fn in_the_sandbox_writes_outside_the_worktree_go_ahead_but_the_git_guards_still_ask() {
+    let worktree = Path::new(WORKTREE);
+    let sandboxed = GuardContext {
+        sandboxed: true,
+        ..context(worktree)
+    };
+    let check = |tool: &str, input: serde_json::Value| {
+        evaluate_guard(tool, &input.to_string(), None, &sandboxed)
+    };
+    assert_eq!(
+        check(
+            "Write",
+            json!({ "file_path": "/etc/hosts", "content": "x" })
+        ),
+        GuardDecision::Allow
+    );
+    assert_eq!(
+        check("Bash", json!({ "command": "touch /etc/x" })),
+        GuardDecision::Allow
+    );
+    assert_eq!(
+        check(
+            "Bash",
+            json!({ "command": "touch /etc/x && git push origin HEAD:main" })
+        ),
+        ask(GuardKind::BaseBranch, "main")
+    );
+    assert_eq!(
+        check("Bash", json!({ "command": "git worktree add ../x" })),
+        ask(GuardKind::WorktreeManagement, "add")
+    );
 }
 
 #[test]

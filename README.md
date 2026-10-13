@@ -178,7 +178,7 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `preset` | Default Preset for new Sessions (built-in default: `edits`) |
 | `review_command` | Command shown when reviewing a Session; not allowed in `.orchestrator.toml` |
 | `[agent]` | `name` (default `claude`), `binary`, `args` |
-| `[presets.<name>]` | `mode`, `allow`, `deny` |
+| `[presets.<name>]` | `mode`, `allow`, `deny`, `sandbox` (run the Agent in the Sandbox; default `false` for now) |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
 
 **Setup and Teardown scripts** run with `sh -c` in the Worktree, with stdin closed. Setup output streams into the TUI; a non-zero exit puts the Session in *Setup failed*. Both scripts get these variables:
@@ -189,7 +189,9 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `ORCH_WORKTREE` | Absolute path of the Worktree |
 | `ORCH_PORT_BASE` | First port of the Session's block (see `ports`), e.g. `PORT=$((ORCH_PORT_BASE + 1))` |
 
-**Trust:** scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
+**Sandbox:** a Preset with `sandbox = true` runs its Agent as `bwrap <policy> -- claude …` (needs [bubblewrap](https://github.com/containers/bubblewrap) 0.3.3 or later). Inside, `$HOME` is a private tmpfs with only Claude's own paths, your git config and common toolchains (`~/.cargo`, `~/.rustup`, `~/.nvm`, …) bound back read-only, so ssh keys, the `gh` token and cloud credentials are invisible. `~/.claude` and `~/.claude.json` stay writable, except Claude's settings, hooks, skills, agents, commands, rules, plugins and `CLAUDE.md`. The rest of the system is read-only, and other homes, `/mnt` and `/media` are hidden. The Agent can write its Worktree, its Subagent worktrees and the git common dir, but not `.git/hooks` or `.git/config`. `/tmp` is the Session's own directory, removed when the Session is Landed or Discarded. In a sandboxed Session the Guard for writes outside the Worktree no longer asks, and the git Guards stay.
+
+**Trust:** scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets (including a Preset with `sandbox = false`) that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
 
 State lives in `~/.local/state/orchestrator/state.db`. Runtime sockets live under `$XDG_RUNTIME_DIR/orchestrator`.
 

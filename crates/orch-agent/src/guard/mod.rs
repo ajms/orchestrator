@@ -46,6 +46,7 @@ pub struct GuardContext<'a> {
     pub enabled: bool,
     pub allowed: &'a [GuardHit],
     pub agent_dirs: &'a [PathBuf],
+    pub sandboxed: bool,
 }
 
 pub fn evaluate_guard(
@@ -81,6 +82,7 @@ pub fn evaluate_guard(
         _ => Vec::new(),
     };
     hits.into_iter()
+        .filter(|hit| !(context.sandboxed && hit.kind == GuardKind::WriteOutsideWorktree))
         .find(|hit| !context.allowed.contains(hit))
         .map_or(GuardDecision::Allow, GuardDecision::Ask)
 }

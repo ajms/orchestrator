@@ -59,6 +59,7 @@ impl Daemon {
                         closed: closed_watch,
                     };
                     let (generation, _) = live.replace_holder(Some(link));
+                    live.sandboxed = hello.sandboxed;
                     let running = hello.agent == AgentStatus::Running;
                     let now = Instant::now();
                     match (how, live.record.agent_state) {
@@ -386,6 +387,7 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
             enabled: live.record.guards_enabled,
             allowed: &live.record.guard_allowances,
             agent_dirs: &agent_dirs,
+            sandboxed: live.sandboxed,
         };
         let decision = evaluate_guard(tool, input_json, cwd.as_deref().map(Path::new), &context);
         (tool.clone(), decision)

@@ -61,8 +61,7 @@ struct PresetLayer {
     allow: Vec<String>,
     #[serde(default)]
     deny: Vec<String>,
-    #[serde(rename = "sandbox")]
-    _sandbox: Option<IgnoredAny>,
+    sandbox: Option<bool>,
 }
 
 impl PresetLayer {
@@ -82,6 +81,7 @@ impl PresetLayer {
             mode,
             allow: self.allow.clone(),
             deny: self.deny.clone(),
+            sandbox: self.sandbox,
         })
     }
 }

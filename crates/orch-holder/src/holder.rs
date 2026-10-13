@@ -28,6 +28,8 @@ use crate::{
 
 const FINAL_OUTPUT_GRACE: Duration = Duration::from_secs(2);
 const KILL_GRACE: Duration = Duration::from_secs(1);
+const BWRAP: &str = "bwrap";
+const IGNORING_HANGUP: &str = r#"trap '' HUP; exec "$0" "$@""#;
 
 #[derive(Debug, Clone)]
 pub struct HoldConfig {
@@ -35,6 +37,7 @@ pub struct HoldConfig {
     pub socket: PathBuf,
     pub cwd: PathBuf,
     pub argv: Vec<String>,
+    pub sandbox: Option<Vec<String>>,
     pub env: Vec<(String, String)>,
     pub base: Option<String>,
     pub port_block: Option<PortBlock>,
@@ -55,6 +58,7 @@ impl HoldConfig {
             socket,
             cwd,
             argv,
+            sandbox: None,
             env: Vec::new(),
             base: None,
             port_block: None,
@@ -141,6 +145,7 @@ struct State {
     base: Option<String>,
     port_block: Option<PortBlock>,
     agent_pid: Option<u32>,
+    sandboxed: bool,
     emulator: Emulator,
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
@@ -159,7 +164,17 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
         .argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty Agent argv"))?;
-    let mut command = CommandBuilder::new(program);
+    let mut command = match &config.sandbox {
+        Some(policy) => {
+            let mut command = CommandBuilder::new("sh");
+            command.args(["-c", IGNORING_HANGUP, BWRAP]);
+            command.args(policy);
+            command.arg("--");
+            command.arg(program);
+            command
+        }
+        None => CommandBuilder::new(program),
+    };
     command.args(args);
     command.cwd(&config.cwd);
     command.env("TERM", "xterm-256color");
@@ -184,6 +199,7 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
             base: config.base.clone(),
             port_block: config.port_block,
             agent_pid,
+            sandboxed: config.sandbox.is_some(),
             emulator: Emulator::new(config.size, config.scrollback),
             master: pty.master,
             killer: child.clone_killer(),
@@ -375,6 +391,7 @@ impl State {
                 Some(exit) => AgentStatus::Exited(exit.clone()),
                 None => AgentStatus::Running,
             },
+            sandboxed: self.sandboxed,
         }
     }
 
