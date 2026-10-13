@@ -291,14 +291,20 @@ impl Store {
         let mut statement = self.conn.prepare_cached(
             "SELECT kind, target FROM guard_allowances WHERE session_id = ?1 ORDER BY position",
         )?;
-        session.guard_allowances = statement
+        let stored = statement
             .query_map(params![session.id.as_str()], |row| {
-                Ok(GuardHit {
-                    kind: row.get::<_, Stored<_>>(0)?.0,
-                    target: row.get(1)?,
-                })
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
-            .collect::<rusqlite::Result<_>>()?;
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        session.guard_allowances = stored
+            .into_iter()
+            .filter_map(|(kind, target)| {
+                Some(GuardHit {
+                    kind: Stored::named(&kind)?.0,
+                    target,
+                })
+            })
+            .collect();
         Ok(session)
     }
 }

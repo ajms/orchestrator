@@ -120,3 +120,31 @@ fn usage_and_sessions_are_written_again_after_leaving_the_antigravity_release() 
     );
     assert_eq!(fx.store.session(&later.id).unwrap(), Some(later));
 }
+
+#[test]
+fn a_session_allowed_to_push_by_the_sandbox_release_still_loads_without_that_allowance() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let session = fx.session(&repo, "boxed");
+    let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
+    conn.execute_batch(&format!(
+        "INSERT INTO guard_allowances VALUES
+            ('{id}', 0, 'push', 'orch/boxed'),
+            ('{id}', 1, 'other_ref', 'refs/heads/main'),
+            ('{id}', 2, 'pull_request', 'orch/boxed');",
+        id = session.id.0
+    ))
+    .unwrap();
+
+    fx.reopen();
+
+    let loaded = fx.store.session(&session.id).unwrap().unwrap();
+    assert_eq!(
+        loaded.guard_allowances,
+        [orch_agent::GuardHit {
+            kind: orch_agent::GuardKind::OtherRef,
+            target: "refs/heads/main".into(),
+        }]
+    );
+    assert_eq!(fx.store.sessions().unwrap().len(), 1);
+}

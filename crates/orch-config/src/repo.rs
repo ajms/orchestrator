@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use orch_agent::{INHERIT, Preset, Presets, mode_from_name};
 use serde::Deserialize;
+use serde::de::IgnoredAny;
 
 use crate::error::ConfigProblem;
 use crate::notifications::{Notifications, NotificationsLayer};
@@ -34,6 +35,8 @@ pub(crate) struct RepoLayer {
     base: Option<String>,
     preset: Option<String>,
     review_command: Option<String>,
+    #[serde(rename = "sandbox")]
+    _sandbox: Option<IgnoredAny>,
     #[serde(default)]
     agent: AgentLayer,
     #[serde(default)]
@@ -58,6 +61,8 @@ struct PresetLayer {
     allow: Vec<String>,
     #[serde(default)]
     deny: Vec<String>,
+    #[serde(rename = "sandbox")]
+    _sandbox: Option<IgnoredAny>,
 }
 
 impl PresetLayer {
