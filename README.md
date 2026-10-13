@@ -205,7 +205,9 @@ pre-commit run --all-files
 
 CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test` on every PR and on pushes to `main`.
 
-Every green push to `main` is released by `.github/workflows/release.yml`: it tags the commit with the UTC date (`2026.09.30`, then `2026.09.30.1`, `2026.09.30.2`, … for later merges that day) and publishes a GitHub Release with generated notes and a Linux x86_64 tarball. The tag is baked into `orch --version` via `ORCH_VERSION`; local builds report the Cargo version.
+Releases follow [SemVer](https://semver.org) and are driven by [release-plz](https://release-plz.dev) (`release-plz.toml`, `.github/workflows/release.yml`). All crates share `workspace.package.version`; none is published to crates.io. After every green push to `main`, release-plz opens or updates a release PR that bumps the version from the [Conventional Commits](https://www.conventionalcommits.org) since the last `v*` tag (`fix` → patch, `feat` → minor; a breaking `!` is a minor bump until 1.0, a major one after) and updates `CHANGELOG.md`. Merging that PR tags `vX.Y.Z` and publishes a GitHub Release with the changelog and a Linux x86_64 tarball. The older date-tagged releases (`2026.09.30` … `2026.10.13`) predate this scheme.
+
+To let CI run on the release PR, add a `RELEASE_PLZ_TOKEN` secret (a fine-grained PAT with contents and pull-requests write); without it the PR is opened with `GITHUB_TOKEN`, which doesn't trigger workflows. The repository must also allow GitHub Actions to create pull requests.
 
 ## Architecture
 

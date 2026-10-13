@@ -3,6 +3,7 @@ name = "orch-daemon"
 description = "The Daemon: single owner of state, Session lifecycle and relaying to Clients."
 version.workspace = true
 edition.workspace = true
+publish.workspace = true
 
 [dependencies]
 orch-agent.workspace = true

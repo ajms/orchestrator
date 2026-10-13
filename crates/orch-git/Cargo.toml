@@ -3,6 +3,7 @@ name = "orch-git"
 description = "Git lifecycle for orch Sessions; requires git >= 2.40 (merge-tree --write-tree --merge-base)."
 version.workspace = true
 edition.workspace = true
+publish.workspace = true
 
 [dependencies]
 tempfile = "3"
