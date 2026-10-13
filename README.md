@@ -12,6 +12,7 @@ The domain vocabulary (Session, Repo, Worktree, Landing, Preset, Guard, Trust…
 - git ≥ 2.40
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` on `PATH`), set up as you normally use it; `orch` uses your own `~/.claude` configuration
 - [`gh`](https://cli.github.com/), authenticated, for PR Landing and PR status
+- [bubblewrap](https://github.com/containers/bubblewrap) 0.3.3 or later (`bwrap` on `PATH`) with unprivileged user namespaces, for the Sandbox. On Ubuntu 24.04 and later, `kernel.apparmor_restrict_unprivileged_userns = 1` blocks them, so add an AppArmor profile for `bwrap`. `orch doctor` checks this.
 - a freedesktop notification daemon for desktop notifications (optional)
 - Rust 1.88+ to build (development uses the version pinned in `rust-toolchain.toml`)
 
@@ -66,7 +67,7 @@ When the Agent is done, press `d` to review, then run `:land` to squash onto the
 | Command | |
 |---|---|
 | `orch` | TUI Client (auto-starts the Daemon) |
-| `orch doctor [--json]` | Run Reconciliation and print findings per Repo with the fixes available. Exits 1 if there are findings. |
+| `orch doctor [--json]` | Run Reconciliation and print findings per Repo with the fixes available, and check that the Sandbox runs and can nest. Exits 1 if there are findings or the Sandbox can't run; a Sandbox that can't nest is only a warning. |
 | `orch repo move <old> <new>` | Tell `orch` a known Repo now lives at a new path. Its Sessions follow it, and Agents keep running if you already moved the directory. |
 | `orch repo forget <path>` | Make `orch` forget a known Repo. This is refused while it has Sessions or running Agents. |
 | `orch trust <repo> [--yes]` | Show what in the Repo's config needs Trust and approve it after a y/N prompt. |
@@ -177,6 +178,7 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `base` | Base branch for new Sessions; unset means origin's default branch, else the Repo's current branch |
 | `preset` | Default Preset for new Sessions (built-in default: `edits`) |
 | `review_command` | Command shown when reviewing a Session; not allowed in `.orchestrator.toml` |
+| `sandbox` | Sandbox for Presets that don't set `sandbox` themselves (built-in default: `false` for now); not allowed in `.orchestrator.toml` |
 | `[agent]` | `name` (default `claude`), `binary`, `args` |
 | `[presets.<name>]` | `mode`, `allow`, `deny`, `sandbox` (run the Agent in the Sandbox; default `false` for now) |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
@@ -190,6 +192,8 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `ORCH_PORT_BASE` | First port of the Session's block (see `ports`), e.g. `PORT=$((ORCH_PORT_BASE + 1))` |
 
 **Sandbox:** a Preset with `sandbox = true` runs its Agent as `bwrap <policy> -- claude …` (needs [bubblewrap](https://github.com/containers/bubblewrap) 0.3.3 or later). Inside, `$HOME` is a private tmpfs with only Claude's own paths, your git config and common toolchains (`~/.cargo`, `~/.rustup`, `~/.nvm`, …) bound back read-only, so ssh keys, the `gh` token and cloud credentials are invisible. `~/.claude` and `~/.claude.json` stay writable, except Claude's settings, hooks, skills, agents, commands, rules, plugins and `CLAUDE.md`. The rest of the system is read-only, and other homes, `/mnt` and `/media` are hidden. The Agent can write its Worktree, its Subagent worktrees and the git common dir, but not `.git/hooks` or `.git/config`. `/tmp` is the Session's own directory, removed when the Session is Landed or Discarded. In a sandboxed Session the Guard for writes outside the Worktree no longer asks, and the git Guards stay.
+
+The Sandbox fails closed: before each sandboxed spawn, `orch` runs the Session's policy around `true`, and if that fails, it never runs the Agent unsandboxed. A new Session, a resume and *start anyway* are refused, and a restart leaves the Agent Errored. The message names the cause (`bwrap` missing, `kernel.unprivileged_userns_clone` or `user.max_user_namespaces` at 0, or Ubuntu's AppArmor restriction) and the ways out: fix the host, set `sandbox = false` under `[defaults]` in your global config, or `:preset` to a Preset with `sandbox = false`. A Preset's own `sandbox` setting wins over `[defaults] sandbox`. `orch` also runs a nested `bwrap` inside the policy; if that fails, the Agent still starts and its pane warns that Claude's own Bash sandbox won't work. If `bwrap` fails while starting the Agent, the error reads "The Sandbox failed to start: …".
 
 **Trust:** scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets (including a Preset with `sandbox = false`) that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
 

@@ -29,7 +29,9 @@ use crate::{
 const FINAL_OUTPUT_GRACE: Duration = Duration::from_secs(2);
 const KILL_GRACE: Duration = Duration::from_secs(1);
 const BWRAP: &str = "bwrap";
-const IGNORING_HANGUP: &str = r#"trap '' HUP; exec "$0" "$@""#;
+const IGNORING_HANGUP: &str = r#"trap '' HUP; exec 3>"$1"; shift; exec "$0" "$@""#;
+const STATUS_FD: &str = "3";
+const EARLY_OUTPUT_LIMIT: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct HoldConfig {
@@ -38,6 +40,7 @@ pub struct HoldConfig {
     pub cwd: PathBuf,
     pub argv: Vec<String>,
     pub sandbox: Option<Vec<String>>,
+    pub warning: Option<String>,
     pub env: Vec<(String, String)>,
     pub base: Option<String>,
     pub port_block: Option<PortBlock>,
@@ -59,6 +62,7 @@ impl HoldConfig {
             cwd,
             argv,
             sandbox: None,
+            warning: None,
             env: Vec::new(),
             base: None,
             port_block: None,
@@ -146,6 +150,7 @@ struct State {
     port_block: Option<PortBlock>,
     agent_pid: Option<u32>,
     sandboxed: bool,
+    early_output: Option<Vec<u8>>,
     emulator: Emulator,
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
@@ -164,16 +169,22 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
         .argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty Agent argv"))?;
-    let mut command = match &config.sandbox {
-        Some(policy) => {
+    let status = config
+        .sandbox
+        .as_ref()
+        .map(|_| config.socket.with_extension("status"));
+    let mut command = match (&config.sandbox, &status) {
+        (Some(policy), Some(status)) => {
             let mut command = CommandBuilder::new("sh");
             command.args(["-c", IGNORING_HANGUP, BWRAP]);
+            command.arg(status);
+            command.args(["--json-status-fd", STATUS_FD]);
             command.args(policy);
             command.arg("--");
             command.arg(program);
             command
         }
-        None => CommandBuilder::new(program),
+        _ => CommandBuilder::new(program),
     };
     command.args(args);
     command.cwd(&config.cwd);
@@ -190,6 +201,10 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
     let agent_pid = child.process_id();
 
     let (input, keystrokes) = mpsc::channel::<Vec<u8>>();
+    let mut emulator = Emulator::new(config.size, config.scrollback);
+    if let Some(warning) = &config.warning {
+        emulator.process(format!("\x1b[33morch: {warning}\x1b[0m\r\n").as_bytes());
+    }
     let mut log = EventLog::new(config.event_capacity);
     log.push(HolderEvent::Spawned { pid: agent_pid });
     let shared = Arc::new(Shared {
@@ -200,7 +215,8 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
             port_block: config.port_block,
             agent_pid,
             sandboxed: config.sandbox.is_some(),
-            emulator: Emulator::new(config.size, config.scrollback),
+            early_output: config.sandbox.as_ref().map(|_| Vec::new()),
+            emulator,
             master: pty.master,
             killer: child.clone_killer(),
             exit: None,
@@ -236,20 +252,32 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
         let _ = drained.send(());
     });
     let exit = shared.clone();
+    let sandbox_status = status;
     std::thread::spawn(move || {
         let status = child.wait();
         let _ = output_done.recv_timeout(FINAL_OUTPUT_GRACE);
-        let exit_info = match status {
+        let mut exit_info = match status {
             Ok(status) => AgentExit {
                 code: status.exit_code(),
                 signal: status.signal().map(String::from),
+                sandbox_failure: None,
             },
             Err(err) => AgentExit {
                 code: 1,
                 signal: Some(err.to_string()),
+                sandbox_failure: None,
             },
         };
         let mut state = exit.lock();
+        if let Some(status) = &sandbox_status {
+            let reported = std::fs::read_to_string(status).unwrap_or_default();
+            let _ = std::fs::remove_file(status);
+            let started = reported.contains("\"exit-code\"");
+            if !started && exit_info.signal.is_none() && exit_info.code != 0 {
+                let said = state.early_output.take().unwrap_or_default();
+                exit_info.sandbox_failure = Some(String::from_utf8_lossy(&said).trim().into());
+            }
+        }
         state.exit = Some(exit_info.clone());
         state.record(HolderEvent::Exited(exit_info));
         drop(state);
@@ -358,6 +386,10 @@ impl State {
     }
 
     fn output(&mut self, bytes: &[u8]) {
+        if let Some(early) = &mut self.early_output {
+            let room = EARLY_OUTPUT_LIMIT.saturating_sub(early.len());
+            early.extend_from_slice(&bytes[..bytes.len().min(room)]);
+        }
         self.emulator.process(bytes);
         for text in self.emulator.take_copies() {
             if let Some((_, upstream)) = &self.upstream {

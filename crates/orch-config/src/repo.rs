@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use orch_agent::{INHERIT, Preset, Presets, mode_from_name};
 use serde::Deserialize;
-use serde::de::IgnoredAny;
 
 use crate::error::ConfigProblem;
 use crate::notifications::{Notifications, NotificationsLayer};
@@ -35,8 +34,7 @@ pub(crate) struct RepoLayer {
     base: Option<String>,
     preset: Option<String>,
     review_command: Option<String>,
-    #[serde(rename = "sandbox")]
-    _sandbox: Option<IgnoredAny>,
+    sandbox: Option<bool>,
     #[serde(default)]
     agent: AgentLayer,
     #[serde(default)]
@@ -106,6 +104,7 @@ pub struct RepoConfig {
     base: Option<String>,
     preset: Option<Sourced<String>>,
     review_command: Option<String>,
+    sandbox: Option<bool>,
     agent: AgentConfig,
     agent_committed: bool,
     notifications: Notifications,
@@ -121,8 +120,14 @@ impl RepoConfig {
         approved: Option<&TrustHash>,
     ) -> Result<Self, (Source, ConfigProblem)> {
         for (source, layer) in &layers {
-            if *source == Source::RepoFile && layer.review_command.is_some() {
-                let key = "review_command";
+            if *source != Source::RepoFile {
+                continue;
+            }
+            let misplaced = [
+                ("review_command", layer.review_command.is_some()),
+                ("sandbox", layer.sandbox.is_some()),
+            ];
+            if let Some((key, _)) = misplaced.into_iter().find(|(_, set)| *set) {
                 return Err((*source, ConfigProblem::Misplaced { key }));
             }
         }
@@ -174,6 +179,7 @@ impl RepoConfig {
             preset: pick(&|layer| layer.preset.as_ref()),
             review_command: pick(&|layer| layer.review_command.as_ref())
                 .map(|sourced| sourced.value),
+            sandbox: layers.iter().rev().find_map(|(_, layer)| layer.sandbox),
             agent,
             agent_committed,
             notifications: Notifications::layered(
@@ -307,10 +313,13 @@ impl RepoConfig {
         if untrusted_definition || untrusted_default {
             return Err(PresetError::Untrusted(name.into()));
         }
-        self.presets()
+        let mut preset = self
+            .presets()
             .get(name)
             .cloned()
-            .ok_or_else(|| PresetError::Unknown(name.into()))
+            .ok_or_else(|| PresetError::Unknown(name.into()))?;
+        preset.sandbox = preset.sandbox.or(self.sandbox);
+        Ok(preset)
     }
 }
 

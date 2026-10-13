@@ -37,6 +37,7 @@ use orch_store::Store;
 use tokio::net::UnixListener;
 use tokio::signal::unix::{SignalKind, signal};
 
+pub use crate::sandbox::{ProbeResult, probe_host_sandbox};
 use crate::state::Daemon;
 use crate::store::StoreHandle;
 

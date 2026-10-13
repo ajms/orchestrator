@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
 use clap::Args;
+use orch_daemon::{ProbeResult, probe_host_sandbox};
 use orch_protocol::{Finding, ReconcileReport, Repair, Reply, Request};
 
 use crate::client;
@@ -23,16 +24,31 @@ pub fn run(args: DoctorArgs) -> ExitCode {
         Ok(report) => report,
         Err(err) => return failed(err),
     };
+    let sandbox = match std::env::current_exe() {
+        Ok(program) => probe_host_sandbox(program),
+        Err(err) => Err(err.to_string()),
+    };
     match args.json {
         true => match serde_json::to_string_pretty(&report) {
-            Ok(json) => println!("{json}"),
+            Ok(json) => {
+                println!("{json}");
+                eprint!("{}", render_sandbox(&sandbox));
+            }
             Err(err) => return failed(err),
         },
-        false => print!("{}", render(&report)),
+        false => print!("{}{}", render_sandbox(&sandbox), render(&report, &sandbox)),
     }
-    match report.findings().next() {
-        Some(_) => ExitCode::from(FINDINGS),
-        None => ExitCode::SUCCESS,
+    match (report.findings().next(), &sandbox) {
+        (None, Ok(_)) => ExitCode::SUCCESS,
+        _ => ExitCode::from(FINDINGS),
+    }
+}
+
+pub fn render_sandbox(sandbox: &ProbeResult) -> String {
+    match sandbox {
+        Ok(None) => "The Sandbox works, nested too.\n".into(),
+        Ok(Some(warning)) => format!("The Sandbox works.\n  warning: {warning}\n"),
+        Err(problem) => format!("! {problem}\n"),
     }
 }
 
@@ -40,12 +56,12 @@ fn failed(message: impl std::fmt::Display) -> ExitCode {
     client::fail("doctor", FAILED, message)
 }
 
-pub fn render(report: &ReconcileReport) -> String {
+pub fn render(report: &ReconcileReport, sandbox: &ProbeResult) -> String {
     let mut out = String::new();
     for repair in &report.repaired {
         out.push_str(&format!("Reconciled: {}\n", describe_repair(repair)));
     }
-    let count = report.findings().count();
+    let count = report.findings().count() + usize::from(sandbox.is_err());
     if count == 0 {
         out.push_str("No problems found.\n");
         return out;

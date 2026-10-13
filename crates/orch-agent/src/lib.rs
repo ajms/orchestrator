@@ -3,6 +3,7 @@ mod claude;
 mod guard;
 mod preset;
 mod sandbox;
+mod sandbox_failure;
 mod shell;
 
 pub use agent::{
@@ -13,3 +14,4 @@ pub use claude::{ClaudeCode, mode_from_name, mode_name};
 pub use guard::{GuardAnswer, GuardContext, GuardDecision, GuardHit, GuardKind, evaluate_guard};
 pub use preset::{INHERIT, Preset, PresetSelection, Presets, ReservedPresetName, UnknownPreset};
 pub use sandbox::{SandboxLayout, SandboxNeeds, sandbox_policy};
+pub use sandbox_failure::{SandboxFailure, sandbox_refusal};

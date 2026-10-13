@@ -64,3 +64,33 @@ fn approval_lapses_when_a_committed_preset_starts_leaving_the_sandbox() {
     let config = fx.loader.repo(fx.repo_path(), Some(&hash)).unwrap();
     assert!(!config.is_trusted());
 }
+
+#[test]
+fn the_global_switch_sets_the_sandbox_of_presets_that_do_not_say() {
+    let fx = Fixture::new();
+    fx.global("[defaults]\nsandbox = true\n\n[defaults.presets.open]\nsandbox = false\n");
+    let config = fx.untrusted();
+    assert!(config.select_preset(Some("plan")).unwrap().sandboxed());
+    assert!(config.select_preset(None).unwrap().sandboxed());
+    assert!(!config.select_preset(Some("open")).unwrap().sandboxed());
+}
+
+#[test]
+fn a_preset_that_asks_for_the_sandbox_keeps_it_when_the_global_switch_is_off() {
+    let fx = Fixture::new();
+    fx.global("[defaults]\nsandbox = false\n\n[defaults.presets.boxed]\nsandbox = true\n");
+    let config = fx.untrusted();
+    assert!(config.select_preset(Some("boxed")).unwrap().sandboxed());
+    assert!(!config.select_preset(Some("plan")).unwrap().sandboxed());
+}
+
+#[test]
+fn the_global_switch_cannot_be_committed() {
+    let fx = Fixture::new();
+    fx.repo_file("sandbox = false\n");
+    let err = fx.loader.repo(fx.repo_path(), None).unwrap_err();
+    assert!(
+        err.to_string().contains("sandbox is not allowed here"),
+        "{err}"
+    );
+}

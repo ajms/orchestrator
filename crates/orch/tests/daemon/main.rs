@@ -16,6 +16,7 @@ mod reconcile;
 mod recovery;
 mod repo_settings;
 mod sandbox;
+mod sandbox_failure;
 mod setup;
 mod stacking;
 mod status;

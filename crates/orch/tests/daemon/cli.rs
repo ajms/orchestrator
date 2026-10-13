@@ -54,21 +54,53 @@ fn stderr(output: &Output) -> String {
 #[tokio::test]
 async fn doctor_without_findings_says_so_and_succeeds() {
     let env = Env::new();
+    env.fake_bwrap();
     let _daemon = env.start_daemon().await;
 
     let output = orch(&env, &["doctor"]).await;
 
     assert!(output.status.success(), "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(report.contains("No problems found"), "{report}");
+    assert!(report.contains("The Sandbox works, nested too"), "{report}");
+}
+
+#[tokio::test]
+async fn doctor_reports_a_sandbox_that_cannot_run_as_a_problem() {
+    let env = Env::new();
+    env.fake_bwrap();
+    env.bwrap_switch("outer-fails", true);
+    let _daemon = env.start_daemon().await;
+
+    let output = orch(&env, &["doctor"]).await;
+
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(report.contains("! The Sandbox can't run"), "{report}");
+    assert!(!report.contains("No problems found"), "{report}");
+}
+
+#[tokio::test]
+async fn doctor_warns_when_the_sandbox_cannot_nest_but_succeeds() {
+    let env = Env::new();
+    env.fake_bwrap();
+    env.bwrap_switch("nested-fails", true);
+    let _daemon = env.start_daemon().await;
+
+    let output = orch(&env, &["doctor"]).await;
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let report = stdout(&output);
     assert!(
-        stdout(&output).contains("No problems found"),
-        "{}",
-        stdout(&output)
+        report.contains("warning: The Sandbox can't nest, so Claude's own Bash sandbox won't work"),
+        "{report}"
     );
 }
 
 #[tokio::test]
 async fn doctor_lists_findings_per_repo_with_their_fixes_and_fails() {
     let env = Env::new();
+    env.fake_bwrap();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = running_session(&env, &mut client, "Doctor").await;
@@ -87,6 +119,7 @@ async fn doctor_lists_findings_per_repo_with_their_fixes_and_fails() {
 #[tokio::test]
 async fn doctor_prints_the_report_as_json_on_request() {
     let env = Env::new();
+    env.fake_bwrap();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = running_session(&env, &mut client, "Doctor").await;
@@ -109,6 +142,7 @@ async fn doctor_prints_the_report_as_json_on_request() {
 #[tokio::test]
 async fn doctor_starts_the_daemon_when_none_is_running() {
     let env = Env::new();
+    env.fake_bwrap();
 
     let mut command = env.orch();
     command.arg("doctor").env_remove("DBUS_SESSION_BUS_ADDRESS");

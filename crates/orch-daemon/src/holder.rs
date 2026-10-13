@@ -78,6 +78,7 @@ impl Daemon {
                         )
                     {
                         live.status.observe(exit_observation(exit), now);
+                        note_sandbox_failure(live, exit);
                     }
                     live.apply_pane_size();
                     live.deliver_prompt();
@@ -260,6 +261,7 @@ impl Daemon {
             HolderEvent::Spawned { .. } => live.status.observe(Observation::Spawned, now),
             HolderEvent::Exited(exit) => {
                 live.prompts.clear();
+                note_sandbox_failure(live, &exit);
                 live.status.observe(exit_observation(&exit), now)
             }
             HolderEvent::Hook { payload, guard } => {
@@ -453,6 +455,12 @@ fn describe_subagents(live: &mut Live, events: &[AgentEvent]) {
         if let Some(description) = transcripts.describe(id).filter(|_| undescribed) {
             live.status.describe_subagent(id, description);
         }
+    }
+}
+
+fn note_sandbox_failure(live: &mut Live, exit: &AgentExit) {
+    if let Some(said) = &exit.sandbox_failure {
+        live.last_error = Some(format!("The Sandbox failed to start: {said}"));
     }
 }
 

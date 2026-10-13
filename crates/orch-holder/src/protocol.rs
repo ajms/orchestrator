@@ -111,6 +111,8 @@ pub enum AgentStatus {
 pub struct AgentExit {
     pub code: u32,
     pub signal: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_failure: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

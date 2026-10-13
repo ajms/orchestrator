@@ -67,3 +67,40 @@ async fn an_unsandboxed_agent_says_so() {
     let (_, hello) = held.attach().await;
     assert!(!hello.sandboxed);
 }
+
+#[tokio::test]
+async fn a_sandbox_that_cannot_start_is_told_apart_from_an_agent_crash() {
+    if !bwrap_runs() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    let missing = sandbox.path("gone");
+    let policy = serde_json::to_string(&[
+        "--ro-bind",
+        "/",
+        "/",
+        "--bind",
+        &missing.display().to_string(),
+        "/mnt",
+    ])
+    .unwrap();
+    let held = sandbox.hold_with("s1", "", &["--sandbox", &policy]);
+    let (mut client, _) = held.attach().await;
+
+    let exit = wait_for_exit(&mut client).await;
+    let failure = exit.sandbox_failure.expect("a Sandbox failure");
+    assert!(failure.contains("Can't find source path"), "{failure}");
+}
+
+#[tokio::test]
+async fn an_agent_failing_inside_the_sandbox_is_not_a_sandbox_failure() {
+    if !bwrap_runs() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    let held = sandbox.hold_with("s1", "exit 3\n", &["--sandbox", MINIMAL_POLICY]);
+    let (mut client, _) = held.attach().await;
+
+    let exit = wait_for_exit(&mut client).await;
+    assert_eq!((exit.code, exit.sandbox_failure), (3, None));
+}

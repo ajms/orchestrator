@@ -17,6 +17,8 @@ pub struct HoldArgs {
     cwd: Option<PathBuf>,
     #[arg(long, value_parser = parse_policy)]
     sandbox: Option<Policy>,
+    #[arg(long, requires = "sandbox")]
+    warning: Option<String>,
     #[arg(long = "env", value_parser = parse_env)]
     env: Vec<(String, String)>,
     #[arg(long)]
@@ -70,6 +72,7 @@ pub fn run(args: HoldArgs) -> ExitCode {
     let socket = socket_path(&runtime_dir, &args.session);
     let mut config = HoldConfig::new(args.session, socket, cwd, args.argv);
     config.sandbox = args.sandbox.map(|Policy(args)| args);
+    config.warning = args.warning;
     config.env = args.env;
     config.base = args.base;
     config.port_block = args
