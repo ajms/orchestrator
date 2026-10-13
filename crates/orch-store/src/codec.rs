@@ -108,6 +108,7 @@ impl Named for GuardKind {
         GuardKind::WorktreeManagement,
         GuardKind::WriteOutsideWorktree,
         GuardKind::Push,
+        GuardKind::PullRequest,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -116,6 +117,7 @@ impl Named for GuardKind {
             GuardKind::WorktreeManagement => "worktree_management",
             GuardKind::WriteOutsideWorktree => "write_outside_worktree",
             GuardKind::Push => "push",
+            GuardKind::PullRequest => "pull_request",
         }
     }
 }

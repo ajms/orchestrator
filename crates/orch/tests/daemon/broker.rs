@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use orch_core::SessionId;
-use orch_protocol::{CreateSession, GuardChoice, GuardKindView, Reply, Request, SessionView};
+use orch_protocol::{
+    CreateSession, GuardChoice, GuardKindView, PhaseView, Reply, Request, SessionView,
+};
 
 use crate::common::*;
 
@@ -216,11 +218,24 @@ async fn git_config_the_user_passes_in_the_environment_still_reaches_the_agent()
 }
 
 async fn answer_push(client: &mut TestClient, id: &SessionId, choice: GuardChoice) {
+    answer_broker(client, id, GuardKindView::Push, choice).await;
+}
+
+async fn answer_pr_change(client: &mut TestClient, id: &SessionId, choice: GuardChoice) {
+    answer_broker(client, id, GuardKindView::PullRequest, choice).await;
+}
+
+async fn answer_broker(
+    client: &mut TestClient,
+    id: &SessionId,
+    kind: GuardKindView,
+    choice: GuardChoice,
+) {
     let asking = client
-        .until(id, "a push prompt", |view| !view.guard_prompts.is_empty())
+        .until(id, "a Broker prompt", |view| !view.guard_prompts.is_empty())
         .await;
     let prompt = &asking.guard_prompts[0];
-    assert_eq!(prompt.kind, GuardKindView::Push);
+    assert_eq!(prompt.kind, kind);
     assert_eq!(prompt.target, asking.branch);
     let reply = client
         .request(Request::AnswerGuard {
@@ -288,4 +303,181 @@ async fn an_unsandboxed_agent_pushes_straight_to_origin_as_before() {
         Some(git(&view.worktree, &["rev-parse", "HEAD"]))
     );
     assert!(!pane.text().contains("Broker"));
+}
+
+fn on_github(extra: &str) -> Env {
+    let env = Env::new();
+    env.write_config(&format!("{extra}{BOXED}"));
+    env.fake_bwrap();
+    env.fake_gh();
+    let repo = env.repo("app");
+    git(
+        &repo,
+        &["remote", "add", "origin", "git@github.com:acme/app.git"],
+    );
+    env
+}
+
+fn gh_calls(env: &Env) -> Vec<Vec<String>> {
+    let repo = env.path("repos/app").canonicalize().unwrap();
+    let mut calls: Vec<Vec<String>> = Vec::new();
+    for line in env.gh_calls().lines() {
+        match std::path::Path::new(line) == repo {
+            true => calls.push(Vec::new()),
+            false => calls.last_mut().unwrap().push(line.into()),
+        }
+    }
+    calls
+}
+
+fn args(line: &str) -> Vec<String> {
+    line.split(' ').map(String::from).collect()
+}
+
+#[tokio::test]
+async fn a_sandboxed_agent_reads_its_repo_through_gh() {
+    let env = on_github("");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let out = view.worktree.join("out");
+
+    let read = format!("gh issue view 7 --json title -q .title > {}", out.display());
+    assert_eq!(shell(&mut pane, &read).await, "exit 0");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "issue 7\n");
+    assert_eq!(
+        gh_calls(&env),
+        [args(
+            "issue view 7 --json title --jq .title --repo acme/app"
+        )]
+    );
+    pane.wait_for_text("Broker: gh issue view 7").await;
+}
+
+#[tokio::test]
+async fn a_sandboxed_agent_creates_and_edits_its_own_pr_with_the_base_fixed() {
+    let env = on_github("");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let (body, out) = (view.worktree.join("body.md"), view.worktree.join("out"));
+    std::fs::write(&body, "Why").unwrap();
+    let branch = view.branch.as_str();
+
+    let create = format!(
+        "gh pr create -t Title --body-file {} --base main --head {branch} > {}",
+        body.display(),
+        out.display()
+    );
+    assert_eq!(shell(&mut pane, &create).await, "exit 0");
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        "https://github.com/acme/app/pull/42\n"
+    );
+    env.gh_lists(r#"[{"number":42}]"#);
+    assert_eq!(
+        shell(&mut pane, "gh pr edit 42 --title=New").await,
+        "exit 0"
+    );
+    assert_eq!(shell(&mut pane, "gh pr ready --undo").await, "exit 0");
+
+    let calls = gh_calls(&env);
+    let fixed = |line: &str| args(&line.replace("BRANCH", branch));
+    let mut created = fixed("pr create --head BRANCH --base main --title Title --body");
+    created.extend(["Why".into(), "--repo".into(), "acme/app".into()]);
+    assert_eq!(calls[0], created);
+    assert_eq!(
+        calls.last().unwrap(),
+        &fixed("pr ready BRANCH --undo --repo acme/app")
+    );
+    assert!(calls.contains(&fixed("pr edit BRANCH --title New --repo acme/app")));
+    pane.wait_for_text("Broker: gh pr ready").await;
+}
+
+#[tokio::test]
+async fn merges_other_repos_and_a_changed_base_are_refused_with_a_message() {
+    let env = on_github("");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "boxed").await;
+    let err = view.worktree.join("err");
+
+    for (call, says) in [
+        ("gh pr merge 42", "doesn't run `gh pr merge`"),
+        ("gh pr comment 42 -b hi", "doesn't run `gh pr comment`"),
+        ("gh issue view 1 -R other/app", "not other/app"),
+        (
+            "gh pr create --base develop",
+            "fixed to the Base branch main",
+        ),
+        (
+            "gh pr edit 42 --base develop",
+            "fixed to the Base branch main",
+        ),
+        ("gh api -X POST repos/acme/app/issues", "only GET"),
+        ("gh api repos/other/app/issues", "only repos/acme/app"),
+    ] {
+        let refused = format!("{call} 2> {}", err.display());
+        assert_ne!(shell(&mut pane, &refused).await, "exit 0", "{call}");
+        let message = std::fs::read_to_string(&err).unwrap();
+        assert!(message.contains(says), "{call}: {message}");
+    }
+    assert_eq!(gh_calls(&env), Vec::<Vec<String>>::new());
+    pane.wait_for_text("Broker refused: the Broker doesn't run `gh pr merge`")
+        .await;
+}
+
+#[tokio::test]
+async fn an_ask_session_prompts_before_a_pr_change_but_never_for_a_read() {
+    let env = on_github(ALL_SANDBOXED);
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _, mut pane) = session(&env, &mut client, "ask").await;
+
+    assert_eq!(shell(&mut pane, "gh pr list").await, "exit 0");
+    let create = "gh pr create --fill";
+    pane.type_line(&format!("sh {create}")).await;
+    answer_pr_change(&mut client, &id, GuardChoice::Deny).await;
+    assert_ne!(shell_result(&mut pane, create).await, "exit 0");
+    assert_eq!(gh_calls(&env).len(), 1);
+
+    pane.type_line(&format!("sh {create} ")).await;
+    answer_pr_change(&mut client, &id, GuardChoice::AllowOnce).await;
+    assert_eq!(
+        shell_result(&mut pane, &format!("{create} ")).await,
+        "exit 0"
+    );
+    assert_eq!(gh_calls(&env)[1][..2], args("pr create"));
+}
+
+#[tokio::test]
+async fn a_plan_session_prompts_before_a_pr_edit() {
+    let env = on_github(ALL_SANDBOXED);
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _, mut pane) = session(&env, &mut client, "plan").await;
+
+    let edit = "gh pr edit --body Better";
+    pane.type_line(&format!("sh {edit}")).await;
+    answer_pr_change(&mut client, &id, GuardChoice::AllowOnce).await;
+    assert_eq!(shell_result(&mut pane, edit).await, "exit 0");
+    assert_eq!(gh_calls(&env)[0][..2], args("pr edit"));
+}
+
+#[tokio::test]
+async fn a_pr_the_agent_creates_puts_the_session_in_pr_open() {
+    let env = on_github("");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _, mut pane) = session(&env, &mut client, "boxed").await;
+
+    assert_eq!(
+        shell(&mut pane, "gh pr create -t Title -b Why").await,
+        "exit 0"
+    );
+
+    let view = client
+        .until(&id, "PR open", |view| view.phase == PhaseView::PrOpen)
+        .await;
+    assert_eq!(view.flags.pr_number, Some(42));
 }

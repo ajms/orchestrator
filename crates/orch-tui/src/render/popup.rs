@@ -209,6 +209,7 @@ fn guard_kind(kind: GuardKindView) -> &'static str {
         GuardKindView::WorktreeManagement => "worktrees",
         GuardKindView::WriteOutsideWorktree => "files outside the Worktree",
         GuardKindView::Push => "Branch on origin, through the Broker",
+        GuardKindView::PullRequest => "PR on GitHub, through the Broker",
     }
 }
 

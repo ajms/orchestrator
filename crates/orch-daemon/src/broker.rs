@@ -9,15 +9,18 @@ use orch_holder::{BrokerReply, BrokerRequest, GuardId, RefUpdate, RemoteRef, ToH
 use orch_store::SessionRecord;
 use tokio::sync::oneshot;
 
+use crate::broker_gh::{GitHubRepo, Limits, PrChange, gh_call};
 use crate::lifecycle::{select_preset, with_git};
+use crate::pr::{gh_brokered, open_pr_of, pr_number};
 use crate::state::{Daemon, PendingGuard};
 
 pub(crate) type EnvVars = Vec<(String, String)>;
 
 pub(crate) const SHIMS_DIR: &str = "shims";
 const REMOTE_HELPER: &str = "git-remote-orch";
+const GH_SHIM: &str = "gh";
 const PUSH_URL: &str = "orch::origin";
-const DENIED: &str = "the user denied this push in the Orchestrator";
+const DENIED: &str = "the user denied this in the Orchestrator";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct AllowedPush {
@@ -90,18 +93,20 @@ fn allowed_update(update: &RefUpdate, branch: &str, base: &str) -> Result<Allowe
     })
 }
 
-fn push_asks(mode: Option<PermissionMode>) -> bool {
+fn change_asks(mode: Option<PermissionMode>) -> bool {
     matches!(mode, Some(PermissionMode::Plan | PermissionMode::Default))
 }
 
 pub(crate) fn install_shims(dir: &Path, orch: &Path) -> Result<EnvVars, String> {
-    let helper = dir.join(REMOTE_HELPER);
     let quoted = orch.to_string_lossy().replace('\'', r"'\''");
-    let script = format!("#!/bin/sh\nexec '{quoted}' broker git-remote \"$@\"\n");
-    std::fs::create_dir_all(dir)
-        .and_then(|()| std::fs::write(&helper, script))
-        .and_then(|()| std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)))
-        .map_err(|err| format!("installing the Broker's git shim: {err}"))?;
+    std::fs::create_dir_all(dir).map_err(|err| format!("installing the Broker's shims: {err}"))?;
+    for (name, command) in [(REMOTE_HELPER, "git-remote"), (GH_SHIM, "gh")] {
+        let shim = dir.join(name);
+        let script = format!("#!/bin/sh\nexec '{quoted}' broker {command} \"$@\"\n");
+        std::fs::write(&shim, script)
+            .and_then(|()| std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)))
+            .map_err(|err| format!("installing the Broker's {name} shim: {err}"))?;
+    }
     let path = match std::env::var("PATH") {
         Ok(path) if !path.is_empty() => format!("{}:{path}", dir.display()),
         _ => dir.display().to_string(),
@@ -119,6 +124,18 @@ pub(crate) fn install_shims(dir: &Path, orch: &Path) -> Result<EnvVars, String> 
         ),
         (format!("GIT_CONFIG_VALUE_{next}"), PUSH_URL.into()),
     ])
+}
+
+async fn origin_url(repo: &Path) -> Option<String> {
+    let mut command = crate::subprocess::command("git");
+    command
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--get", "remote.origin.url"]);
+    let limit = std::time::Duration::from_secs(10);
+    crate::subprocess::run(command, None, limit, "git config")
+        .await
+        .ok()
 }
 
 impl Daemon {
@@ -168,8 +185,12 @@ impl Daemon {
             }
             BrokerRequest::Push { updates } => {
                 let push = allowed_push(&updates, &record.branch, &record.base)?;
-                if self.push_asks(&record, &repo).await {
-                    self.ask_push(id, broker, &record.branch, push.lease.is_some())
+                if self.change_asks(&record, &repo).await {
+                    let tool = match push.lease.is_some() {
+                        true => "git push --force-with-lease",
+                        false => "git push",
+                    };
+                    self.ask(id, broker, GuardKind::Push, &record.branch, tool)
                         .await?;
                 }
                 let leased = push.lease.is_some();
@@ -193,26 +214,71 @@ impl Daemon {
                     said: format!("pushed {} to origin{how}", record.branch),
                 })
             }
+            BrokerRequest::Gh { args } => {
+                let origin = origin_url(&repo).await;
+                let github = origin.as_deref().and_then(GitHubRepo::from_remote).ok_or(
+                    "the Broker's gh reaches only this Repo on GitHub, and origin isn't on GitHub",
+                )?;
+                let limits = Limits {
+                    repo: &github,
+                    branch: &record.branch,
+                    base: &record.base,
+                };
+                let call = gh_call(&args, &limits)?;
+                if let Some(change) = &call.change {
+                    if let PrChange::Edit { pr: Some(number) } = change
+                        && open_pr_of(&repo, &record.branch).await != Some(*number)
+                    {
+                        return Err(format!(
+                            "the Broker edits only this Session's PR, for {}",
+                            record.branch
+                        ));
+                    }
+                    if self.change_asks(&record, &repo).await {
+                        let tool = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
+                        self.ask(
+                            id,
+                            broker,
+                            GuardKind::PullRequest,
+                            &record.branch,
+                            &format!("gh {tool}"),
+                        )
+                        .await?;
+                    }
+                }
+                let output = gh_brokered(&repo, &call.args).await?;
+                if call.change == Some(PrChange::Create)
+                    && output.code == 0
+                    && let Some(number) = pr_number(&output.stdout)
+                {
+                    let _ = self.record_pr(id, number);
+                }
+                Ok(BrokerReply::Gh {
+                    said: call.said,
+                    output,
+                })
+            }
         }
     }
 
-    async fn push_asks(&self, record: &SessionRecord, repo: &Path) -> bool {
+    async fn change_asks(&self, record: &SessionRecord, repo: &Path) -> bool {
         let Ok(config) = self.repo_config(repo).await else {
             return true;
         };
         select_preset(repo, &config, Some(&record.preset))
-            .map_or(true, |preset| push_asks(preset.mode))
+            .map_or(true, |preset| change_asks(preset.mode))
     }
 
-    async fn ask_push(
+    async fn ask(
         &self,
         id: &SessionId,
         broker: GuardId,
+        kind: GuardKind,
         branch: &str,
-        leased: bool,
+        tool: &str,
     ) -> Result<(), String> {
         let hit = GuardHit {
-            kind: GuardKind::Push,
+            kind,
             target: branch.into(),
         };
         let (waiter, answer) = oneshot::channel();
@@ -222,10 +288,6 @@ impl Daemon {
             if live.record.guard_allowances.contains(&hit) {
                 return Ok(());
             }
-            let tool = match leased {
-                true => "git push --force-with-lease",
-                false => "git push",
-            };
             live.prompts.push(PendingGuard {
                 id: broker,
                 tool: tool.into(),

@@ -20,8 +20,8 @@ pub use paths::{
     locate_socket, socket_path,
 };
 pub use protocol::{
-    AgentExit, AgentStatus, BrokerReply, BrokerRequest, FromHolder, GuardId, Hello, HolderEvent,
-    PROTOCOL_VERSION, RefUpdate, RemoteRef, Size, ToHolder,
+    AgentExit, AgentStatus, BrokerReply, BrokerRequest, FromHolder, GhOutput, GuardId, Hello,
+    HolderEvent, PROTOCOL_VERSION, RefUpdate, RemoteRef, Size, ToHolder,
 };
 pub use report::{report, request_broker, request_guard};
 pub use screen::{Emulator, ScreenCopy, ScreenSnapshot};

@@ -4,21 +4,33 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 use clap::Subcommand;
-use orch_holder::{BrokerReply, BrokerRequest, HOLDER_SOCKET_ENV, RefUpdate, request_broker};
+use orch_holder::{
+    BrokerReply, BrokerRequest, GhOutput, HOLDER_SOCKET_ENV, RefUpdate, request_broker,
+};
 
 const ABSENT: &str = "0000000000000000000000000000000000000000";
 
 #[derive(Subcommand)]
 pub enum BrokerCommand {
-    GitRemote { remote: String, url: Option<String> },
+    GitRemote {
+        remote: String,
+        url: Option<String>,
+    },
+    #[command(disable_help_flag = true)]
+    Gh {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 pub fn run(command: BrokerCommand) -> ExitCode {
-    let BrokerCommand::GitRemote { .. } = command;
     let Some(socket) = std::env::var_os(HOLDER_SOCKET_ENV).map(PathBuf::from) else {
-        eprintln!("orch: pushing goes through the Broker, which only a sandboxed Session has");
+        eprintln!("orch: this goes through the Broker, which only a sandboxed Session has");
         return ExitCode::FAILURE;
     };
+    if let BrokerCommand::Gh { args } = command {
+        return gh(&socket, args);
+    }
     let ask = |request| request_broker(&socket, request);
     let stdin = io::stdin().lock();
     match remote_helper(stdin, io::stdout().lock(), ask) {
@@ -28,6 +40,67 @@ pub fn run(command: BrokerCommand) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn gh(socket: &std::path::Path, args: Vec<String>) -> ExitCode {
+    let reply =
+        inline_body_file(args).and_then(|args| request_broker(socket, BrokerRequest::Gh { args }));
+    match reply {
+        Ok(BrokerReply::Gh {
+            output:
+                GhOutput {
+                    stdout,
+                    stderr,
+                    code,
+                },
+            ..
+        }) => {
+            print!("{stdout}");
+            eprint!("{stderr}");
+            let _ = io::stdout().flush();
+            ExitCode::from(u8::try_from(code).unwrap_or(1))
+        }
+        Ok(BrokerReply::Refused { reason }) => {
+            eprintln!("orch: {reason}");
+            ExitCode::FAILURE
+        }
+        Ok(other) => {
+            eprintln!("orch: the Broker answered out of turn: {other:?}");
+            ExitCode::FAILURE
+        }
+        Err(err) => {
+            eprintln!("orch: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn inline_body_file(args: Vec<String>) -> io::Result<Vec<String>> {
+    if !matches!(args.get(..2), Some([pr, create_or_edit]) if pr == "pr" && matches!(create_or_edit.as_str(), "create" | "edit"))
+    {
+        return Ok(args);
+    }
+    let mut inlined = Vec::with_capacity(args.len());
+    let mut rest = args.into_iter();
+    while let Some(arg) = rest.next() {
+        let path = match arg.as_str() {
+            "--body-file" | "-F" => rest.next(),
+            _ => arg
+                .strip_prefix("--body-file=")
+                .or_else(|| arg.strip_prefix("-F"))
+                .map(String::from),
+        };
+        let Some(path) = path else {
+            inlined.push(arg);
+            continue;
+        };
+        let body = match path.as_str() {
+            "-" => io::read_to_string(io::stdin())?,
+            path => std::fs::read_to_string(path)?,
+        };
+        inlined.extend(["--body".into(), body]);
+    }
+    Ok(inlined)
 }
 
 fn remote_helper(
@@ -59,7 +132,7 @@ fn remote_helper(
                 let refs = match ask(BrokerRequest::Refs)? {
                     BrokerReply::Refs { refs } => refs,
                     BrokerReply::Refused { reason } => return Err(io::Error::other(reason)),
-                    BrokerReply::Done { said } => return Err(io::Error::other(said)),
+                    other => return Err(io::Error::other(format!("{other:?}"))),
                 };
                 for listed in refs {
                     writeln!(out, "{} {}", listed.commit, listed.name)?;
@@ -73,7 +146,7 @@ fn remote_helper(
                 let outcome = match ask(BrokerRequest::Push { updates })? {
                     BrokerReply::Done { .. } => None,
                     BrokerReply::Refused { reason } => Some(reason),
-                    BrokerReply::Refs { .. } => Some("the Broker answered out of turn".into()),
+                    _ => Some("the Broker answered out of turn".into()),
                 };
                 for dst in dsts {
                     match &outcome {

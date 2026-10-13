@@ -70,6 +70,7 @@ pub enum ToHolder {
 pub enum BrokerRequest {
     Refs,
     Push { updates: Vec<RefUpdate> },
+    Gh { args: Vec<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +88,14 @@ pub enum BrokerReply {
     Refs { refs: Vec<RemoteRef> },
     Done { said: String },
     Refused { reason: String },
+    Gh { said: String, output: GhOutput },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GhOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub code: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

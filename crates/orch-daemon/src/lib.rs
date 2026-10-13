@@ -1,5 +1,6 @@
 mod agents;
 mod broker;
+mod broker_gh;
 mod cleanup;
 mod client;
 mod discard;

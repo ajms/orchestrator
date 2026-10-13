@@ -227,7 +227,9 @@ case "$1 $2" in
     [ -f DIR/fail-create ] && { echo 'gh: permission denied' >&2; exit 1; }
     echo https://github.com/acme/app/pull/42 ;;
   'pr view') cat DIR/view.json ;;
-  'pr edit') ;;
+  'pr edit'|'pr ready') ;;
+  'issue view') echo "issue $3" ;;
+  'api '*) echo '{"name":"app"}' ;;
   'pr list') cat DIR/list.json 2>/dev/null || echo '[]' ;;
   *) exit 1 ;;
 esac
