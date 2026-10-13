@@ -84,7 +84,7 @@ fn describe(item: &TrustItem) -> String {
         }
         TrustItem::Preset(preset) => format!("Preset {}", preset.name),
         TrustItem::DefaultPreset(preset) => format!("default Preset {}", preset.name),
-        TrustItem::SandboxPath(list, path) => format!("Sandbox {}: {path}", list.name()),
+        TrustItem::SandboxPath { list, path } => format!("Sandbox {}: {path}", list.name()),
     }
 }
 

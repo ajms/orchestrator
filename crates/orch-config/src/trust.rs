@@ -34,7 +34,10 @@ pub enum TrustItem {
     },
     Preset(Preset),
     DefaultPreset(Preset),
-    SandboxPath(SandboxList, String),
+    SandboxPath {
+        list: SandboxList,
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +90,7 @@ fn fields(item: &TrustItem) -> Vec<String> {
     match item {
         TrustItem::SetupScript(script) => vec!["setup".into(), script.clone()],
         TrustItem::TeardownScript(script) => vec!["teardown".into(), script.clone()],
-        TrustItem::SandboxPath(list, path) => {
+        TrustItem::SandboxPath { list, path } => {
             vec!["sandbox_path".into(), list.name().into(), path.clone()]
         }
         TrustItem::Agent { binary, args } => {

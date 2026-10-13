@@ -435,9 +435,10 @@ async fn configured_writable_paths_are_writable_and_hidden_ones_are_masked() {
     let env = Env::new();
     env.real_bwrap();
     seed(env.path("home/.cargo/env"), "toolchain");
+    let profile = seed(env.path("home/.profile"), "");
     let data = seed(env.path("data/secret.txt"), "secret");
     env.write_config(&format!(
-        "[defaults.sandbox]\nwritable = [\"~/.cache/tool\"]\nhidden = [\"~/.cargo\", {:?}]\n",
+        "[defaults.sandbox]\nwritable = [\"~/.cache/tool\", \"~/.profile\"]\nhidden = [\"~/.cargo\", {:?}]\n",
         env.path("data").display()
     ));
     let _daemon = env.start_daemon().await;
@@ -447,6 +448,8 @@ async fn configured_writable_paths_are_writable_and_hidden_ones_are_masked() {
     let cached = env.path("home/.cache/tool/blob");
     assert_eq!(run(&mut pane, "write", &cached).await, "ok");
     assert!(cached.exists());
+    assert_eq!(run(&mut pane, "write", &profile).await, "ok");
+    assert_eq!(std::fs::read_to_string(&profile).unwrap(), "x");
     assert_eq!(
         run(&mut pane, "exists", &env.path("home/.cargo/env")).await,
         "no"

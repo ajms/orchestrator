@@ -136,11 +136,16 @@ pub fn sandbox_carve_outs(
 }
 
 pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String> {
+    let agents_paths: Vec<_> = needs
+        .writable
+        .iter()
+        .chain(&needs.read_only)
+        .chain(&needs.carve_outs)
+        .collect();
+    let agents_own = |path: &Path| agents_paths.iter().any(|agents| path.starts_with(agents));
     let mut mounts = vec![Mount {
-        kind: Kind::Bind,
         source: layout.tmp.clone(),
-        target: SANDBOX_TMP.into(),
-        maskable: false,
+        ..Mount::same(Kind::Bind, Path::new(SANDBOX_TMP))
     }];
     mounts.push(Mount::same(Kind::Tmpfs, &layout.home));
     mounts.extend(
@@ -153,17 +158,16 @@ pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String>
     let toolchains = HOME_READ_ONLY.iter().map(|entry| layout.home.join(entry));
     mounts.extend(toolchains.map(|path| Mount::maskable(Kind::ReadOnlyTry, &path)));
     let configured = &layout.configured;
+    let readable = configured
+        .readable
+        .iter()
+        .map(|path| (Kind::ReadOnlyTry, path));
+    let writable = configured.writable.iter().map(|path| (Kind::Bind, path));
     mounts.extend(
-        configured
-            .readable
-            .iter()
-            .map(|path| Mount::maskable(Kind::ReadOnlyTry, path)),
-    );
-    mounts.extend(
-        configured
-            .writable
-            .iter()
-            .map(|path| Mount::maskable(Kind::Bind, path)),
+        readable
+            .chain(writable)
+            .filter(|(_, path)| !agents_own(path))
+            .map(|(kind, path)| Mount::maskable(kind, path)),
     );
     let read_only = needs.read_only.iter().chain(&layout.read_only);
     mounts.extend(read_only.map(|path| Mount::same(Kind::ReadOnlyTry, path)));
@@ -183,6 +187,7 @@ pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String>
     ] {
         mounts.push(Mount::same(Kind::Bind, path));
     }
+    mounts.sort_by_key(|mount| mount.target.components().count());
 
     let carve_outs = sandbox_carve_outs(layout, needs);
     mounts.extend(
@@ -202,16 +207,11 @@ pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String>
             .filter(|mount| mount.target.starts_with(hidden) && mount.target != *hidden);
         args.extend(inside.flat_map(Mount::args));
     }
-    let agents_paths: Vec<_> = needs
-        .writable
+    for hidden in configured
+        .hidden
         .iter()
-        .chain(&needs.read_only)
-        .chain(&needs.carve_outs)
-        .collect();
-    for hidden in &configured.hidden {
-        if agents_paths.iter().any(|path| hidden.starts_with(path)) {
-            continue;
-        }
+        .filter(|hidden| !agents_own(hidden))
+    {
         args.extend(Mount::same(Kind::Tmpfs, hidden).args());
         let kept = mounts
             .iter()

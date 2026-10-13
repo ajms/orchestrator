@@ -137,8 +137,14 @@ fn committed_readable_and_writable_paths_need_trust_before_a_sandboxed_spawn() {
     assert_eq!(
         untrusted.trust_request().unwrap().items,
         [
-            TrustItem::SandboxPath(SandboxList::Readable, "~/.aws".into()),
-            TrustItem::SandboxPath(SandboxList::Writable, "~/.bashrc".into()),
+            TrustItem::SandboxPath {
+                list: SandboxList::Readable,
+                path: "~/.aws".into(),
+            },
+            TrustItem::SandboxPath {
+                list: SandboxList::Writable,
+                path: "~/.bashrc".into(),
+            },
         ]
     );
     assert_eq!(untrusted.sandbox_paths(), Err(Untrusted));
@@ -236,4 +242,29 @@ fn naming_a_hard_wall_as_readable_or_writable_is_a_config_error() {
     .unwrap();
     fx.repo_file("");
     assert!(loader.repo(fx.repo_path(), None).is_err());
+}
+
+#[test]
+fn a_symlink_does_not_get_a_path_past_the_hard_walls() {
+    let fx = Fixture::new();
+    let real_home = fx.dir.path().join("real-home");
+    std::fs::create_dir_all(real_home.join(".config/orchestrator")).unwrap();
+    let home = fx.dir.path().join("linked-home");
+    std::os::unix::fs::symlink(&real_home, &home).unwrap();
+    std::os::unix::fs::symlink(real_home.join(".config/orchestrator"), real_home.join("x"))
+        .unwrap();
+    let loader = orch_config::ConfigLoader::from_env_vars(|key| {
+        (key == "HOME").then(|| home.display().to_string())
+    })
+    .unwrap();
+
+    for wall in [
+        real_home.display().to_string(),
+        "~/x".into(),
+        "~/x/state".into(),
+    ] {
+        fx.repo_file(&format!("[sandbox]\nwritable = [{wall:?}]\n"));
+        let err = loader.repo(fx.repo_path(), None).unwrap_err();
+        assert!(err.to_string().contains("hard wall"), "{wall}: {err}");
+    }
 }

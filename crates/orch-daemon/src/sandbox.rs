@@ -179,12 +179,13 @@ fn layout(
         main_checkout: paths.main_checkout,
         git_common_dir: paths.git_common_dir,
         read_only: vec![orch_program],
-        configured: present(configured)?,
+        configured: prepared_on_disk(configured)?,
     })
 }
 
-fn present(configured: &SandboxPaths) -> Result<SandboxPaths, String> {
-    for dir in &configured.writable {
+fn prepared_on_disk(configured: &SandboxPaths) -> Result<SandboxPaths, String> {
+    let missing = configured.writable.iter().filter(|path| !path.exists());
+    for dir in missing {
         std::fs::create_dir_all(dir).map_err(|err| format!("creating {}: {err}", dir.display()))?;
     }
     let mut hidden = Vec::new();

@@ -225,9 +225,10 @@ writable = ["~/.cache", "~/.npm", "~/.cargo/registry"] # bound writable
 hidden = ["~/.sdkman", "/srv/data"]                    # masked with an empty dir
 ```
 
-- `hidden` beats `readable`, `writable` and the shipped toolchains, but never Claude's own paths: hiding `~/.claude` has no effect, so the Agent can't be broken that way.
-- A missing `writable` path is created as a directory before the Agent starts. Missing `readable` and `hidden` paths are skipped. A `hidden` path must be a directory.
-- `readable` and `writable` may not name `/`, `$HOME` or a directory that contains it, `orch`'s config or state dirs (or a directory containing them), `.git/hooks`, `.git/config`, or Claude's read-only config (`settings.json`, `hooks/`, `skills/` and the rest). Doing so is a config error.
+- `hidden` beats `readable`, `writable` and the shipped toolchains. A deeper `readable` or `writable` entry wins over the one it sits in, so `writable = ["~/x"]` with `readable = ["~/x/sub"]` leaves `sub` read-only.
+- Claude's own paths beat all three lists: an entry at or inside `~/.claude` is ignored, so the Agent can't be broken that way.
+- A `writable` entry can be a file or a directory; a missing one is created as a directory before the Agent starts. Missing `readable` and `hidden` paths are skipped. A `hidden` path must be a directory.
+- `readable` and `writable` may not name `/`, `$HOME` or a directory that contains it, `orch`'s config or state dirs (or a directory containing them), `.git/hooks`, `.git/config`, or Claude's read-only config (`settings.json`, `hooks/`, `skills/` and the rest), also when reached through a symlink. Doing so is a config error.
 - In `.orchestrator.toml` each `readable` and `writable` path needs your Trust; `hidden` paths only tighten and need none. Until you approve, a sandboxed spawn is refused with the Trust prompt.
 - A change applies the next time the Agent starts.
 

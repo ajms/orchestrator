@@ -130,7 +130,10 @@ impl RepoConfig {
                 ("review_command", layer.review_command.is_some()),
                 (
                     "sandbox",
-                    layer.sandbox.as_ref().is_some_and(|s| s.switch().is_some()),
+                    layer
+                        .sandbox
+                        .as_ref()
+                        .is_some_and(|setting| setting.switch().is_some()),
                 ),
             ];
             if let Some((key, _)) = misplaced.into_iter().find(|(_, set)| *set) {
@@ -247,7 +250,10 @@ impl RepoConfig {
         );
         items.extend(
             self.committed_sandbox_openings()
-                .map(|entry| TrustItem::SandboxPath(entry.list, entry.written.clone())),
+                .map(|entry| TrustItem::SandboxPath {
+                    list: entry.list,
+                    path: entry.written.clone(),
+                }),
         );
         items
     }

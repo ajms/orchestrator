@@ -87,6 +87,7 @@ impl SandboxContext {
                 let path = self.expand(written).map_err(problem)?;
                 if list != SandboxList::Hidden {
                     self.check_walls(&path).map_err(problem)?;
+                    self.check_walls(&resolved(&path)).map_err(problem)?;
                 }
                 entries.push(SandboxEntry {
                     list,
@@ -107,39 +108,42 @@ impl SandboxContext {
         };
         Ok(normalized(&path))
     }
-}
 
-impl SandboxContext {
     fn check_walls(&self, path: &Path) -> Result<(), &'static str> {
-        let normal = |dir: &PathBuf| normalized(dir);
         if path == Path::new("/") {
             return Err("is the root, a hard wall");
         }
-        if self
-            .home
-            .iter()
-            .map(normal)
-            .any(|home| home.starts_with(path))
-        {
+        if walls(&self.home).any(|home| home.starts_with(path)) {
             return Err("is $HOME or contains it, a hard wall");
         }
-        let overlaps = |dir: PathBuf| dir.starts_with(path) || path.starts_with(dir);
-        if self.orch_dirs.iter().map(normal).any(overlaps) {
+        if walls(&self.orch_dirs).any(|dir| dir.starts_with(path) || path.starts_with(dir)) {
             return Err("overlaps orch's config or state, a hard wall");
         }
         if in_git_hooks_or_config(path) {
             return Err("is git's hooks or config, a hard wall");
         }
-        if self
-            .carve_outs
-            .iter()
-            .map(normal)
-            .any(|carve| path.starts_with(carve))
-        {
+        if walls(&self.carve_outs).any(|carve_out| path.starts_with(carve_out)) {
             return Err("is Claude's read-only config, a hard wall");
         }
         Ok(())
     }
+}
+
+fn walls<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> impl Iterator<Item = PathBuf> {
+    paths
+        .into_iter()
+        .flat_map(|path| [normalized(path), resolved(path)])
+}
+
+fn resolved(path: &Path) -> PathBuf {
+    let path = normalized(path);
+    path.ancestors()
+        .find_map(|ancestor| {
+            let real = ancestor.canonicalize().ok()?;
+            let rest = path.strip_prefix(ancestor).ok()?;
+            Some(real.join(rest))
+        })
+        .unwrap_or(path)
 }
 
 fn in_git_hooks_or_config(path: &Path) -> bool {
