@@ -2,7 +2,6 @@ use std::time::{Duration, Instant};
 
 use crate::flags::{Attention, ChecksState, Effect, Flags, PrState, PrStatus, ReviewDecision};
 use crate::gate::{DiscardPlan, GateRefusal, agent_settled};
-use crate::turn_gate::TurnGate;
 use crate::{
     AgentEvent, AgentState, ConversationId, InvalidTransition, Observation, PermissionMode, Phase,
     PhaseEvent, Subagent, SubagentId, UsageSample,
@@ -15,7 +14,6 @@ pub struct SessionStatus {
     phase: Phase,
     agent_state: Option<AgentState>,
     agent_process_alive: bool,
-    turn_gate: TurnGate,
     observed: bool,
     flags: Flags,
     watched: bool,
@@ -39,7 +37,6 @@ impl SessionStatus {
             phase: Phase::SettingUp,
             agent_state: None,
             agent_process_alive: false,
-            turn_gate: TurnGate::default(),
             observed: true,
             flags: Flags::default(),
             watched: false,
@@ -143,12 +140,7 @@ impl SessionStatus {
             return Vec::new();
         }
         match observation {
-            Observation::Spawned => {
-                self.agent_process_alive = true;
-                for subagent in &mut self.subagents {
-                    subagent.done = true;
-                }
-            }
+            Observation::Spawned => self.agent_process_alive = true,
             Observation::Exited { .. } => self.agent_process_alive = false,
             _ if !self.agent_process_alive => return Vec::new(),
             _ => {}
@@ -163,14 +155,10 @@ impl SessionStatus {
         }
 
         let before = self.agent_state;
-        let current = before.unwrap_or(AgentState::Starting);
-        let after = if self.turn_gate.ignores(&observation) {
-            current
-        } else {
-            current.after(&observation, self.observed)
-        };
+        let after = before
+            .unwrap_or(AgentState::Starting)
+            .after(&observation, self.observed);
         self.agent_state = Some(after);
-        self.turn_gate.note(&observation, after);
 
         let turn_ended = observation == Observation::Agent(AgentEvent::TurnEnded);
         let attention = match after {
@@ -307,11 +295,7 @@ impl SessionStatus {
                 agent_type,
                 description,
             } => match self.subagent_mut(id) {
-                Some(resumed) => {
-                    resumed.done = false;
-                    resumed.agent_type.clone_from(agent_type);
-                    resumed.description.clone_from(description);
-                }
+                Some(resumed) => resumed.done = false,
                 None => self.subagents.push(Subagent {
                     id: id.clone(),
                     agent_type: agent_type.clone(),

@@ -1,10 +1,11 @@
 mod hooks;
+mod lines;
 mod settings;
 mod statusline;
 mod subagents;
 mod transcript;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use hooks::HookEvent;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
@@ -14,11 +15,12 @@ use transcript::TranscriptTitles;
 
 use crate::shell::quote;
 use crate::{
-    AgentAdapter, Argv, Capabilities, Draft, DraftInput, GUARD_WAIT_SECS, GuardAnswer, LaunchSpec,
-    PayloadError, SubagentTranscripts, TitleWatch, WorktreeRequest,
+    AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, SubagentTranscripts,
+    TitleWatch, WorktreeRequest,
 };
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
+const GUARD_WAIT_SECS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeCode {
@@ -34,14 +36,11 @@ impl Default for ClaudeCode {
 }
 
 impl ClaudeCode {
-    pub const NAME: &str = "claude";
-
     fn settings(&self, spec: &LaunchSpec) -> Value {
         let orch_command = |subcommand: &str| {
             format!(
-                "{} {subcommand} --agent {} --session {}",
+                "{} {subcommand} --session {}",
                 quote(&spec.orch_program),
-                Self::NAME,
                 quote(spec.session.as_str())
             )
         };
@@ -71,9 +70,9 @@ impl ClaudeCode {
             "hooks": hooks,
             "statusLine": { "type": "command", "command": orch_command("tap") },
         });
-        let rules = spec.preset.rules_for(Self::NAME);
-        if let Some(rules) = rules.filter(|rules| !rules.is_empty()) {
-            settings["permissions"] = json!({ "allow": rules.allow, "deny": rules.deny });
+        let preset = &spec.preset;
+        if !preset.allow.is_empty() || !preset.deny.is_empty() {
+            settings["permissions"] = json!({ "allow": preset.allow, "deny": preset.deny });
         }
         settings
     }
@@ -112,17 +111,6 @@ impl AgentAdapter for ClaudeCode {
         }
     }
 
-    fn modes(&self) -> &'static [PermissionMode] {
-        &[
-            PermissionMode::Default,
-            PermissionMode::AcceptEdits,
-            PermissionMode::Plan,
-            PermissionMode::Auto,
-            PermissionMode::DontAsk,
-            PermissionMode::BypassPermissions,
-        ]
-    }
-
     fn launch(&self, spec: &LaunchSpec) -> Argv {
         let mut argv = self.interactive(
             ["--session-id", spec.session.as_str()],
@@ -141,7 +129,7 @@ impl AgentAdapter for ClaudeCode {
         conversation: &ConversationId,
         observed_mode: Option<PermissionMode>,
     ) -> Option<Argv> {
-        let mode = spec.resume_mode(observed_mode);
+        let mode = spec.preset.mode.and(observed_mode.or(spec.preset.mode));
         Some(self.interactive(["--resume", conversation.as_str()], spec, mode))
     }
 
@@ -167,7 +155,7 @@ impl AgentAdapter for ClaudeCode {
 
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String> {
         let (decision, reason) = match answer {
-            GuardAnswer::Proceed | GuardAnswer::PresetAllow => return None,
+            GuardAnswer::Proceed => return None,
             GuardAnswer::Ask => ("ask", None),
             GuardAnswer::Deny { reason } => ("deny", Some(reason)),
         };
@@ -193,17 +181,8 @@ impl AgentAdapter for ClaudeCode {
             .unwrap_or_default()
     }
 
-    fn user_statusline_command(
-        &self,
-        cwd: &Path,
-        lookup: &dyn Fn(&str) -> Option<String>,
-    ) -> Option<String> {
-        settings::user_statusline_command(cwd, lookup)
-    }
-
-    fn draft(&self, conversation: Option<&ConversationId>) -> Option<Draft> {
-        let conversation = conversation?;
-        let argv = Argv {
+    fn draft(&self, conversation: &ConversationId) -> Option<Argv> {
+        Some(Argv {
             program: self.program.clone(),
             args: vec![
                 "-p".into(),
@@ -211,10 +190,6 @@ impl AgentAdapter for ClaudeCode {
                 conversation.as_str().into(),
                 "--fork-session".into(),
             ],
-        };
-        Some(Draft {
-            argv,
-            input: DraftInput::Instruction,
         })
     }
 }

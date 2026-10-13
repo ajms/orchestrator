@@ -5,9 +5,9 @@ use std::time::Instant;
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView, AgentUsageWindows, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt,
-    LandingMode, LeftoverView, PhaseView, ReconcileReport, Reply, Request, RequestError,
-    SessionView, Size, SubagentView, UsageReport,
+    AgentStateView, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt, LandingMode,
+    LeftoverView, PhaseView, ReconcileReport, Reply, Request, RequestError, SessionView, Size,
+    SubagentView, UsageReport,
 };
 
 use crate::clipboard::copy_effects;
@@ -32,6 +32,12 @@ use crate::sidebar::{Row, SidebarView, Stop, SubagentRow, Viewport};
 use crate::transcript::Transcript;
 
 pub(crate) const NO_SESSION: &str = "no Session selected";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct RateLimits {
+    pub five_hour: Option<f64>,
+    pub seven_day: Option<f64>,
+}
 
 pub(crate) enum Call {
     Request(RequestId, Request),
@@ -187,7 +193,7 @@ pub(crate) struct App {
     pub mode: Mode,
     pub prefix: Option<Prefix>,
     pub message: Option<String>,
-    pub usage_windows: Vec<AgentUsageWindows>,
+    pub rate_limits: RateLimits,
     pub popup: Option<Popup>,
     pub review: Option<ReviewView>,
     pub reconcile: Option<ReconcileView>,
@@ -225,7 +231,7 @@ impl App {
             mode: Mode::Normal,
             prefix: None,
             message: None,
-            usage_windows: Vec::new(),
+            rate_limits: RateLimits::default(),
             popup: None,
             review: None,
             reconcile: None,
@@ -294,7 +300,15 @@ impl App {
                 title,
                 body,
             } => self.ring(&session, &title, &body),
-            FromDaemon::UsageWindows { agents } => self.usage_windows = agents,
+            FromDaemon::RateLimits {
+                five_hour,
+                seven_day,
+            } => {
+                self.rate_limits = RateLimits {
+                    five_hour,
+                    seven_day,
+                }
+            }
             FromDaemon::Focus { session } => self.focus_session(session),
             FromDaemon::Clipboard { session, text } => {
                 if self.selected.as_ref() == Some(&session) {
@@ -1163,7 +1177,8 @@ impl App {
                 path,
             })
             .collect();
-        NewForm::new(repos, start, &self.config.branch_prefix)
+        let presets = self.config.presets.names().map(String::from).collect();
+        NewForm::new(repos, start, presets, &self.config.branch_prefix)
     }
 
     pub fn form_repo_changed(&mut self) {

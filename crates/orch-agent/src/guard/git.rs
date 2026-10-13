@@ -1,6 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use super::invocations::GIT_GLOBALS_WITH_VALUES;
 use super::shell::Word;
 use super::{GuardHit, GuardKind, GuardScope, other_ref, paths};
 
@@ -80,47 +79,16 @@ impl<'w> Args<'w> {
             .map(|(_, value)| *value)
     }
 
-    fn named(&self, all: bool) -> Vec<String> {
-        self.known(0, if all { usize::MAX } else { 1 })
+    fn named(&self, all: bool) -> impl Iterator<Item = &'w str> + '_ {
+        self.known_operands().take(if all { usize::MAX } else { 1 })
     }
 
-    fn known(&self, skip: usize, take: usize) -> Vec<String> {
+    fn known_operands(&self) -> impl Iterator<Item = &'w str> + '_ {
         self.operands
             .iter()
-            .skip(skip)
-            .take(take)
-            .flat_map(|word| known(word))
-            .collect()
+            .filter(|word| !word.dynamic)
+            .map(|word| word.text.as_str())
     }
-}
-
-fn known(word: &Word) -> Vec<String> {
-    if word.expanded {
-        return Vec::new();
-    }
-    word.candidates().unwrap_or_else(|| vec![word.text.clone()])
-}
-
-fn first_hit(scope: &GuardScope, names: Vec<String>) -> Option<GuardHit> {
-    names.iter().find_map(|name| scope.ref_hit(name))
-}
-
-fn directory(scope: &GuardScope, cwd: &Path, dir: &Word) -> Option<PathBuf> {
-    if dir.expanded {
-        return None;
-    }
-    let Some(candidates) = dir.candidates() else {
-        return Some(PathBuf::from(&dir.text));
-    };
-    let resolved: Vec<PathBuf> = candidates
-        .iter()
-        .map(|candidate| paths::resolve(cwd, &paths::widest(candidate)))
-        .collect();
-    resolved
-        .iter()
-        .find(|path| scope.outside(path))
-        .or(resolved.first())
-        .cloned()
 }
 
 pub(super) fn hits(scope: &GuardScope, cwd: &Path, args: &[&Word]) -> Vec<GuardHit> {
@@ -130,11 +98,11 @@ pub(super) fn hits(scope: &GuardScope, cwd: &Path, args: &[&Word]) -> Vec<GuardH
     while let Some(word) = words.next() {
         match word.text.as_str() {
             "-C" => {
-                if let Some(dir) = words.next().and_then(|dir| directory(scope, &git_cwd, dir)) {
-                    git_cwd = dir;
+                if let Some(dir) = words.next().filter(|dir| !dir.dynamic) {
+                    git_cwd = paths::resolve(&git_cwd, &dir.text);
                 }
             }
-            option if GIT_GLOBALS_WITH_VALUES.contains(&option) => {
+            "-c" | "--git-dir" | "--work-tree" | "--namespace" => {
                 words.next();
             }
             option if option.starts_with('-') => {}
@@ -196,8 +164,8 @@ fn push(scope: &GuardScope, rest: &[&Word]) -> Vec<GuardHit> {
             hits.push(other_ref(target));
         }
     }
-    let refspecs = args.known(1, usize::MAX);
-    hits.extend(refspecs.iter().filter_map(|refspec| {
+    let refspecs = args.known_operands().skip(1);
+    hits.extend(refspecs.filter_map(|refspec| {
         let refspec = refspec.trim_start_matches('+');
         let destination = match refspec.split_once(':') {
             Some((_, destination)) => destination,
@@ -228,8 +196,8 @@ fn fetch(scope: &GuardScope, rest: &[&Word]) -> Vec<GuardHit> {
             "--strategy-option",
         ],
     );
-    args.known(1, usize::MAX)
-        .iter()
+    args.known_operands()
+        .skip(1)
         .filter_map(|refspec| refspec.split_once(':'))
         .map(|(_, destination)| destination.trim_start_matches('+'))
         .filter(|destination| !destination.is_empty())
@@ -258,7 +226,6 @@ fn branch(scope: &GuardScope, rest: &[&Word]) -> Vec<GuardHit> {
         return Vec::new();
     }
     args.named(renames_or_deletes)
-        .iter()
         .filter_map(|name| scope.ref_hit(name))
         .collect()
 }
@@ -287,35 +254,33 @@ fn tag(rest: &[&Word]) -> Vec<GuardHit> {
     if lists && !deletes {
         return Vec::new();
     }
-    args.named(deletes)
-        .iter()
-        .map(|name| other_ref(name))
-        .collect()
+    args.named(deletes).map(other_ref).collect()
 }
 
 fn checkout(scope: &GuardScope, cwd: &Path, rest: &[&Word]) -> Option<GuardHit> {
     let args = Args::parse(rest, &["-b", "-B", "--orphan"]);
     if let Some(new_branch) = args.value(&["-b", "-B", "--orphan"]) {
-        return first_hit(scope, known(new_branch));
+        return (!new_branch.dynamic)
+            .then(|| scope.ref_hit(&new_branch.text))
+            .flatten();
     }
     if args.paths_follow || args.operands.len() != 1 {
         return None;
     }
-    args.named(false).iter().find_map(|target| {
-        let hit = scope.ref_hit(target)?;
-        let looks_like_path = target.starts_with(['.', '/']) || cwd.join(target).exists();
-        (hit.kind == GuardKind::BaseBranch || !looks_like_path).then_some(hit)
-    })
+    let target = args.known_operands().next()?;
+    let hit = scope.ref_hit(target)?;
+    let looks_like_path = target.starts_with(['.', '/']) || cwd.join(target).exists();
+    (hit.kind == GuardKind::BaseBranch || !looks_like_path).then_some(hit)
 }
 
 fn switch(scope: &GuardScope, rest: &[&Word]) -> Option<GuardHit> {
     let creating = ["-c", "-C", "--create", "--force-create", "--orphan"];
     let args = Args::parse(rest, &creating);
-    let targets = match args.value(&creating) {
-        Some(new_branch) => known(new_branch),
-        None => args.named(false),
+    let target = match args.value(&creating) {
+        Some(new_branch) => (!new_branch.dynamic).then_some(new_branch.text.as_str())?,
+        None => args.known_operands().next()?,
     };
-    first_hit(scope, targets)
+    scope.ref_hit(target)
 }
 
 fn update_ref(scope: &GuardScope, rest: &[&Word]) -> Vec<GuardHit> {
@@ -323,13 +288,23 @@ fn update_ref(scope: &GuardScope, rest: &[&Word]) -> Vec<GuardHit> {
     if args.has(&["--stdin"]) {
         return vec![other_ref("stdin")];
     }
-    first_hit(scope, args.named(false)).into_iter().collect()
+    args.known_operands()
+        .next()
+        .and_then(|name| scope.ref_hit(name))
+        .into_iter()
+        .collect()
 }
 
 fn symbolic_ref(scope: &GuardScope, rest: &[&Word]) -> Vec<GuardHit> {
     let args = Args::parse(rest, &["-m"]);
-    let target = if args.has(&["-d", "--delete"]) { 0 } else { 1 };
-    first_hit(scope, args.known(target, 1))
+    let operands: Vec<&str> = args.known_operands().collect();
+    let target = if args.has(&["-d", "--delete"]) {
+        operands.first()
+    } else {
+        operands.get(1)
+    };
+    target
+        .and_then(|name| scope.ref_hit(name))
         .into_iter()
         .collect()
 }

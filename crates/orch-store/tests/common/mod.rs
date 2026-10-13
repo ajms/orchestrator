@@ -72,7 +72,6 @@ pub fn new_session(repo: &Repo, slug: &str) -> NewSession {
         worktree: repo.path.join(".orchestrator/worktrees").join(slug),
         phase: Phase::SettingUp,
         preset: "inherit".into(),
-        agent: "claude".into(),
     }
 }
 

@@ -48,15 +48,12 @@ pub enum ToHolder {
     },
     Shutdown,
     Hook {
-        agent: String,
         payload: String,
     },
     Guard {
-        agent: String,
         payload: String,
     },
     Tap {
-        agent: String,
         payload: String,
     },
 }
@@ -95,8 +92,6 @@ pub struct Hello {
     #[serde(default)]
     pub base: Option<String>,
     #[serde(default)]
-    pub agent_name: Option<String>,
-    #[serde(default)]
     pub port_block: Option<PortBlock>,
     pub holder_pid: u32,
     pub agent_pid: Option<u32>,
@@ -123,24 +118,11 @@ pub enum HolderEvent {
         pid: Option<u32>,
     },
     Hook {
-        #[serde(default)]
-        agent: Option<String>,
         payload: String,
         guard: Option<GuardId>,
     },
     Tap {
-        #[serde(default)]
-        agent: Option<String>,
         payload: String,
     },
     Exited(AgentExit),
-}
-
-impl HolderEvent {
-    pub fn agent(&self) -> Option<&str> {
-        match self {
-            Self::Hook { agent, .. } | Self::Tap { agent, .. } => agent.as_deref(),
-            _ => None,
-        }
-    }
 }

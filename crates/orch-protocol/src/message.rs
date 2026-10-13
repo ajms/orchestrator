@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use orch_core::{SessionId, TranscriptEntry, UsageWindow};
+use orch_core::{SessionId, TranscriptEntry};
 use orch_holder::{ScreenSnapshot, Size};
 use serde::{Deserialize, Serialize};
 
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -193,7 +193,6 @@ pub struct CreateSession {
     pub branch: Option<String>,
     pub base: Option<String>,
     pub preset: Option<String>,
-    pub agent: Option<String>,
 }
 
 impl CreateSession {
@@ -204,7 +203,6 @@ impl CreateSession {
             branch: None,
             base: None,
             preset: None,
-            agent: None,
         }
     }
 }
@@ -263,39 +261,15 @@ pub enum FromDaemon {
     Focus {
         session: SessionId,
     },
-    UsageWindows {
-        agents: Vec<AgentUsageWindows>,
+    RateLimits {
+        five_hour: Option<f64>,
+        seven_day: Option<f64>,
     },
     Clipboard {
         session: SessionId,
         text: String,
     },
     SubagentTranscript(SubagentTranscript),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentUsageWindows {
-    pub agent: String,
-    pub windows: Vec<UsageWindowView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UsageWindowView {
-    pub name: String,
-    pub label: String,
-    pub used_percent: f64,
-    pub resets_at_unix: Option<i64>,
-}
-
-impl From<&UsageWindow> for UsageWindowView {
-    fn from(window: &UsageWindow) -> Self {
-        Self {
-            name: window.name.clone(),
-            label: window.label.clone(),
-            used_percent: window.used_percent,
-            resets_at_unix: window.resets_at_unix,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,32 +322,12 @@ pub enum Reply {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoSettings {
     pub repo: PathBuf,
-    pub agents: Vec<AgentChoice>,
-    pub default_agent: String,
+    pub presets: Vec<String>,
+    pub default_preset: Option<String>,
     pub default_base: Option<String>,
     pub review_command: Option<String>,
     pub branch_prefix: String,
     pub trust: Option<TrustNeeded>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentChoice {
-    pub name: String,
-    pub unavailable: Option<String>,
-    pub presets: Vec<PresetChoice>,
-    pub default_preset: Option<DefaultPreset>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PresetChoice {
-    pub name: String,
-    pub lacks_rules: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DefaultPreset {
-    pub name: String,
-    pub unsupported: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -392,20 +346,13 @@ pub struct StaleOverrides {
 pub struct UsageReport {
     pub per_repo: Vec<RepoUsage>,
     pub today: Vec<RepoUsage>,
-    pub per_agent: Vec<AgentTotals>,
+    pub total: UsageTotalsView,
     pub estimated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepoUsage {
     pub repo: PathBuf,
-    pub agent: String,
-    pub totals: UsageTotalsView,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentTotals {
-    pub agent: String,
     pub totals: UsageTotalsView,
 }
 
@@ -413,7 +360,7 @@ pub struct AgentTotals {
 pub struct UsageTotalsView {
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cost_usd: Option<f64>,
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -10,14 +10,7 @@ use crate::{Store, StoreError};
 pub struct UsageTotals {
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cost_usd: Option<f64>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct RepoAgentUsage {
-    pub repo: PathBuf,
-    pub agent: String,
-    pub totals: UsageTotals,
+    pub cost_usd: f64,
 }
 
 impl UsageTotals {
@@ -25,24 +18,21 @@ impl UsageTotals {
         Self {
             input_tokens: sample.input_tokens.unwrap_or(fallback.input_tokens),
             output_tokens: sample.output_tokens.unwrap_or(fallback.output_tokens),
-            cost_usd: sample.cost_usd.or(fallback.cost_usd),
+            cost_usd: sample.cost_usd.unwrap_or(fallback.cost_usd),
         }
     }
 
     fn below(self, other: UsageTotals) -> bool {
         self.input_tokens < other.input_tokens
             || self.output_tokens < other.output_tokens
-            || matches!((self.cost_usd, other.cost_usd), (Some(cost), Some(other)) if cost < other)
+            || self.cost_usd < other.cost_usd
     }
 
     pub fn plus(self, other: UsageTotals) -> Self {
         Self {
             input_tokens: self.input_tokens + other.input_tokens,
             output_tokens: self.output_tokens + other.output_tokens,
-            cost_usd: self
-                .cost_usd
-                .zip(other.cost_usd)
-                .map(|(cost, other)| cost + other),
+            cost_usd: self.cost_usd + other.cost_usd,
         }
     }
 
@@ -50,10 +40,7 @@ impl UsageTotals {
         Self {
             input_tokens: self.input_tokens - other.input_tokens,
             output_tokens: self.output_tokens - other.output_tokens,
-            cost_usd: match (self.cost_usd, other.cost_usd) {
-                (Some(cost), Some(other)) => Some(cost - other),
-                (cost, _) => cost,
-            },
+            cost_usd: self.cost_usd - other.cost_usd,
         }
     }
 
@@ -68,7 +55,7 @@ impl UsageTotals {
 
 impl std::iter::Sum for UsageTotals {
     fn sum<I: Iterator<Item = Self>>(totals: I) -> Self {
-        totals.reduce(Self::plus).unwrap_or_default()
+        totals.fold(Self::default(), Self::plus)
     }
 }
 
@@ -128,7 +115,7 @@ impl Store {
                 now,
             ],
         )?;
-        add_daily(&tx, &repo_path, &record.agent, now, added)?;
+        add_daily(&tx, &repo_path, now, added)?;
         tx.commit()?;
         Ok(())
     }
@@ -160,11 +147,11 @@ impl Store {
             .sum())
     }
 
-    pub fn usage_per_repo_and_agent(&self) -> Result<Vec<RepoAgentUsage>, StoreError> {
+    pub fn usage_per_repo(&self) -> Result<Vec<(PathBuf, UsageTotals)>, StoreError> {
         self.daily_usage("1", params![])
     }
 
-    pub fn usage_per_repo_and_agent_today(&self) -> Result<Vec<RepoAgentUsage>, StoreError> {
+    pub fn usage_per_repo_today(&self) -> Result<Vec<(PathBuf, UsageTotals)>, StoreError> {
         self.daily_usage("day = date('now', 'localtime')", params![])
     }
 
@@ -172,20 +159,17 @@ impl Store {
         &self,
         filter: &str,
         args: &[&dyn rusqlite::ToSql],
-    ) -> Result<Vec<RepoAgentUsage>, StoreError> {
+    ) -> Result<Vec<(PathBuf, UsageTotals)>, StoreError> {
         let mut statement = self.conn.prepare(&format!(
-            "SELECT repo_path, agent, SUM(input_tokens), SUM(output_tokens),
-                CASE WHEN COUNT(cost_usd) = COUNT(*) THEN SUM(cost_usd) END
-             FROM usage_daily WHERE {filter}
-             GROUP BY repo_path, agent ORDER BY repo_path, agent"
+            "SELECT repo_path, SUM(input_tokens), SUM(output_tokens), SUM(cost_usd)
+             FROM usage_daily WHERE {filter} GROUP BY repo_path ORDER BY repo_path"
         ))?;
         let totals = statement
             .query_map(args, |row| {
-                Ok(RepoAgentUsage {
-                    repo: PathBuf::from(row.get::<_, String>(0)?),
-                    agent: row.get(1)?,
-                    totals: UsageTotals::from_columns(row, 2)?,
-                })
+                Ok((
+                    PathBuf::from(row.get::<_, String>(0)?),
+                    UsageTotals::from_columns(row, 1)?,
+                ))
             })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(totals)
@@ -195,20 +179,18 @@ impl Store {
 fn add_daily(
     tx: &Transaction,
     repo_path: &std::path::Path,
-    agent: &str,
     now: i64,
     added: UsageTotals,
 ) -> rusqlite::Result<()> {
     tx.execute(
-        "INSERT INTO usage_daily (repo_path, agent, day, input_tokens, output_tokens, cost_usd)
-         VALUES (?1, ?2, date(?3, 'unixepoch', 'localtime'), ?4, ?5, ?6)
-         ON CONFLICT (repo_path, agent, day) DO UPDATE SET
-            input_tokens = input_tokens + ?4,
-            output_tokens = output_tokens + ?5,
-            cost_usd = cost_usd + ?6",
+        "INSERT INTO usage_daily (repo_path, day, input_tokens, output_tokens, cost_usd)
+         VALUES (?1, date(?2, 'unixepoch', 'localtime'), ?3, ?4, ?5)
+         ON CONFLICT (repo_path, day) DO UPDATE SET
+            input_tokens = input_tokens + ?3,
+            output_tokens = output_tokens + ?4,
+            cost_usd = cost_usd + ?5",
         params![
             repo_path.to_string_lossy(),
-            agent,
             now / 1000,
             added.input_tokens as i64,
             added.output_tokens as i64,
@@ -220,10 +202,10 @@ fn add_daily(
 
 pub(crate) fn move_usage(tx: &Transaction, from: &str, to: &str) -> rusqlite::Result<()> {
     tx.execute(
-        "INSERT INTO usage_daily (repo_path, agent, day, input_tokens, output_tokens, cost_usd)
-         SELECT ?2, agent, day, input_tokens, output_tokens, cost_usd FROM usage_daily
+        "INSERT INTO usage_daily (repo_path, day, input_tokens, output_tokens, cost_usd)
+         SELECT ?2, day, input_tokens, output_tokens, cost_usd FROM usage_daily
          WHERE repo_path = ?1
-         ON CONFLICT (repo_path, agent, day) DO UPDATE SET
+         ON CONFLICT (repo_path, day) DO UPDATE SET
             input_tokens = input_tokens + excluded.input_tokens,
             output_tokens = output_tokens + excluded.output_tokens,
             cost_usd = cost_usd + excluded.cost_usd",
