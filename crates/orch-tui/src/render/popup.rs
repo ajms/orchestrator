@@ -112,36 +112,22 @@ fn usage(frame: &mut Frame, report: &UsageReport) {
     lines.push(Line::from(" Today").bold());
     lines.extend(report.today.iter().map(repo_usage));
     lines.push(Line::default());
-    lines.push(Line::from(" Total").bold());
-    lines.extend(
-        report
-            .per_agent
-            .iter()
-            .map(|total| usage_line("", &total.agent, &total.totals).bold()),
-    );
+    lines.push(usage_line("Total", &report.total).bold());
     lines.push(Line::default());
     lines.push(Line::from(" Esc close").dark_gray());
-    show(
-        frame,
-        " :usage (approximate, as each Agent reports it) ",
-        Color::Cyan,
-        lines,
-        92,
-    );
+    show(frame, " :usage (estimates) ", Color::Cyan, lines, 80);
 }
 
 fn repo_usage(usage: &RepoUsage) -> Line<'static> {
-    usage_line(&repo_name(&usage.repo), &usage.agent, &usage.totals)
+    usage_line(&repo_name(&usage.repo), &usage.totals)
 }
 
-fn usage_line(name: &str, agent: &str, totals: &UsageTotalsView) -> Line<'static> {
-    let cost = totals
-        .cost_usd
-        .map_or_else(|| "cost unknown".into(), |cost| format!("${cost:.2}"));
+fn usage_line(name: &str, totals: &UsageTotalsView) -> Line<'static> {
     Line::from(format!(
-        "   {name:<20}  {agent:<12}  {:>8} in  {:>8} out  {cost}",
+        "   {name:<20}  {:>8} in  {:>8} out  ${:.2}",
         tokens(totals.input_tokens),
         tokens(totals.output_tokens),
+        totals.cost_usd
     ))
 }
 
@@ -203,7 +189,11 @@ fn trust(frame: &mut Frame, repo: &std::path::Path, items: &[String], skippable:
 
 fn guard(frame: &mut Frame, prompt: &GuardPrompt) {
     let lines = vec![
-        guard_heading(prompt),
+        Line::from(vec![
+            Span::raw(" The Agent wants to use "),
+            Span::raw(prompt.tool.clone()).bold(),
+            Span::raw(format!(" on the {}:", guard_kind(prompt.kind))),
+        ]),
         Line::default(),
         Line::from(format!("   {}", prompt.target)).yellow(),
         Line::default(),
@@ -212,22 +202,12 @@ fn guard(frame: &mut Frame, prompt: &GuardPrompt) {
     show(frame, " Guard ", Color::Yellow, lines, 70);
 }
 
-fn guard_heading(prompt: &GuardPrompt) -> Line<'static> {
-    let on = |target: &str| {
-        Line::from(vec![
-            Span::raw(" The Agent wants to use "),
-            Span::raw(prompt.tool.clone()).bold(),
-            Span::raw(format!(" on {target}:")),
-        ])
-    };
-    match prompt.kind {
-        GuardKindView::BaseBranch => on("the Base branch"),
-        GuardKindView::OtherRef => on("another ref"),
-        GuardKindView::WorktreeManagement => on("worktrees"),
-        GuardKindView::WriteOutsideWorktree => on("files outside the Worktree"),
-        GuardKindView::ExternalTool => {
-            Line::from(" The Agent wants to use a tool that reaches beyond the Session:")
-        }
+fn guard_kind(kind: GuardKindView) -> &'static str {
+    match kind {
+        GuardKindView::BaseBranch => "Base branch",
+        GuardKindView::OtherRef => "another ref",
+        GuardKindView::WorktreeManagement => "worktrees",
+        GuardKindView::WriteOutsideWorktree => "files outside the Worktree",
     }
 }
 

@@ -4,7 +4,7 @@ use orch_protocol::{PhaseView, Reply, Request};
 
 use crate::common::*;
 
-pub(crate) async fn run(mut command: Command) -> Output {
+async fn run(mut command: Command) -> Output {
     let running = tokio::task::spawn_blocking(move || command.output().unwrap());
     tokio::time::timeout(WAIT, running)
         .await
@@ -12,7 +12,7 @@ pub(crate) async fn run(mut command: Command) -> Output {
         .unwrap()
 }
 
-pub(crate) async fn orch_with_input(env: &Env, args: &[&str], input: impl AsRef<[u8]>) -> Output {
+async fn orch_with_input(env: &Env, args: &[&str], input: &str) -> Output {
     use std::io::Write;
     let mut command = env.orch();
     command
@@ -20,10 +20,15 @@ pub(crate) async fn orch_with_input(env: &Env, args: &[&str], input: impl AsRef<
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    let input = input.as_ref().to_vec();
+    let input = input.to_string();
     let running = tokio::task::spawn_blocking(move || {
         let mut child = command.spawn().unwrap();
-        child.stdin.take().unwrap().write_all(&input).unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
         child.wait_with_output().unwrap()
     });
     tokio::time::timeout(WAIT, running)
@@ -32,17 +37,17 @@ pub(crate) async fn orch_with_input(env: &Env, args: &[&str], input: impl AsRef<
         .unwrap()
 }
 
-pub(crate) async fn orch(env: &Env, args: &[&str]) -> Output {
+async fn orch(env: &Env, args: &[&str]) -> Output {
     let mut command = env.orch();
     command.args(args);
     run(command).await
 }
 
-pub(crate) fn stdout(output: &Output) -> String {
+fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-pub(crate) fn stderr(output: &Output) -> String {
+fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 

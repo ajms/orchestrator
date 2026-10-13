@@ -1,5 +1,5 @@
 use orch_agent::{AgentAdapter, ClaudeCode};
-use orch_core::{AgentEvent, ConversationId, UsageSample, UsageWindow};
+use orch_core::{AgentEvent, ConversationId, RateLimit, UsageSample};
 
 fn usage(name: &str) -> Vec<AgentEvent> {
     let path = format!(
@@ -33,20 +33,14 @@ fn a_subscribers_statusline_yields_context_cost_and_rate_limits() {
             input_tokens: Some(84_211),
             output_tokens: Some(3_107),
             cost_usd: Some(1.8342),
-            windows: vec![
-                UsageWindow {
-                    name: "five_hour".into(),
-                    label: "5h".into(),
-                    used_percent: 83.5,
-                    resets_at_unix: Some(1_790_592_000),
-                },
-                UsageWindow {
-                    name: "seven_day".into(),
-                    label: "7d".into(),
-                    used_percent: 41.2,
-                    resets_at_unix: Some(1_791_014_400),
-                },
-            ],
+            five_hour: Some(RateLimit {
+                used_percent: 83.5,
+                resets_at_unix: Some(1_790_592_000),
+            }),
+            seven_day: Some(RateLimit {
+                used_percent: 41.2,
+                resets_at_unix: Some(1_791_014_400),
+            }),
         })]
     );
 }
@@ -57,19 +51,16 @@ fn fields_missing_before_the_first_response_stay_unknown() {
     assert_eq!(sample.context_used_percent, None);
     assert_eq!(sample.context_window_tokens, Some(200_000));
     assert_eq!(sample.cost_usd, Some(0.0));
-    assert_eq!(sample.windows, []);
+    assert_eq!(sample.five_hour, None);
+    assert_eq!(sample.seven_day, None);
 }
 
 #[test]
 fn each_rate_limit_window_may_be_absent_on_its_own() {
     let sample = only_sample(usage("seven_day_only"));
     assert_eq!(sample.model.as_deref(), Some("claude-sonnet-5"));
-    let windows: Vec<_> = sample
-        .windows
-        .iter()
-        .map(|limit| (limit.label.as_str(), limit.used_percent))
-        .collect();
-    assert_eq!(windows, [("7d", 96.4)]);
+    assert_eq!(sample.five_hour, None);
+    assert_eq!(sample.seven_day.map(|limit| limit.used_percent), Some(96.4));
 }
 
 #[test]

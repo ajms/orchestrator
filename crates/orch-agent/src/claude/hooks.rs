@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use orch_core::{AgentEvent, ConversationId, FailureKind, GuardedAction, SubagentId};
+use orch_core::{AgentEvent, ConversationId, FailureKind, SubagentId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -97,24 +97,6 @@ pub(super) fn worktree_request(payload: &str) -> Option<WorktreeRequest> {
     }
 }
 
-fn guarded_action(tool: &str, input: Option<&Value>) -> Option<GuardedAction> {
-    let field = |key: &str| {
-        input
-            .and_then(|input| input.get(key))
-            .and_then(Value::as_str)
-            .map(String::from)
-    };
-    match tool {
-        "Write" | "Edit" | "MultiEdit" => {
-            field("file_path").map(|path| GuardedAction::WriteFile { path })
-        }
-        "NotebookEdit" => field("notebook_path").map(|path| GuardedAction::WriteFile { path }),
-        "Bash" => field("command").map(|command| GuardedAction::Shell { command }),
-        _ if tool.starts_with("mcp__") => Some(GuardedAction::ExternalTool { name: tool.into() }),
-        _ => None,
-    }
-}
-
 pub(super) fn map_hook(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
     let hook: HookPayload =
         serde_json::from_str(payload).map_err(|err| PayloadError(err.to_string()))?;
@@ -144,16 +126,18 @@ impl HookPayload {
             H::UserPromptSubmit => vec![AgentEvent::PromptSubmitted],
             H::PreToolUse | H::PermissionRequest if asks_user => vec![AgentEvent::QuestionAsked],
             H::PreToolUse => {
-                let check = guarded_action(&tool, self.tool_input.as_ref()).map(|action| {
-                    AgentEvent::GuardCheck {
+                let input_json = self.tool_input.unwrap_or(Value::Null).to_string();
+                vec![
+                    AgentEvent::ToolStarted {
                         tool: tool.clone(),
-                        action,
+                        subagent,
+                    },
+                    AgentEvent::GuardCheck {
+                        tool,
+                        input_json,
                         cwd: self.cwd,
-                    }
-                });
-                std::iter::once(AgentEvent::ToolStarted { tool, subagent })
-                    .chain(check)
-                    .collect()
+                    },
+                ]
             }
             H::PostToolUse | H::PostToolUseFailure => {
                 vec![AgentEvent::ToolFinished { tool, subagent }]

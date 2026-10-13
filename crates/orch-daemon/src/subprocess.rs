@@ -1,4 +1,4 @@
-use std::process::{Output, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use orch_git::ENV_REDIRECTING_GIT;
@@ -14,31 +14,11 @@ pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
 }
 
 pub(crate) async fn run(
-    command: Command,
-    input: Option<String>,
-    limit: Duration,
-    what: &str,
-) -> Result<String, String> {
-    let output = output(command, input, limit, what).await?;
-    match output.status.success() {
-        true => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
-        false => Err(failed(what, &output)),
-    }
-}
-
-pub(crate) fn failed(what: &str, output: &Output) -> String {
-    format!(
-        "{what} failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    )
-}
-
-pub(crate) async fn output(
     mut command: Command,
     input: Option<String>,
     limit: Duration,
     what: &str,
-) -> Result<Output, String> {
+) -> Result<String, String> {
     let stdin = match input {
         Some(_) => Stdio::piped(),
         None => Stdio::null(),
@@ -53,8 +33,15 @@ pub(crate) async fn output(
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
         let _ = stdin.write_all(input.as_bytes()).await;
     }
-    tokio::time::timeout(limit, child.wait_with_output())
+    let output = tokio::time::timeout(limit, child.wait_with_output())
         .await
         .map_err(|_| format!("{what} took longer than {}s", limit.as_secs()))?
-        .map_err(|err| format!("{what} failed: {err}"))
+        .map_err(|err| format!("{what} failed: {err}"))?;
+    match output.status.success() {
+        true => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+        false => Err(format!(
+            "{what} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
 }

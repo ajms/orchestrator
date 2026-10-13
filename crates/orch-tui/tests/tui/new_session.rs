@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use orch_protocol::{CreateSession, Reply, RepoSettings, Request, RequestError};
+use orch_protocol::{CreateSession, Reply, Request, RequestError};
 use orch_tui::{Effect, Event, TuiConfig};
 
 use crate::common::*;
@@ -17,26 +17,8 @@ pub fn config() -> TuiConfig {
     }
 }
 
-fn recent_settings() -> RepoSettings {
-    RepoSettings {
-        repo: PathBuf::from("/home/me/recent"),
-        agents: vec![agent_offering("claude", &["plan", "ask", "edits"], None)],
-        default_agent: "claude".into(),
-        branch_prefix: "orch/".into(),
-        ..RepoSettings::default()
-    }
-}
-
 pub fn form(config: TuiConfig) -> Harness {
     let mut tui = Harness::with_config(config);
-    tui.sessions(vec![session("recent", "existing")]);
-    tui.command("new");
-    tui
-}
-
-pub fn form_with_presets(config: TuiConfig) -> Harness {
-    let mut tui = Harness::with_config(config);
-    tui.daemon().settings = vec![recent_settings()];
     tui.sessions(vec![session("recent", "existing")]);
     tui.command("new");
     tui
@@ -130,7 +112,6 @@ fn an_edited_branch_base_and_preset_are_sent() {
     let mut other = session("recent", "other-work");
     other.branch = "orch/other-work".into();
     let mut tui = Harness::with_config(config());
-    tui.daemon().settings = vec![recent_settings()];
     tui.sessions(vec![other]);
     tui.command("new");
     tui.keys("Stacked work");
@@ -140,7 +121,6 @@ fn an_edited_branch_base_and_preset_are_sent() {
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Down);
     assert!(field(&mut tui, "Base").contains("orch/other-work"));
-    tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Right);
     assert!(field(&mut tui, "Preset").contains("plan"));
@@ -154,7 +134,6 @@ fn an_edited_branch_base_and_preset_are_sent() {
             branch: Some("orch/stacked-work-v2".into()),
             base: Some("orch/other-work".into()),
             preset: Some("plan".into()),
-            agent: Some("claude".into()),
         }]
     );
 }

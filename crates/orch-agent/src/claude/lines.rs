@@ -2,21 +2,19 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
-
 #[derive(Debug, Default)]
-pub(crate) struct FollowedLines {
+pub(super) struct FollowedLines {
     path: PathBuf,
     offset: u64,
 }
 
-pub(crate) struct NewLines {
-    pub(crate) reset: bool,
-    pub(crate) lines: Vec<Vec<u8>>,
+pub(super) struct NewLines {
+    pub(super) reset: bool,
+    pub(super) lines: Vec<Vec<u8>>,
 }
 
 impl FollowedLines {
-    pub(crate) fn read(&mut self, path: &Path) -> Option<NewLines> {
+    pub(super) fn read(&mut self, path: &Path) -> Option<NewLines> {
         let mut file = File::open(path).ok()?;
         let len = file.metadata().ok()?.len();
         let reset = self.path != path || len < self.offset;
@@ -37,10 +35,4 @@ impl FollowedLines {
         }
         Some(NewLines { reset, lines })
     }
-}
-
-pub(crate) fn first_str(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| value.get(*key)?.as_str())
-        .map(String::from)
 }

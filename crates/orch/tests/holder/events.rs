@@ -1,4 +1,3 @@
-use orch_agent::ClaudeCode;
 use orch_holder::{HolderClient, HolderEvent, ToHolder};
 
 use crate::common::*;
@@ -10,7 +9,6 @@ const STATUS: &str = r#"{"model":{"display_name":"Opus"},"context_window":{"used
 
 fn hook(payload: &str) -> HolderEvent {
     HolderEvent::Hook {
-        agent: Some(ClaudeCode::NAME.into()),
         payload: payload.into(),
         guard: None,
     }
@@ -18,7 +16,6 @@ fn hook(payload: &str) -> HolderEvent {
 
 fn tap(payload: &str) -> HolderEvent {
     HolderEvent::Tap {
-        agent: Some(ClaudeCode::NAME.into()),
         payload: payload.into(),
     }
 }
