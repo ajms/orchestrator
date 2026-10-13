@@ -10,6 +10,6 @@ A Preset has a `sandbox` setting that defaults to true for every Preset, built-i
 
 ## Consequences
 
-- An upgrade sandboxes every Session at its next spawn. Hosts where bubblewrap can't run must fail closed (never fall back to unsandboxed) and tell the user to opt out.
+- An upgrade sandboxes every Session at its next spawn. Where bubblewrap can't run, orch fails closed and never falls back to running unsandboxed. The way out is a global `[defaults] sandbox = false` in the user's own config. The order is: a Preset's explicit setting wins, then that global default, then true.
 - Only unsandboxed Sessions carry a marker, because sandboxed is the normal case.
 - A write the Sandbox blocks shows only as the Agent's own error. orch doesn't prompt on it.
