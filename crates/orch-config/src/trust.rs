@@ -3,6 +3,8 @@ use std::fmt;
 use orch_agent::{Preset, mode_name};
 use sha2::{Digest, Sha256};
 
+use crate::sandbox::SandboxList;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TrustHash(String);
 
@@ -32,6 +34,7 @@ pub enum TrustItem {
     },
     Preset(Preset),
     DefaultPreset(Preset),
+    SandboxPath(SandboxList, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +87,9 @@ fn fields(item: &TrustItem) -> Vec<String> {
     match item {
         TrustItem::SetupScript(script) => vec!["setup".into(), script.clone()],
         TrustItem::TeardownScript(script) => vec!["teardown".into(), script.clone()],
+        TrustItem::SandboxPath(list, path) => {
+            vec!["sandbox_path".into(), list.name().into(), path.clone()]
+        }
         TrustItem::Agent { binary, args } => {
             let mut fields = vec!["agent".into()];
             fields.extend(list("binary", binary.as_slice()));

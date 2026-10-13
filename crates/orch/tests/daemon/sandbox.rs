@@ -426,3 +426,30 @@ async fn real_claude_runs_sandboxed_writes_its_worktree_and_stops_cleanly() {
         .await;
     assert_eq!(stopped.agent, Some(State::Exited), "{:?}", stopped.error);
 }
+
+#[tokio::test]
+async fn configured_writable_paths_are_writable_and_hidden_ones_are_masked() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.real_bwrap();
+    seed(env.path("home/.cargo/env"), "toolchain");
+    let data = seed(env.path("data/secret.txt"), "secret");
+    env.write_config(&format!(
+        "[defaults.sandbox]\nwritable = [\"~/.cache/tool\"]\nhidden = [\"~/.cargo\", {:?}]\n",
+        env.path("data").display()
+    ));
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, mut pane) = sandboxed_session(&env, &mut client).await;
+
+    let cached = env.path("home/.cache/tool/blob");
+    assert_eq!(run(&mut pane, "write", &cached).await, "ok");
+    assert!(cached.exists());
+    assert_eq!(
+        run(&mut pane, "exists", &env.path("home/.cargo/env")).await,
+        "no"
+    );
+    assert_eq!(run(&mut pane, "exists", &data).await, "no");
+}

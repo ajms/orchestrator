@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use orch_agent::{
-    AgentAdapter, BWRAP, Placeholder, SandboxFailure, SandboxLayout, SandboxNeeds, sandbox_args,
-    sandbox_carve_outs, sandbox_refusal,
+    AgentAdapter, BWRAP, Placeholder, SandboxFailure, SandboxLayout, SandboxNeeds, SandboxPaths,
+    sandbox_args, sandbox_carve_outs, sandbox_refusal,
 };
 use orch_config::xdg;
 use orch_store::SessionRecord;
@@ -46,11 +46,12 @@ impl Daemon {
         record: &SessionRecord,
         repo: &Path,
         adapter: &dyn AgentAdapter,
+        configured: &SandboxPaths,
     ) -> Result<(Vec<String>, EnvVars), String> {
         let paths = self.session_paths(record, repo, self.holder_socket(&record.id))?;
         let shims = self.session_dir(&record.id).join(SHIMS_DIR);
         let env = install_shims(&shims, &self.config.orch_program)?;
-        let mut layout = layout(paths, self.config.orch_program.clone())?;
+        let mut layout = layout(paths, self.config.orch_program.clone(), configured)?;
         layout.read_only.push(shims);
         let args = carved_args(&layout, &adapter.sandbox_needs(&xdg::process_env))?;
         Ok((args, env))
@@ -61,6 +62,7 @@ impl Daemon {
         record: Option<&SessionRecord>,
         repo: &Path,
         adapter: &dyn AgentAdapter,
+        configured: &SandboxPaths,
     ) -> ProbeResult {
         let scratch = Scratch::new(&self.config.runtime_dir).map_err(|err| err.to_string())?;
         let paths = match record {
@@ -72,7 +74,7 @@ impl Daemon {
                 ..scratch.paths()?
             },
         };
-        let layout = layout(paths, self.config.orch_program.clone())?;
+        let layout = layout(paths, self.config.orch_program.clone(), configured)?;
         probe(&carved_args(
             &layout,
             &adapter.sandbox_needs(&xdg::process_env),
@@ -101,7 +103,7 @@ impl Daemon {
 
 pub fn probe_host_sandbox(orch_program: PathBuf) -> ProbeResult {
     let scratch = Scratch::new(&std::env::temp_dir()).map_err(|err| err.to_string())?;
-    let layout = layout(scratch.paths()?, orch_program)?;
+    let layout = layout(scratch.paths()?, orch_program, &SandboxPaths::default())?;
     let mut needs = default_adapter().sandbox_needs(&xdg::process_env);
     needs.carve_outs.retain(|path| path.exists());
     probe(&carved_args(&layout, &needs)?)
@@ -157,7 +159,11 @@ fn sysctl(key: &str) -> Option<String> {
     std::fs::read_to_string(Path::new("/proc/sys").join(key.replace('.', "/"))).ok()
 }
 
-fn layout(paths: SessionPaths, orch_program: PathBuf) -> Result<SandboxLayout, String> {
+fn layout(
+    paths: SessionPaths,
+    orch_program: PathBuf,
+    configured: &SandboxPaths,
+) -> Result<SandboxLayout, String> {
     let home = xdg::process_env("HOME")
         .filter(|home| !home.is_empty())
         .map(|home| canonical(Path::new(&home)))
@@ -173,6 +179,30 @@ fn layout(paths: SessionPaths, orch_program: PathBuf) -> Result<SandboxLayout, S
         main_checkout: paths.main_checkout,
         git_common_dir: paths.git_common_dir,
         read_only: vec![orch_program],
+        configured: present(configured)?,
+    })
+}
+
+fn present(configured: &SandboxPaths) -> Result<SandboxPaths, String> {
+    for dir in &configured.writable {
+        std::fs::create_dir_all(dir).map_err(|err| format!("creating {}: {err}", dir.display()))?;
+    }
+    let mut hidden = Vec::new();
+    for path in &configured.hidden {
+        match path.metadata() {
+            Ok(meta) if meta.is_dir() => hidden.push(path.clone()),
+            Ok(_) => {
+                return Err(format!(
+                    "the Sandbox can only hide directories, not {}",
+                    path.display()
+                ));
+            }
+            Err(_) => {}
+        }
+    }
+    Ok(SandboxPaths {
+        hidden,
+        ..configured.clone()
     })
 }
 

@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
-use orch_agent::{INHERIT, Preset, Presets, mode_from_name};
+use orch_agent::{INHERIT, Preset, Presets, SandboxPaths, mode_from_name};
 use serde::Deserialize;
 
 use crate::error::ConfigProblem;
 use crate::notifications::{Notifications, NotificationsLayer};
+use crate::sandbox::{SandboxContext, SandboxEntry, SandboxList, SandboxSetting, sandbox_paths};
 use crate::trust::{TrustHash, TrustItem, TrustRequest, Untrusted};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -34,7 +35,7 @@ pub(crate) struct RepoLayer {
     base: Option<String>,
     preset: Option<String>,
     review_command: Option<String>,
-    sandbox: Option<bool>,
+    sandbox: Option<SandboxSetting>,
     #[serde(default)]
     agent: AgentLayer,
     #[serde(default)]
@@ -109,6 +110,7 @@ pub struct RepoConfig {
     agent_committed: bool,
     notifications: Notifications,
     presets: BTreeMap<String, Sourced<Preset>>,
+    sandbox_entries: Vec<Sourced<SandboxEntry>>,
     trust_request: Option<TrustRequest>,
     trusted: bool,
 }
@@ -117,6 +119,7 @@ impl RepoConfig {
     pub(crate) fn layered(
         global_notifications: &NotificationsLayer,
         layers: [(Source, &RepoLayer); 3],
+        sandbox: &SandboxContext,
         approved: Option<&TrustHash>,
     ) -> Result<Self, (Source, ConfigProblem)> {
         for (source, layer) in &layers {
@@ -125,7 +128,10 @@ impl RepoConfig {
             }
             let misplaced = [
                 ("review_command", layer.review_command.is_some()),
-                ("sandbox", layer.sandbox.is_some()),
+                (
+                    "sandbox",
+                    layer.sandbox.as_ref().is_some_and(|s| s.switch().is_some()),
+                ),
             ];
             if let Some((key, _)) = misplaced.into_iter().find(|(_, set)| *set) {
                 return Err((*source, ConfigProblem::Misplaced { key }));
@@ -172,6 +178,17 @@ impl RepoConfig {
             }
         }
 
+        let mut sandbox_entries = Vec::new();
+        for (source, layer) in &layers {
+            let entries = sandbox
+                .entries(layer.sandbox.as_ref())
+                .map_err(|problem| (*source, problem))?;
+            sandbox_entries.extend(entries.into_iter().map(|value| Sourced {
+                value,
+                source: *source,
+            }));
+        }
+
         let mut config = Self {
             setup: pick(&|layer| layer.setup.as_ref()),
             teardown: pick(&|layer| layer.teardown.as_ref()),
@@ -179,7 +196,10 @@ impl RepoConfig {
             preset: pick(&|layer| layer.preset.as_ref()),
             review_command: pick(&|layer| layer.review_command.as_ref())
                 .map(|sourced| sourced.value),
-            sandbox: layers.iter().rev().find_map(|(_, layer)| layer.sandbox),
+            sandbox: layers
+                .iter()
+                .rev()
+                .find_map(|(_, layer)| layer.sandbox.as_ref()?.switch()),
             agent,
             agent_committed,
             notifications: Notifications::layered(
@@ -187,6 +207,7 @@ impl RepoConfig {
                     .chain(layers.iter().map(|(_, layer)| &layer.notifications)),
             ),
             presets,
+            sandbox_entries,
             trust_request: None,
             trusted: false,
         };
@@ -224,6 +245,10 @@ impl RepoConfig {
             self.committed_loosening_default()
                 .map(TrustItem::DefaultPreset),
         );
+        items.extend(
+            self.committed_sandbox_openings()
+                .map(|entry| TrustItem::SandboxPath(entry.list, entry.written.clone())),
+        );
         items
     }
 
@@ -233,6 +258,13 @@ impl RepoConfig {
             .get(&name.value)
             .filter(|preset| preset.loosens())
             .cloned()
+    }
+
+    fn committed_sandbox_openings(&self) -> impl Iterator<Item = &SandboxEntry> {
+        self.sandbox_entries
+            .iter()
+            .filter(|entry| entry.committed() && entry.value.list != SandboxList::Hidden)
+            .map(|entry| &entry.value)
     }
 
     fn all_presets(&self) -> Presets {
@@ -302,6 +334,15 @@ impl RepoConfig {
         Presets::new(usable).expect("reserved preset names are rejected at load")
     }
 
+    pub fn sandbox_paths(&self) -> Result<SandboxPaths, Untrusted> {
+        if !self.trusted && self.committed_sandbox_openings().next().is_some() {
+            return Err(Untrusted);
+        }
+        Ok(sandbox_paths(
+            self.sandbox_entries.iter().map(|entry| &entry.value),
+        ))
+    }
+
     pub fn select_preset(&self, new: Option<&str>) -> Result<Preset, PresetError> {
         let name = new.or(self.default_preset()).unwrap_or(INHERIT);
         let untrusted_definition = self
@@ -319,6 +360,9 @@ impl RepoConfig {
             .cloned()
             .ok_or_else(|| PresetError::Unknown(name.into()))?;
         preset.sandbox = preset.sandbox.or(self.sandbox);
+        if preset.sandboxed() && self.sandbox_paths().is_err() {
+            return Err(PresetError::Untrusted(name.into()));
+        }
         Ok(preset)
     }
 }

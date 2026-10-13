@@ -4,6 +4,7 @@ mod loader;
 mod notifications;
 mod ports;
 mod repo;
+mod sandbox;
 mod trust;
 pub mod xdg;
 
@@ -13,4 +14,5 @@ pub use loader::{ConfigLoader, REPO_FILE};
 pub use notifications::{Channel, Notifications};
 pub use ports::{PortBlock, PortRange};
 pub use repo::{AgentConfig, PresetError, RepoConfig, Source};
+pub use sandbox::SandboxList;
 pub use trust::{TrustHash, TrustItem, TrustRequest, Untrusted};

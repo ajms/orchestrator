@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset};
+use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset, SandboxPaths};
 use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
@@ -84,6 +84,7 @@ fn describe(item: &TrustItem) -> String {
         }
         TrustItem::Preset(preset) => format!("Preset {}", preset.name),
         TrustItem::DefaultPreset(preset) => format!("default Preset {}", preset.name),
+        TrustItem::SandboxPath(list, path) => format!("Sandbox {}: {path}", list.name()),
     }
 }
 
@@ -227,7 +228,8 @@ impl Daemon {
             .map_err(|_| untrusted(root.path(), &config))?;
         let adapter = adapter_for(agent).map_err(refused)?;
         if preset.sandboxed() {
-            self.probe_sandbox(None, root.path(), adapter.as_ref())
+            let configured = sandbox_paths(root.path(), &config)?;
+            self.probe_sandbox(None, root.path(), adapter.as_ref(), &configured)
                 .map_err(refused)?;
         }
         let global = self.config.loader.global().map_err(refused)?;
@@ -307,11 +309,12 @@ impl Daemon {
         let agent = config.agent().map_err(|_| untrusted(repo, &config))?;
         let preset = select_preset(repo, &config, Some(&record.preset))?;
         if preset.sandboxed() {
+            let configured = sandbox_paths(repo, &config)?;
             let adapter = adapter_for(agent).map_err(refused)?;
             let daemon = self.clone();
             let (record, repo) = (record.clone(), repo.to_path_buf());
             tokio::task::spawn_blocking(move || {
-                daemon.probe_sandbox(Some(&record), &repo, adapter.as_ref())
+                daemon.probe_sandbox(Some(&record), &repo, adapter.as_ref(), &configured)
             })
             .await
             .map_err(refused)?
@@ -477,13 +480,16 @@ impl Daemon {
         };
         let spawned = match launch {
             Ok(launch) => {
-                let sandbox = match launch.sandboxed {
-                    true => self.blocking_sandbox(&record, &repo, &launch.adapter).await,
-                    false => Ok(None),
+                let sandbox = match &launch.sandbox {
+                    Some(configured) => {
+                        self.blocking_sandbox(&record, &repo, &launch.adapter, configured)
+                            .await
+                    }
+                    None => Ok(None),
                 };
                 let _ = self.update(id, |live| {
                     live.adapter = launch.adapter;
-                    live.preset_sandboxed = launch.sandboxed;
+                    live.preset_sandboxed = launch.sandbox.is_some();
                     Ok(())
                 });
                 match sandbox {
@@ -521,12 +527,15 @@ impl Daemon {
         record: &SessionRecord,
         repo: &Path,
         adapter: &Adapter,
+        configured: &SandboxPaths,
     ) -> Result<Option<SandboxLaunch>, String> {
         let daemon = self.clone();
         let (record, repo, adapter) = (record.clone(), repo.to_path_buf(), adapter.clone());
+        let configured = configured.clone();
         tokio::task::spawn_blocking(move || {
-            let warning = daemon.probe_sandbox(Some(&record), &repo, adapter.as_ref())?;
-            let (args, env) = daemon.sandbox_args(&record, &repo, adapter.as_ref())?;
+            let warning =
+                daemon.probe_sandbox(Some(&record), &repo, adapter.as_ref(), &configured)?;
+            let (args, env) = daemon.sandbox_args(&record, &repo, adapter.as_ref(), &configured)?;
             Ok(Some(SandboxLaunch { args, warning, env }))
         })
         .await
@@ -545,7 +554,10 @@ impl Daemon {
         let adapter = adapter_for(agent)?;
         let preset =
             select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
-        let sandboxed = preset.sandboxed();
+        let sandbox = match preset.sandboxed() {
+            true => Some(config.sandbox_paths().map_err(|err| err.to_string())?),
+            false => None,
+        };
         let mut spec = LaunchSpec::new(
             record.id.clone(),
             self.config.orch_program.to_string_lossy(),
@@ -563,7 +575,7 @@ impl Daemon {
         Ok(AgentLaunch {
             adapter,
             argv,
-            sandboxed,
+            sandbox,
         })
     }
 
@@ -735,7 +747,7 @@ struct SandboxLaunch {
 struct AgentLaunch {
     adapter: Adapter,
     argv: Vec<String>,
-    sandboxed: bool,
+    sandbox: Option<SandboxPaths>,
 }
 
 pub(crate) fn select_preset(
@@ -747,6 +759,10 @@ pub(crate) fn select_preset(
         PresetError::Unknown(name) => refused(format!("unknown Preset {name}")),
         PresetError::Untrusted(_) => untrusted(repo, config),
     })
+}
+
+fn sandbox_paths(repo: &Path, config: &RepoConfig) -> Result<SandboxPaths, RequestError> {
+    config.sandbox_paths().map_err(|_| untrusted(repo, config))
 }
 
 pub(crate) fn agent_command(
