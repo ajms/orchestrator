@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/ajms/orchestrator/compare/v0.1.0...v0.1.1) - 2026-10-13
+
+### Other
+
+- *(holder)* let the alternate-screen mirror catch up with the Holder before comparing
+- *(daemon)* match the worktree-hook launch line across a resize's line breaks
+
 ## [0.1.0](https://github.com/ajms/orchestrator/releases/tag/v0.1.0) - 2026-10-13
 
 ### Added
