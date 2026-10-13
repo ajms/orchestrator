@@ -3,11 +3,15 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use orch_agent::{AgentAdapter, SandboxFailure, SandboxLayout, sandbox_policy, sandbox_refusal};
+use orch_agent::{
+    AgentAdapter, Placeholder, SandboxFailure, SandboxLayout, SandboxNeeds, sandbox_carve_outs,
+    sandbox_policy, sandbox_refusal,
+};
 use orch_config::xdg;
 use orch_store::SessionRecord;
 
 use crate::agents::default_adapter;
+use crate::broker::{EnvVars, SHIMS_DIR, install_shims};
 use crate::state::Daemon;
 
 const TMP_DIR: &str = "tmp";
@@ -42,13 +46,14 @@ impl Daemon {
         record: &SessionRecord,
         repo: &Path,
         adapter: &dyn AgentAdapter,
-    ) -> Result<Vec<String>, String> {
+    ) -> Result<(Vec<String>, EnvVars), String> {
         let paths = self.session_paths(record, repo, self.holder_socket(&record.id))?;
-        let layout = layout(paths, self.config.orch_program.clone())?;
-        Ok(sandbox_policy(
-            &layout,
-            &adapter.sandbox_needs(&xdg::process_env),
-        ))
+        let shims = self.session_dir(&record.id).join(SHIMS_DIR);
+        let env = install_shims(&shims, &self.config.orch_program)?;
+        let mut layout = layout(paths, self.config.orch_program.clone())?;
+        layout.read_only.push(shims);
+        let policy = carved_policy(&layout, &adapter.sandbox_needs(&xdg::process_env))?;
+        Ok((policy, env))
     }
 
     pub(crate) fn probe_sandbox(
@@ -68,10 +73,10 @@ impl Daemon {
             },
         };
         let layout = layout(paths, self.config.orch_program.clone())?;
-        probe(&sandbox_policy(
+        probe(&carved_policy(
             &layout,
             &adapter.sandbox_needs(&xdg::process_env),
-        ))
+        )?)
     }
 
     fn session_paths(
@@ -97,8 +102,26 @@ impl Daemon {
 pub fn probe_host_sandbox(orch_program: PathBuf) -> ProbeResult {
     let scratch = Scratch::new(&std::env::temp_dir()).map_err(|err| err.to_string())?;
     let layout = layout(scratch.paths()?, orch_program)?;
-    let needs = default_adapter().sandbox_needs(&xdg::process_env);
-    probe(&sandbox_policy(&layout, &needs))
+    let mut needs = default_adapter().sandbox_needs(&xdg::process_env);
+    needs.carve_outs.retain(|path| path.exists());
+    probe(&carved_policy(&layout, &needs)?)
+}
+
+fn carved_policy(layout: &SandboxLayout, needs: &SandboxNeeds) -> Result<Vec<String>, String> {
+    for (path, placeholder) in sandbox_carve_outs(layout, needs) {
+        if path.symlink_metadata().is_ok() {
+            continue;
+        }
+        let made = match placeholder {
+            Placeholder::Dir => std::fs::create_dir_all(&path),
+            Placeholder::File(content) => path
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&path, content)),
+        };
+        made.map_err(|err| format!("creating {}: {err}", path.display()))?;
+    }
+    Ok(sandbox_policy(layout, needs))
 }
 
 fn probe(policy: &[String]) -> ProbeResult {

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use orch_agent::{GuardHit, GuardKind, SubagentTranscripts, mode_name};
+use orch_agent::{GuardAnswer, GuardHit, GuardKind, SubagentTranscripts, mode_name};
 use orch_core::{AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus};
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
@@ -14,7 +14,7 @@ use orch_protocol::{
 };
 use orch_store::SessionRecord;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Notify, oneshot, watch};
 
 use crate::DaemonConfig;
 use crate::agents::Adapter;
@@ -151,6 +151,7 @@ pub(crate) struct PendingGuard {
     pub(crate) id: u64,
     pub(crate) tool: String,
     pub(crate) hit: GuardHit,
+    pub(crate) brokered: Option<oneshot::Sender<GuardAnswer>>,
 }
 
 #[derive(Default)]
@@ -390,6 +391,7 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::OtherRef => GuardKindView::OtherRef,
         GuardKind::WorktreeManagement => GuardKindView::WorktreeManagement,
         GuardKind::WriteOutsideWorktree => GuardKindView::WriteOutsideWorktree,
+        GuardKind::Push => GuardKindView::Push,
     }
 }
 

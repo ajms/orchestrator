@@ -16,6 +16,7 @@ pub enum GuardKind {
     OtherRef,
     WorktreeManagement,
     WriteOutsideWorktree,
+    Push,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

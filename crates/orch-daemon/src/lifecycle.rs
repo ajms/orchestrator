@@ -521,8 +521,12 @@ impl Daemon {
         let (record, repo, adapter) = (record.clone(), repo.to_path_buf(), adapter.clone());
         tokio::task::spawn_blocking(move || {
             let warning = daemon.probe_sandbox(Some(&record), &repo, adapter.as_ref())?;
-            let policy = daemon.sandbox_policy(&record, &repo, adapter.as_ref())?;
-            Ok(Some(SandboxLaunch { policy, warning }))
+            let (policy, env) = daemon.sandbox_policy(&record, &repo, adapter.as_ref())?;
+            Ok(Some(SandboxLaunch {
+                policy,
+                warning,
+                env,
+            }))
         })
         .await
         .map_err(|err| err.to_string())?
@@ -586,15 +590,26 @@ impl Daemon {
                 .arg("--port-size")
                 .arg(block.size.to_string());
         }
-        if let Some(SandboxLaunch { policy, warning }) = sandbox {
+        let mut broker_env = Vec::new();
+        if let Some(SandboxLaunch {
+            policy,
+            warning,
+            env,
+        }) = sandbox
+        {
             let policy = serde_json::to_string(&policy).map_err(|err| err.to_string())?;
             command.arg("--sandbox").arg(policy);
             if let Some(warning) = warning {
                 command.arg("--warning").arg(warning);
             }
+            broker_env = env;
         }
         let display = self.lock().display.pairs();
-        for (key, value) in session_env(record).into_iter().chain(display) {
+        let env = session_env(record)
+            .into_iter()
+            .chain(display)
+            .chain(broker_env);
+        for (key, value) in env {
             command.arg("--env").arg(format!("{key}={value}"));
         }
         let size = self
@@ -710,6 +725,7 @@ impl Daemon {
 struct SandboxLaunch {
     policy: Vec<String>,
     warning: Option<String>,
+    env: Vec<(String, String)>,
 }
 
 struct AgentLaunch {

@@ -1,4 +1,4 @@
-use orch_agent::{SandboxLayout, SandboxNeeds, sandbox_policy};
+use orch_agent::{Placeholder, SandboxLayout, SandboxNeeds, sandbox_carve_outs, sandbox_policy};
 
 const HOME: &str = "/home/dev";
 const REPO: &str = "/home/dev/shop";
@@ -54,6 +54,10 @@ fn last_at(args: &[String], words: &[&str]) -> usize {
 
 fn read_only(path: &str) -> [&str; 3] {
     ["--ro-bind-try", path, path]
+}
+
+fn carved(path: &str) -> [&str; 3] {
+    ["--ro-bind", path, path]
 }
 
 fn writable(path: &str) -> [&str; 3] {
@@ -135,10 +139,10 @@ fn the_worktree_its_subagent_worktrees_and_the_git_common_dir_are_writable() {
 fn git_hooks_and_config_and_the_agents_carve_outs_stay_read_only() {
     let args = policy();
     let git_writable = at(&args, &writable(GIT));
-    assert!(at(&args, &read_only("/home/dev/shop/.git/hooks")) > git_writable);
-    assert!(at(&args, &read_only("/home/dev/shop/.git/config")) > git_writable);
+    assert!(at(&args, &carved("/home/dev/shop/.git/hooks")) > git_writable);
+    assert!(at(&args, &carved("/home/dev/shop/.git/config")) > git_writable);
     assert!(
-        at(&args, &read_only("/home/dev/.agent/hooks"))
+        at(&args, &carved("/home/dev/.agent/hooks"))
             > at(
                 &args,
                 &["--bind-try", "/home/dev/.agent", "/home/dev/.agent"]
@@ -154,7 +158,7 @@ fn mounts_go_root_then_home_then_allowlist_then_writable_then_carve_outs_then_ma
         at(&args, &["--tmpfs", HOME]),
         at(&args, &read_only("/home/dev/.gitconfig")),
         at(&args, &writable(WORKTREE)),
-        at(&args, &read_only("/home/dev/.agent/hooks")),
+        at(&args, &carved("/home/dev/.agent/hooks")),
         at(&args, &["--tmpfs", "/mnt"]),
     ];
     assert!(order.is_sorted(), "{order:?} in {args:#?}");
@@ -229,12 +233,35 @@ fn paths_bound_inside_a_hidden_dir_come_back_after_it_is_masked() {
     let mask = at(&args, &["--tmpfs", "/mnt"]);
     let repo_again = last_at(&args, &["--ro-bind", repo, repo]);
     let worktree_again = last_at(&args, &writable(worktree));
-    let hooks_again = last_at(&args, &read_only("/mnt/data/shop/.git/hooks"));
+    let hooks_again = last_at(&args, &carved("/mnt/data/shop/.git/hooks"));
     assert!(mask < repo_again && repo_again < worktree_again && worktree_again < hooks_again);
     assert!(
         last_at(
             &args,
             &["--bind-try", "/home/dev/.agent", "/home/dev/.agent"]
         ) < mask
+    );
+}
+
+#[test]
+fn a_missing_carve_out_gets_an_empty_placeholder_of_its_kind() {
+    let needs = SandboxNeeds {
+        carve_outs: vec![
+            "/home/dev/.agent/hooks".into(),
+            "/home/dev/.agent/settings.json".into(),
+            "/home/dev/.agent/AGENT.md".into(),
+        ],
+        ..needs()
+    };
+    assert_eq!(
+        sandbox_carve_outs(&layout(), &needs),
+        [
+            ("/home/dev/.agent/hooks", Placeholder::Dir),
+            ("/home/dev/.agent/settings.json", Placeholder::File("{}")),
+            ("/home/dev/.agent/AGENT.md", Placeholder::File("")),
+            ("/home/dev/shop/.git/hooks", Placeholder::Dir),
+            ("/home/dev/shop/.git/config", Placeholder::File("")),
+        ]
+        .map(|(path, placeholder)| (path.into(), placeholder))
     );
 }

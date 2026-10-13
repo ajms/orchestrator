@@ -1,3 +1,4 @@
+mod broker;
 mod cli;
 mod clipboard;
 mod common;

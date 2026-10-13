@@ -117,6 +117,15 @@ impl Daemon {
             match message {
                 FromHolder::Event { seq, event } if seq > last_seq => {
                     last_seq = seq;
+                    if let HolderEvent::Broker {
+                        id: broker,
+                        request,
+                    } = &event
+                    {
+                        let daemon = self.clone();
+                        let (session, broker, request) = (id.clone(), *broker, request.clone());
+                        tokio::spawn(async move { daemon.broker(session, broker, request).await });
+                    }
                     if let (
                         Some(titles),
                         HolderEvent::Hook { payload, .. } | HolderEvent::Tap { payload },
@@ -280,6 +289,7 @@ impl Daemon {
                 let events = live.adapter.map_tap(&payload).unwrap_or_default();
                 observe(live, &events, now, &mut conversations, &mut usage)
             }
+            HolderEvent::Broker { .. } => Vec::new(),
         };
         live.deliver_prompt();
         let first_conversation = live.record.conversations.is_empty() && !conversations.is_empty();
@@ -337,7 +347,14 @@ impl Daemon {
                     reason: DENIED_BY_USER.into(),
                 },
             };
-            live.send_to_holder(ToHolder::GuardAnswer { id: guard, answer });
+            match pending.brokered {
+                Some(waiter) => {
+                    let _ = waiter.send(answer);
+                }
+                None => {
+                    live.send_to_holder(ToHolder::GuardAnswer { id: guard, answer });
+                }
+            }
             Ok(())
         })?;
         Ok(Reply::Done)
@@ -401,6 +418,7 @@ fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant
                 id: guard,
                 tool,
                 hit,
+                brokered: None,
             });
             live.status.observe(Observation::GuardPrompted, now);
         }

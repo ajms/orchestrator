@@ -195,6 +195,8 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 
 The Sandbox fails closed: before each sandboxed spawn, `orch` runs the Session's policy around `true`, and if that fails, it never runs the Agent unsandboxed. A new Session, a resume and *start anyway* are refused, and a restart leaves the Agent Errored. The message names the cause (`bwrap` missing, `kernel.unprivileged_userns_clone` or `user.max_user_namespaces` at 0, or Ubuntu's AppArmor restriction) and the ways out: fix the host, set `sandbox = false` under `[defaults]` in your global config, or `:preset` to a Preset with `sandbox = false`. A Preset's own `sandbox` setting wins over `[defaults] sandbox`. `orch` also runs a nested `bwrap` inside the policy; if that fails, the Agent still starts and its pane warns that Claude's own Bash sandbox won't work. If `bwrap` fails while starting the Agent, the error reads "The Sandbox failed to start: …".
 
+**Broker:** a sandboxed Agent gets none of your GitHub credentials, so `orch` pushes for it ([ADR 0010](docs/adr/0010-sandboxed-agents-reach-github-through-the-broker.md)). Inside the Sandbox, origin's push URL is `orch::origin`, which a `git-remote-orch` helper on `PATH` forwards over the Session's Holder socket to the Daemon, so the Agent keeps typing `git push`. The Daemon pushes from the main checkout with your credentials, but only this Session's Branch, to origin under the same name. `--force-with-lease` works; a plain `--force`, other branches, tags, deletions, `--all`, `--mirror` and the Base branch are refused with a reason. It runs with `--no-verify`, `core.hooksPath=/dev/null`, and `core.sshCommand` taken from your global git config (or `ssh`), so nothing the Agent plants in the repo runs. With the `plan` and `ask` Presets (or any Preset whose `mode` is `plan` or `default`) each push asks first, like a Guard; *allow for Session* stops the asking. Every brokered push, and every refusal, shows in the Session's pane. Unsandboxed Sessions push with your own credentials as before.
+
 **Trust:** scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets (including a Preset with `sandbox = false`) that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
 
 State lives in `~/.local/state/orchestrator/state.db`. Runtime sockets live under `$XDG_RUNTIME_DIR/orchestrator`.
@@ -219,6 +221,7 @@ To let CI run on the release PR, add a `RELEASE_PLZ_TOKEN` secret (a fine-graine
 
 - [ADR 0001](docs/adr/0001-embed-agent-tui.md): embed the Agent's own TUI instead of rendering the conversation.
 - [ADR 0002](docs/adr/0002-daemon-with-session-holders.md): a Daemon plus one Holder per Session, not tmux.
+- [ADR 0010](docs/adr/0010-sandboxed-agents-reach-github-through-the-broker.md): sandboxed Agents reach GitHub through the Broker.
 - [Agent adapters](docs/agent-adapters.md): the adapter trait, capabilities, and a checklist for adding another Agent.
 
 The crates under `crates/`:

@@ -56,6 +56,43 @@ pub enum ToHolder {
     Tap {
         payload: String,
     },
+    Broker {
+        request: BrokerRequest,
+    },
+    BrokerReply {
+        id: GuardId,
+        reply: BrokerReply,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BrokerRequest {
+    Refs,
+    Push { updates: Vec<RefUpdate> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefUpdate {
+    pub src: String,
+    pub commit: Option<String>,
+    pub dst: String,
+    pub force: bool,
+    pub lease: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BrokerReply {
+    Refs { refs: Vec<RemoteRef> },
+    Done { said: String },
+    Refused { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteRef {
+    pub name: String,
+    pub commit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -78,6 +115,9 @@ pub enum FromHolder {
     Superseded,
     Clipboard {
         text: String,
+    },
+    BrokerReply {
+        reply: BrokerReply,
     },
     #[serde(other)]
     Unknown,
@@ -127,6 +167,10 @@ pub enum HolderEvent {
     },
     Tap {
         payload: String,
+    },
+    Broker {
+        id: GuardId,
+        request: BrokerRequest,
     },
     Exited(AgentExit),
 }

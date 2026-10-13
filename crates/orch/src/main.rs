@@ -1,3 +1,4 @@
+mod broker;
 mod client;
 mod daemon;
 mod doctor;
@@ -31,6 +32,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(subcommand, hide = true)]
+    Broker(broker::BrokerCommand),
     Daemon(daemon::DaemonArgs),
     Doctor(doctor::DoctorArgs),
     Hold(hold::HoldArgs),
@@ -62,6 +65,7 @@ enum Command {
 fn main() -> ExitCode {
     match Cli::parse().command {
         None => tui::run(),
+        Some(Command::Broker(command)) => broker::run(command),
         Some(Command::Daemon(args)) => daemon::run(args),
         Some(Command::Doctor(args)) => doctor::run(args),
         Some(Command::Hold(args)) => hold::run(args),

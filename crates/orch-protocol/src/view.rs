@@ -192,6 +192,7 @@ pub enum GuardKindView {
     OtherRef,
     WorktreeManagement,
     WriteOutsideWorktree,
+    Push,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -238,3 +238,28 @@ async fn an_unsandboxed_preset_runs_the_agent_as_before() {
     assert_eq!(run(&mut pane, "write", &stray).await, "ok");
     assert!(stray.exists());
 }
+
+#[tokio::test]
+async fn a_sandboxed_agent_pushes_its_branch_through_the_broker() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.write_config(BOXED);
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = boxed_session(&env, &mut client).await;
+    let view = client.sessions[&id].clone();
+    let remote = env.remote(&env.path("repos/app"));
+
+    let push = format!(
+        "git commit -q --allow-empty -m boxed && git push -u origin {}",
+        view.branch
+    );
+    assert_eq!(shell(&mut pane, &push).await, "exit 0");
+    assert_eq!(
+        git(&remote, &["log", "-1", "--format=%s", &view.branch]),
+        "boxed"
+    );
+    pane.wait_for_text("Broker: pushed").await;
+}

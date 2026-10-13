@@ -90,6 +90,33 @@ impl Mount {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placeholder {
+    Dir,
+    File(&'static str),
+}
+
+pub fn sandbox_carve_outs(
+    layout: &SandboxLayout,
+    needs: &SandboxNeeds,
+) -> Vec<(PathBuf, Placeholder)> {
+    let placeholder = |path: &Path| match path.extension().and_then(|ext| ext.to_str()) {
+        None => Placeholder::Dir,
+        Some("json") => Placeholder::File("{}"),
+        Some(_) => Placeholder::File(""),
+    };
+    let agents = needs
+        .carve_outs
+        .iter()
+        .map(|path| (path.clone(), placeholder(path)));
+    let git = [
+        ("hooks", Placeholder::Dir),
+        ("config", Placeholder::File("")),
+    ]
+    .map(|(name, placeholder)| (layout.git_common_dir.join(name), placeholder));
+    agents.chain(git).collect()
+}
+
 pub fn sandbox_policy(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String> {
     let mut mounts = vec![Mount {
         kind: Kind::Bind,
@@ -126,9 +153,12 @@ pub fn sandbox_policy(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<Strin
         mounts.push(Mount::same(Kind::Bind, path));
     }
 
-    let git_carve_outs = ["hooks", "config"].map(|name| layout.git_common_dir.join(name));
-    let carve_outs = needs.carve_outs.iter().chain(&git_carve_outs);
-    mounts.extend(carve_outs.map(|path| Mount::same(Kind::ReadOnlyTry, path)));
+    let carve_outs = sandbox_carve_outs(layout, needs);
+    mounts.extend(
+        carve_outs
+            .iter()
+            .map(|(path, _)| Mount::same(Kind::ReadOnly, path)),
+    );
 
     let mut args: Vec<String> = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
         .map(String::from)

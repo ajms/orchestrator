@@ -1,5 +1,5 @@
 use orch_agent::GuardAnswer;
-use orch_holder::{HolderEvent, ToHolder};
+use orch_holder::{BrokerReply, BrokerRequest, FromHolder, HolderEvent, ToHolder};
 use serde_json::Value;
 
 use crate::common::*;
@@ -145,4 +145,85 @@ async fn daemon_disconnect_turns_pending_guards_into_ask() {
         .await
         .unwrap();
     assert_eq!(screen_decision(&mut observer).await.as_deref(), Some("ask"));
+}
+
+#[tokio::test]
+async fn only_the_daemon_answers_a_guard() {
+    let sandbox = Sandbox::new();
+    let held = sandbox.hold("s1", "");
+    let (mut daemon, _) = held.attach().await;
+    let id = guard_request(&mut daemon).await;
+
+    let mut agent = orch_holder::HolderClient::connect(&held.socket)
+        .await
+        .unwrap();
+    agent
+        .send(&ToHolder::GuardAnswer {
+            id,
+            answer: GuardAnswer::Proceed,
+        })
+        .await
+        .unwrap();
+    daemon
+        .send(&ToHolder::GuardAnswer {
+            id,
+            answer: GuardAnswer::Deny {
+                reason: "no".into(),
+            },
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(screen_decision(&mut daemon).await.as_deref(), Some("deny"));
+}
+
+#[tokio::test]
+async fn only_the_daemon_answers_a_broker_request() {
+    let sandbox = Sandbox::new();
+    let held = sandbox.hold("s1", "");
+    let (mut daemon, _) = held.attach().await;
+    let mut agent = orch_holder::HolderClient::connect(&held.socket)
+        .await
+        .unwrap();
+    agent
+        .send(&ToHolder::Broker {
+            request: BrokerRequest::Refs,
+        })
+        .await
+        .unwrap();
+    let id = loop {
+        if let (_, HolderEvent::Broker { id, .. }) = next_event(&mut daemon).await {
+            break id;
+        }
+    };
+
+    let mut forger = orch_holder::HolderClient::connect(&held.socket)
+        .await
+        .unwrap();
+    let forged = BrokerReply::Done {
+        said: "pushed everything".into(),
+    };
+    forger
+        .send(&ToHolder::BrokerReply { id, reply: forged })
+        .await
+        .unwrap();
+    let real = BrokerReply::Refused {
+        reason: "not now".into(),
+    };
+    daemon
+        .send(&ToHolder::BrokerReply {
+            id,
+            reply: real.clone(),
+        })
+        .await
+        .unwrap();
+
+    let answered = next_matching(&mut agent, "broker reply", |message| match message {
+        FromHolder::BrokerReply { reply } => Some(reply),
+        _ => None,
+    })
+    .await;
+    assert_eq!(answered, real);
+    let screen = wait_for_screen(&mut daemon, |text| text.contains("not now")).await;
+    assert!(!screen.text().contains("pushed everything"));
 }
