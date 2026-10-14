@@ -6,6 +6,7 @@ use orch_git::{ENV_REDIRECTING_GIT, Repo, SessionName, SessionWorktree};
 use tempfile::TempDir;
 
 static ISOLATE: Once = Once::new();
+const GIT_CONFIG_INJECTED: [&str; 2] = ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
 
 fn isolate_git() {
     ISOLATE.call_once(|| {
@@ -21,7 +22,7 @@ fn isolate_git() {
             // SAFETY: every test calls `isolate_git` before spawning anything, and Once serialises the writes.
             unsafe { std::env::set_var(key, value) };
         }
-        for key in ENV_REDIRECTING_GIT {
+        for key in ENV_REDIRECTING_GIT.iter().chain(&GIT_CONFIG_INJECTED) {
             // SAFETY: as above.
             unsafe { std::env::remove_var(key) };
         }
@@ -30,7 +31,7 @@ fn isolate_git() {
 
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let mut command = Command::new("git");
-    for key in ENV_REDIRECTING_GIT {
+    for key in ENV_REDIRECTING_GIT.iter().chain(&GIT_CONFIG_INJECTED) {
         command.env_remove(key);
     }
     let output = command

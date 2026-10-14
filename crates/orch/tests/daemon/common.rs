@@ -32,8 +32,10 @@ const GIT_ENV: [(&str, &str); 6] = [
     ("GIT_COMMITTER_EMAIL", "test@example.com"),
 ];
 
+const GIT_CONFIG_INJECTED: [&str; 2] = ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
+
 fn hermetic(command: &mut Command) -> &mut Command {
-    for key in ENV_REDIRECTING_GIT {
+    for key in ENV_REDIRECTING_GIT.iter().chain(&GIT_CONFIG_INJECTED) {
         command.env_remove(key);
     }
     command.envs(GIT_ENV)
