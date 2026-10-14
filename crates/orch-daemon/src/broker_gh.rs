@@ -134,6 +134,12 @@ const OUTPUT: &[Flag] = &[
     value("jq", Some('q')),
     value("template", Some('t')),
 ];
+const REPO_VIEW: &[Flag] = &[
+    value("json", None),
+    value("jq", Some('q')),
+    value("template", Some('t')),
+    value("branch", Some('b')),
+];
 const ISSUE_VIEW: &[Flag] = &[switch("comments", Some('c'))];
 const ISSUE_LIST: &[Flag] = &[
     value("state", Some('s')),
@@ -332,6 +338,7 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
         ("pr", "checks") => (&[OUTPUT, PR_CHECKS], 1),
         ("run", "view") => (&[OUTPUT, RUN_VIEW], 1),
         ("run", "list") => (&[OUTPUT, RUN_LIST], 0),
+        ("repo", "view") => (&[REPO_VIEW], 1),
         ("pr", "create") => (&[PR_CREATE], 0),
         ("pr", "edit") => (&[PR_EDIT], 1),
         ("pr", "ready") => (&[PR_READY], 1),
@@ -384,10 +391,20 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
                 Some(PrChange::Edit { pr }),
             )
         }
+        "view" if command == "repo" => {
+            if let Some(named) = parsed.positionals.pop()
+                && !limits.repo.is(&named)
+            {
+                return Err(another_repo(&named, limits.repo));
+            }
+            (strings(&["repo", "view", &limits.repo.slug()]), None)
+        }
         _ => (strings(&[command, sub]), None),
     };
     args.extend(parsed.args());
-    args.extend(strings(&["--repo", &limits.repo.slug()]));
+    if command != "repo" {
+        args.extend(strings(&["--repo", &limits.repo.slug()]));
+    }
     Ok(GhCall { args, said, change })
 }
 
@@ -547,9 +564,24 @@ mod tests {
     }
 
     #[test]
+    fn repo_view_pins_this_repo_as_its_argument() {
+        assert_eq!(passed("repo view"), "repo view acme/app");
+        assert_eq!(
+            passed("repo view https://github.com/ACME/app -q.name --json=name"),
+            "repo view acme/app --jq .name --json name"
+        );
+        assert_eq!(
+            passed("repo view acme/app -b dev"),
+            "repo view acme/app --branch dev"
+        );
+    }
+
+    #[test]
     fn flags_outside_the_allowlist_are_never_smuggled_through() {
         for (line, says) in [
             ("pr view 3 --web", "--web"),
+            ("repo view --web", "--web"),
+            ("repo view -R acme/app", "-R"),
             ("pr checks --watch", "--watch"),
             ("issue list --hostname=evil", "--hostname"),
             ("pr view -- --web", "--web"),
@@ -570,6 +602,8 @@ mod tests {
         for line in [
             "issue view 1 --repo=other/app",
             "pr view https://github.com/other/app/pull/1",
+            "repo view other/app",
+            "repo view https://github.com/other/app",
             "api repos/other/app",
             "api repos/acme/app/../../other/app",
             "api https://api.github.com/repos/acme/app",
