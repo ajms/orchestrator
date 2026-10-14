@@ -1,7 +1,7 @@
 mod common;
 
 use common::Fixture;
-use orch_config::{PresetError, TrustItem};
+use orch_config::{PresetError, SandboxList, TrustItem, Untrusted};
 
 #[test]
 fn every_preset_runs_in_the_sandbox_unless_it_opts_out() {
@@ -99,4 +99,172 @@ fn the_global_switch_cannot_be_committed() {
         err.to_string().contains("sandbox is not allowed here"),
         "{err}"
     );
+}
+
+#[test]
+fn sandbox_lists_append_across_layers() {
+    let fx = Fixture::new();
+    fx.global(&format!(
+        "[defaults.sandbox]\nreadable = [\"~/.m2\"]\nwritable = [\"~/.cache\"]\n\n\
+         [repos.{}.sandbox]\nwritable = [\"/srv/scratch\"]\nhidden = [\"/mnt/data\"]\n",
+        fx.repo_key()
+    ));
+    fx.repo_file("[sandbox]\nreadable = [\"/opt/sdk\"]\nhidden = [\"~/.cargo\"]\n");
+
+    let paths = fx.approved().sandbox_paths().unwrap();
+    assert_eq!(paths.readable, [fx.home(".m2"), "/opt/sdk".into()]);
+    assert_eq!(paths.writable, [fx.home(".cache"), "/srv/scratch".into()]);
+    assert_eq!(paths.hidden, [fx.home(".cargo"), "/mnt/data".into()]);
+}
+
+#[test]
+fn a_sandbox_path_must_be_absolute_or_start_with_home() {
+    let fx = Fixture::new();
+    fx.global("[defaults.sandbox]\nwritable = [\".cache\"]\n");
+    let err = fx.loader.repo(fx.repo_path(), None).unwrap_err();
+    assert!(err.to_string().contains("\".cache\""), "{err}");
+}
+
+#[test]
+fn committed_readable_and_writable_paths_need_trust_before_a_sandboxed_spawn() {
+    let fx = Fixture::new();
+    fx.repo_file(
+        "[sandbox]\nreadable = [\"~/.aws\"]\nwritable = [\"~/.bashrc\"]\nhidden = [\"~/.cargo\"]\n",
+    );
+    fx.global("[defaults.presets.open]\nsandbox = false\n");
+
+    let untrusted = fx.untrusted();
+    assert_eq!(
+        untrusted.trust_request().unwrap().items,
+        [
+            TrustItem::SandboxPath {
+                list: SandboxList::Readable,
+                path: "~/.aws".into(),
+            },
+            TrustItem::SandboxPath {
+                list: SandboxList::Writable,
+                path: "~/.bashrc".into(),
+            },
+        ]
+    );
+    assert_eq!(untrusted.sandbox_paths(), Err(Untrusted));
+    assert_eq!(
+        untrusted.select_preset(Some("plan")),
+        Err(PresetError::Untrusted("plan".into()))
+    );
+    assert!(untrusted.select_preset(Some("open")).is_ok());
+
+    let approved = fx.approved();
+    assert!(approved.select_preset(Some("plan")).unwrap().sandboxed());
+    assert_eq!(
+        approved.sandbox_paths().unwrap().readable,
+        [fx.home(".aws")]
+    );
+}
+
+#[test]
+fn hidden_and_uncommitted_sandbox_paths_need_no_trust() {
+    let fx = Fixture::new();
+    fx.global(&format!(
+        "[defaults.sandbox]\nwritable = [\"~/.cache\"]\n\n[repos.{}.sandbox]\nreadable = [\"~/.m2\"]\n",
+        fx.repo_key()
+    ));
+    fx.repo_file("[sandbox]\nhidden = [\"~/.cargo\"]\n");
+    let config = fx.untrusted();
+    assert_eq!(config.trust_request(), None);
+    assert!(config.select_preset(None).is_ok());
+}
+
+#[test]
+fn approval_lapses_when_committed_readable_or_writable_paths_change_but_not_hidden_ones() {
+    let fx = Fixture::new();
+    fx.repo_file("[sandbox]\nreadable = [\"/opt/sdk\"]\n");
+    let hash = fx.untrusted().trust_request().unwrap().hash;
+    let trusted = |file: &str| {
+        fx.repo_file(file);
+        fx.loader
+            .repo(fx.repo_path(), Some(&hash))
+            .unwrap()
+            .is_trusted()
+    };
+
+    assert!(trusted(
+        "[sandbox]\nreadable = [\"/opt/sdk\"]\nhidden = [\"~/.cargo\"]\n"
+    ));
+    assert!(!trusted(
+        "[sandbox]\nreadable = [\"/opt/sdk\", \"~/.aws\"]\n"
+    ));
+    assert!(!trusted("[sandbox]\nwritable = [\"/opt/sdk\"]\n"));
+}
+
+#[test]
+fn naming_a_hard_wall_as_readable_or_writable_is_a_config_error() {
+    let fx = Fixture::new();
+    let home = fx.home("");
+    let loader = orch_config::ConfigLoader::from_env_vars(|key| {
+        (key == "HOME").then(|| home.display().to_string())
+    })
+    .unwrap();
+    std::fs::create_dir_all(loader.global_path().parent().unwrap()).unwrap();
+    let load = |list: &str, path: &str| {
+        fx.repo_file(&format!("[sandbox]\n{list} = [{path:?}]\n"));
+        loader.repo(fx.repo_path(), None)
+    };
+
+    for wall in [
+        "/",
+        "~/",
+        "~/..",
+        "~/.config",
+        "~/.config/orchestrator",
+        "~/.config/orchestrator/config.toml",
+        "~/.local/state/orchestrator/sessions",
+        "/srv/app/.git/hooks",
+        "/srv/app/.git/hooks/pre-commit",
+        "/srv/app/.git/config",
+        "~/.claude/settings.json",
+        "~/.claude/skills/mine",
+    ] {
+        for list in ["readable", "writable"] {
+            let err = load(list, wall).unwrap_err();
+            assert!(err.to_string().contains(&format!("{wall:?}")), "{err}");
+        }
+        assert!(load("hidden", wall).is_ok(), "hidden {wall}");
+    }
+    for fine in ["~/.cache", "~/.claude/projects", "/srv/app/.git/objects"] {
+        assert!(load("writable", fine).is_ok(), "{fine}");
+    }
+
+    std::fs::write(
+        loader.global_path(),
+        "[defaults.sandbox]\nreadable = [\"~/.config\"]\n",
+    )
+    .unwrap();
+    fx.repo_file("");
+    assert!(loader.repo(fx.repo_path(), None).is_err());
+}
+
+#[test]
+fn a_symlink_does_not_get_a_path_past_the_hard_walls() {
+    let fx = Fixture::new();
+    let real_home = fx.dir.path().join("real-home");
+    std::fs::create_dir_all(real_home.join(".config/orchestrator")).unwrap();
+    let home = fx.dir.path().join("linked-home");
+    std::os::unix::fs::symlink(&real_home, &home).unwrap();
+    std::os::unix::fs::symlink(real_home.join(".config/orchestrator"), real_home.join("x"))
+        .unwrap();
+    let loader = orch_config::ConfigLoader::from_env_vars(|key| {
+        (key == "HOME").then(|| home.display().to_string())
+    })
+    .unwrap();
+
+    for wall in [
+        real_home.display().to_string(),
+        "~/x".into(),
+        "~/x/state".into(),
+    ] {
+        fx.repo_file(&format!("[sandbox]\nwritable = [{wall:?}]\n"));
+        let err = loader.repo(fx.repo_path(), None).unwrap_err();
+        assert!(err.to_string().contains("hard wall"), "{wall}: {err}");
+    }
 }

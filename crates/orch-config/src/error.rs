@@ -6,10 +6,20 @@ use crate::PortRange;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigProblem {
-    UnknownPermissionMode { preset: String, mode: String },
+    UnknownPermissionMode {
+        preset: String,
+        mode: String,
+    },
     ReservedPresetName,
     EmptyPortRange(PortRange),
-    Misplaced { key: &'static str },
+    Misplaced {
+        key: &'static str,
+    },
+    SandboxPath {
+        list: &'static str,
+        path: String,
+        why: &'static str,
+    },
 }
 
 impl fmt::Display for ConfigProblem {
@@ -27,6 +37,9 @@ impl fmt::Display for ConfigProblem {
                 range.start, range.end, range.block_size
             ),
             ConfigProblem::Misplaced { key } => write!(f, "{key} is not allowed here"),
+            ConfigProblem::SandboxPath { list, path, why } => {
+                write!(f, "sandbox {list} entry {path:?} {why}")
+            }
         }
     }
 }

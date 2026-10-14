@@ -1,11 +1,13 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use orch_agent::{AgentAdapter, ClaudeCode};
 use serde::de::DeserializeOwned;
 
 use crate::error::{ConfigError, ConfigProblem};
 use crate::global::{GlobalConfig, GlobalFile};
 use crate::repo::{RepoConfig, RepoLayer, Source};
+use crate::sandbox::SandboxContext;
 use crate::trust::TrustHash;
 use crate::xdg;
 
@@ -15,6 +17,8 @@ pub const REPO_FILE: &str = ".orchestrator.toml";
 pub struct ConfigLoader {
     global_path: PathBuf,
     home: Option<PathBuf>,
+    state_dir: Option<PathBuf>,
+    carve_outs: Vec<PathBuf>,
 }
 
 impl ConfigLoader {
@@ -22,6 +26,8 @@ impl ConfigLoader {
         Self {
             global_path: global_path.into(),
             home: None,
+            state_dir: None,
+            carve_outs: Vec::new(),
         }
     }
 
@@ -38,7 +44,11 @@ impl ConfigLoader {
 
     pub fn from_env_vars(lookup: impl Fn(&str) -> Option<String>) -> Option<Self> {
         let base = xdg::config_home(&lookup)?;
-        let loader = Self::new(base.join("orchestrator").join("config.toml"));
+        let loader = Self {
+            state_dir: xdg::state_home(&lookup).map(|state| state.join("orchestrator")),
+            carve_outs: ClaudeCode::default().sandbox_needs(&lookup).carve_outs,
+            ..Self::new(base.join("orchestrator").join("config.toml"))
+        };
         Some(match xdg::home(&lookup) {
             Some(home) => loader.with_home(home),
             None => loader,
@@ -74,6 +84,7 @@ impl ConfigLoader {
                 (Source::RepoFile, &repo_file),
                 (Source::PersonalOverride, personal),
             ],
+            &self.sandbox_context(),
             approved,
         )
         .map_err(|(source, problem)| ConfigError::Invalid {
@@ -108,6 +119,18 @@ impl ConfigLoader {
             _ => PathBuf::from(key),
         };
         canonical(&expanded)
+    }
+
+    fn sandbox_context(&self) -> SandboxContext {
+        let config_dir = self.global_path.parent().map(Path::to_path_buf);
+        SandboxContext {
+            home: self.home.clone(),
+            orch_dirs: config_dir
+                .into_iter()
+                .chain(self.state_dir.clone())
+                .collect(),
+            carve_outs: self.carve_outs.clone(),
+        }
     }
 
     fn global_file(&self) -> Result<GlobalFile, ConfigError> {

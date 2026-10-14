@@ -38,7 +38,7 @@ Make sure `~/.local/bin` is on your `PATH` (e.g. `export PATH="$HOME/.local/bin:
 **Upgrading to the Sandbox.** From this release every Claude Session runs in the [Sandbox](#sandbox) unless its Preset opts out. Running Agents keep running unsandboxed; each Session is sandboxed the next time its Agent starts (resume, restart or `:preset`), with no exemption for Sessions created before the upgrade. Restart the Daemon when the TUI offers it, since the old Daemon keeps spawning unsandboxed. Then:
 
 1. Run `orch doctor`. If the Sandbox can't run (no `bwrap`, user namespaces off, Ubuntu's AppArmor restriction), fix the host, or turn the Sandbox off for every Preset that doesn't say otherwise with `sandbox = false` under `[defaults]` in `~/.config/orchestrator/config.toml`. Until then, `orch` refuses to start sandboxed Agents rather than run them unsandboxed.
-2. Expect writes outside the Worktree to fail. Most visible are tool caches in `$HOME`: `~/.cargo`, `~/.rustup`, `~/.local/share/uv`, `~/.nvm` and the other toolchain dirs are read-only, so `cargo` can't download crates and `rustup`, `uv` or `nvm` can't install anything, and other caches such as `~/.cache` or `~/.npm` start empty in the Sandbox's private `$HOME` and are thrown away when the Agent stops. Fetch dependencies in the Repo's Setup script (it runs outside the Sandbox), e.g. `cargo fetch`, `npm ci` or `uv sync`, or give the Session a Preset with `sandbox = false`.
+2. Expect writes outside the Worktree to fail. Most visible are tool caches in `$HOME`: `~/.cargo`, `~/.rustup`, `~/.local/share/uv`, `~/.nvm` and the other toolchain dirs are read-only, so `cargo` can't download crates and `rustup`, `uv` or `nvm` can't install anything, and other caches such as `~/.cache` or `~/.npm` start empty in the Sandbox's private `$HOME` and are thrown away when the Agent stops. Fetch dependencies in the Repo's Setup script (it runs outside the Sandbox), e.g. `cargo fetch`, `npm ci` or `uv sync`, open the caches with a [`[sandbox]` table](#sandbox), or give the Session a Preset with `sandbox = false`.
 3. `git push` and `gh` keep working through the [Broker](#broker), but only for the Session's own Branch, its own PR and reads of its Repo. Your ssh keys, `gh` token and cloud credentials are not visible inside.
 
 The Daemon starts automatically the first time you run `orch`, and exits after a few idle minutes once no Client, Holder or open PR needs it. If you'd rather have it start with your login:
@@ -185,6 +185,7 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `preset` | Default Preset for new Sessions (built-in default: `edits`) |
 | `review_command` | Command shown when reviewing a Session; not allowed in `.orchestrator.toml` |
 | `sandbox` | The global switch: whether Presets that don't set `sandbox` themselves run in the Sandbox (default `true`); not allowed in `.orchestrator.toml` |
+| `[sandbox]` | `readable`, `writable` and `hidden` path lists for the [Sandbox](#sandbox); they append across layers, and a layer can't hold both this table and the `sandbox` switch |
 | `[agent]` | `name` (default `claude`), `binary`, `args` |
 | `[presets.<name>]` | `mode`, `allow`, `deny`, `sandbox` (run the Agent in the Sandbox; default `true`) |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
@@ -215,6 +216,22 @@ sandbox = false
 
 In `.orchestrator.toml` that opt-out needs your Trust. `sandbox = false` under `[defaults]` in your global config is the global switch, for hosts where bubblewrap can't run: it turns the Sandbox off for every Preset that doesn't set `sandbox` itself.
 
+**Widening and tightening:** a `[sandbox]` table opens more of `$HOME` or hides more of the system. It goes in `[defaults.sandbox]`, `[repos."<path>".sandbox]` or `.orchestrator.toml`, and the lists from every layer append. Paths are absolute or start with `~/`.
+
+```toml
+[defaults.sandbox]
+readable = ["~/.m2"]                                   # bound read-only
+writable = ["~/.cache", "~/.npm", "~/.cargo/registry"] # bound writable
+hidden = ["~/.sdkman", "/srv/data"]                    # masked with an empty dir
+```
+
+- `hidden` beats `readable`, `writable` and the shipped toolchains. A deeper `readable` or `writable` entry wins over the one it sits in, so `writable = ["~/x"]` with `readable = ["~/x/sub"]` leaves `sub` read-only.
+- Claude's own paths beat all three lists: an entry at or inside `~/.claude` is ignored, so the Agent can't be broken that way.
+- A `writable` entry can be a file or a directory; a missing one is created as a directory before the Agent starts. Missing `readable` and `hidden` paths are skipped. A `hidden` path must be a directory.
+- `readable` and `writable` may not name `/`, `$HOME` or a directory that contains it, `orch`'s config or state dirs (or a directory containing them), `.git/hooks`, `.git/config`, or Claude's read-only config (`settings.json`, `hooks/`, `skills/` and the rest), also when reached through a symlink. Doing so is a config error.
+- In `.orchestrator.toml` each `readable` and `writable` path needs your Trust; `hidden` paths only tighten and need none. Until you approve, a sandboxed spawn is refused with the Trust prompt.
+- A change applies the next time the Agent starts.
+
 The Sandbox fails closed: before each sandboxed spawn, `orch` runs `bwrap` with the Session's Sandbox args around `true`, and if that fails, it never runs the Agent unsandboxed. A new Session, a resume and *start anyway* are refused, and a restart leaves the Agent Errored. The message names the cause (`bwrap` missing, `kernel.unprivileged_userns_clone` or `user.max_user_namespaces` at 0, or Ubuntu's AppArmor restriction) and the ways out: fix the host, set `sandbox = false` under `[defaults]` in your global config, or `:preset` to a Preset with `sandbox = false`. A Preset's own `sandbox` setting wins over `[defaults] sandbox`. `orch` also runs a nested `bwrap` inside that Sandbox; if that fails, the Agent still starts and its pane warns that Claude's own Bash sandbox won't work. If `bwrap` fails while starting the Agent, the error reads "The Sandbox failed to start: …".
 
 ### Broker
@@ -225,7 +242,7 @@ A `gh` shim on the Sandbox's `PATH` forwards `gh` the same way, for this Repo's 
 
 ### Trust
 
-Scripts (`setup`, `teardown`), the Agent command and permission-loosening Presets (including a Preset with `sandbox = false`) that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
+Scripts (`setup`, `teardown`), the Agent command, permission-loosening Presets (including a Preset with `sandbox = false`) and `readable` or `writable` Sandbox paths that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
 
 ## Development
 

@@ -1,4 +1,6 @@
-use orch_agent::{Placeholder, SandboxLayout, SandboxNeeds, sandbox_args, sandbox_carve_outs};
+use orch_agent::{
+    Placeholder, SandboxLayout, SandboxNeeds, SandboxPaths, sandbox_args, sandbox_carve_outs,
+};
 
 const HOME: &str = "/home/dev";
 const REPO: &str = "/home/dev/shop";
@@ -21,6 +23,7 @@ fn layout() -> SandboxLayout {
         git_common_dir: GIT.into(),
         read_only: vec!["/home/dev/bin/orch".into()],
         hidden: vec!["/home/other".into(), "/mnt".into()],
+        configured: SandboxPaths::default(),
     }
 }
 
@@ -263,5 +266,155 @@ fn a_missing_carve_out_gets_an_empty_placeholder_of_its_kind() {
             ("/home/dev/shop/.git/config", Placeholder::File("")),
         ]
         .map(|(path, placeholder)| (path.into(), placeholder))
+    );
+}
+
+fn effective(args: &[String], path: &str) -> (String, String) {
+    let mut found = None;
+    let mut rest = args;
+    while let [flag, tail @ ..] = rest {
+        let width = match flag.as_str() {
+            "--bind" | "--bind-try" | "--ro-bind" | "--ro-bind-try" | "--setenv" => 2,
+            "--tmpfs" | "--dev" | "--proc" | "--unsetenv" | "--chdir" => 1,
+            other => panic!("unknown bwrap flag {other}"),
+        };
+        let target = &tail[width - 1];
+        let mounts = flag != "--setenv" && flag != "--unsetenv" && flag != "--chdir";
+        if mounts && std::path::Path::new(path).starts_with(target) {
+            found = Some((flag.clone(), target.clone()));
+        }
+        rest = &tail[width..];
+    }
+    found.unwrap_or_else(|| panic!("nothing mounted over {path} in {args:#?}"))
+}
+
+fn args_with(readable: &[&str], writable: &[&str], hidden: &[&str]) -> Vec<String> {
+    let paths = |list: &[&str]| list.iter().map(Into::into).collect();
+    sandbox_args(
+        &SandboxLayout {
+            configured: SandboxPaths {
+                readable: paths(readable),
+                writable: paths(writable),
+                hidden: paths(hidden),
+            },
+            ..layout()
+        },
+        &needs(),
+    )
+}
+
+fn mount(flag: &str, target: &str) -> (String, String) {
+    (flag.into(), target.into())
+}
+
+#[test]
+fn configured_paths_open_home_without_overriding_the_sessions_own_mounts() {
+    let args = args_with(
+        &["/home/dev/.m2"],
+        &[
+            "/home/dev/.cargo/registry",
+            "/home/dev/shop",
+            "/home/dev/.agent",
+        ],
+        &[],
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.m2/repo"),
+        mount("--ro-bind-try", "/home/dev/.m2")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.cargo/registry/index"),
+        mount("--bind", "/home/dev/.cargo/registry")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.cargo/bin"),
+        mount("--ro-bind-try", "/home/dev/.cargo")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/shop/README.md"),
+        mount("--ro-bind", REPO)
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/shop/.git/hooks/pre-commit"),
+        mount("--ro-bind", "/home/dev/shop/.git/hooks")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.agent/hooks/x"),
+        mount("--ro-bind", "/home/dev/.agent/hooks")
+    );
+}
+
+#[test]
+fn hidden_beats_readable_writable_and_the_shipped_toolchains() {
+    let args = args_with(
+        &["/home/dev/.m2"],
+        &["/home/dev/.cargo/registry"],
+        &["/home/dev/.cargo", "/home/dev/.m2/secret", "/srv/data"],
+    );
+    for (path, mask) in [
+        ("/home/dev/.cargo/bin", "/home/dev/.cargo"),
+        ("/home/dev/.cargo/registry/index", "/home/dev/.cargo"),
+        ("/home/dev/.m2/secret/key", "/home/dev/.m2/secret"),
+        ("/srv/data/x", "/srv/data"),
+    ] {
+        assert_eq!(effective(&args, path), mount("--tmpfs", mask), "{path}");
+    }
+    assert_eq!(
+        effective(&args, "/home/dev/.m2/repo"),
+        mount("--ro-bind-try", "/home/dev/.m2")
+    );
+}
+
+#[test]
+fn the_agents_own_paths_beat_hidden() {
+    let args = args_with(
+        &[],
+        &[],
+        &[
+            "/home/dev/.agent",
+            "/home/dev/.agent/projects",
+            "/home/dev/.local",
+        ],
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.agent/projects/x"),
+        mount("--bind-try", "/home/dev/.agent")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.agent/hooks/x"),
+        mount("--ro-bind", "/home/dev/.agent/hooks")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.local/share/agent/bin"),
+        mount("--ro-bind-try", "/home/dev/.local/share/agent")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.local/share/uv"),
+        mount("--tmpfs", "/home/dev/.local")
+    );
+}
+
+#[test]
+fn a_nested_configured_path_wins_over_its_parent_but_never_over_the_agents_own() {
+    let args = args_with(
+        &["/home/dev/x/sub", "/home/dev/.agent/projects"],
+        &["/home/dev/x", "/home/dev/shop/node_modules"],
+        &[],
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/x/sub/f"),
+        mount("--ro-bind-try", "/home/dev/x/sub")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/x/f"),
+        mount("--bind", "/home/dev/x")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/shop/node_modules/pkg"),
+        mount("--bind", "/home/dev/shop/node_modules")
+    );
+    assert_eq!(
+        effective(&args, "/home/dev/.agent/projects/p"),
+        mount("--bind-try", "/home/dev/.agent")
     );
 }

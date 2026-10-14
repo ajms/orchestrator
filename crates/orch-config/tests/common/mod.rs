@@ -17,7 +17,9 @@ impl Fixture {
         let repo = dir.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
         let repo = repo.canonicalize().unwrap();
-        let loader = ConfigLoader::new(dir.path().join("config.toml"));
+        std::fs::create_dir(dir.path().join("config")).unwrap();
+        let loader = ConfigLoader::new(dir.path().join("config/config.toml"))
+            .with_home(dir.path().join("home"));
         Self { dir, loader, repo }
     }
 
@@ -45,6 +47,10 @@ impl Fixture {
         let untrusted = self.untrusted();
         let hash = untrusted.trust_request().map(|request| request.hash);
         self.loader.repo(&self.repo, hash.as_ref()).unwrap()
+    }
+
+    pub fn home(&self, rest: &str) -> PathBuf {
+        self.dir.path().join("home").join(rest)
     }
 
     pub fn repo_path(&self) -> &Path {
