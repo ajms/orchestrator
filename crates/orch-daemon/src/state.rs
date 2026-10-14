@@ -399,6 +399,7 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::WriteOutsideWorktree => GuardKindView::WriteOutsideWorktree,
         GuardKind::Push => GuardKindView::Push,
         GuardKind::PullRequest => GuardKindView::PullRequest,
+        GuardKind::Issue => GuardKindView::Issue,
     }
 }
 

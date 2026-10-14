@@ -81,8 +81,12 @@ fn gh(socket: &std::path::Path, args: Vec<String>) -> ExitCode {
 }
 
 fn inline_body_file(args: Vec<String>) -> io::Result<Vec<String>> {
-    if !matches!(args.get(..2), Some([pr, create_or_edit]) if pr == "pr" && matches!(create_or_edit.as_str(), "create" | "edit"))
-    {
+    let takes_body = |command: &str, sub: &str| match command {
+        "pr" => matches!(sub, "create" | "edit"),
+        "issue" => matches!(sub, "create" | "comment" | "edit"),
+        _ => false,
+    };
+    if !matches!(args.get(..2), Some([command, sub]) if takes_body(command, sub)) {
         return Ok(args);
     }
     let mut inlined = Vec::with_capacity(args.len());

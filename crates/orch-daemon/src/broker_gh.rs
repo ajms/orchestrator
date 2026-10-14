@@ -73,7 +73,7 @@ impl GitHubRepo {
         })
     }
 
-    fn slug(&self) -> String {
+    pub(crate) fn slug(&self) -> String {
         format!("{}/{}", self.owner, self.name)
     }
 
@@ -93,16 +93,17 @@ pub(crate) struct Limits<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum PrChange {
-    Create,
-    Edit { pr: Option<u64> },
+pub(crate) enum Change {
+    PrCreate,
+    PrEdit { pr: Option<u64> },
+    Issue,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct GhCall {
     pub(crate) args: Vec<String>,
     pub(crate) said: String,
-    pub(crate) change: Option<PrChange>,
+    pub(crate) change: Option<Change>,
 }
 
 struct Flag {
@@ -219,6 +220,30 @@ const PR_EDIT: &[Flag] = &[
     value("base", Some('B')),
 ];
 const PR_READY: &[Flag] = &[REPO, switch("undo", None)];
+const ISSUE_CREATE: &[Flag] = &[
+    REPO,
+    value("title", Some('t')),
+    value("body", Some('b')),
+    value("label", Some('l')),
+    value("assignee", Some('a')),
+];
+const ISSUE_COMMENT: &[Flag] = &[REPO, value("body", Some('b'))];
+const ISSUE_EDIT: &[Flag] = &[
+    REPO,
+    value("title", Some('t')),
+    value("body", Some('b')),
+    value("add-label", None),
+    value("remove-label", None),
+    value("add-assignee", None),
+    value("remove-assignee", None),
+];
+const ISSUE_CLOSE: &[Flag] = &[
+    REPO,
+    value("comment", Some('c')),
+    value("reason", Some('r')),
+];
+const ISSUE_REOPEN: &[Flag] = &[REPO, value("comment", Some('c'))];
+const FIELDS: &[Flag] = &[value("field", Some('F')), value("raw-field", Some('f'))];
 
 struct Parsed {
     flags: Vec<(&'static str, Option<String>)>,
@@ -342,6 +367,11 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
         ("pr", "create") => (&[PR_CREATE], 0),
         ("pr", "edit") => (&[PR_EDIT], 1),
         ("pr", "ready") => (&[PR_READY], 1),
+        ("issue", "create") => (&[ISSUE_CREATE], 0),
+        ("issue", "comment") => (&[ISSUE_COMMENT], 1),
+        ("issue", "edit") => (&[ISSUE_EDIT], 1),
+        ("issue", "close") => (&[ISSUE_CLOSE], 1),
+        ("issue", "reopen") => (&[ISSUE_REOPEN], 1),
         _ => return Err(refused(&what)),
     };
     let mut parsed = parse(&args[2..], tables, &what)?;
@@ -379,7 +409,7 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
                 "--base",
                 limits.base,
             ];
-            (strings(&fixed), Some(PrChange::Create))
+            (strings(&fixed), Some(Change::PrCreate))
         }
         "edit" | "ready" if command == "pr" => {
             let pr = own_pr(parsed.positionals.pop(), limits)?;
@@ -388,8 +418,12 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
             }
             (
                 strings(&["pr", sub, limits.branch]),
-                Some(PrChange::Edit { pr }),
+                Some(Change::PrEdit { pr }),
             )
+        }
+        "create" | "comment" | "edit" | "close" | "reopen" if command == "issue" => {
+            only_the_user_assigned(&parsed)?;
+            (strings(&[command, sub]), Some(Change::Issue))
         }
         "view" if command == "repo" => {
             if let Some(named) = parsed.positionals.pop()
@@ -421,6 +455,19 @@ fn pr_create(parsed: &mut Parsed, limits: &Limits) -> Result<(), String> {
     Ok(())
 }
 
+fn only_the_user_assigned(parsed: &Parsed) -> Result<(), String> {
+    let assigns = ["assignee", "add-assignee", "remove-assignee"];
+    match parsed
+        .flags
+        .iter()
+        .filter(|(name, _)| assigns.contains(name))
+        .all(|(_, value)| value.as_deref() == Some("@me"))
+    {
+        true => Ok(()),
+        false => Err("the Broker assigns issues only to the user, as @me".into()),
+    }
+}
+
 fn own_pr(target: Option<String>, limits: &Limits) -> Result<Option<u64>, String> {
     let Some(target) = target else {
         return Ok(None);
@@ -446,7 +493,7 @@ pub(crate) fn not_this_sessions_pr(branch: &str) -> String {
 }
 
 fn api(args: &[String], repo: &GitHubRepo) -> Result<GhCall, String> {
-    let mut parsed = parse(args, &[API], "gh api")?;
+    let mut parsed = parse(args, &[API, FIELDS], "gh api")?;
     let [endpoint] = parsed.positionals.as_slice() else {
         return Err("gh api takes one endpoint".into());
     };
@@ -465,23 +512,66 @@ fn api(args: &[String], repo: &GitHubRepo) -> Result<GhCall, String> {
             repo.slug()
         ));
     }
-    if parsed
+    let posts = parsed
         .take("method")
         .iter()
-        .any(|method| !method.eq_ignore_ascii_case("GET"))
-    {
-        return Err("the Broker passes only GET requests to gh api".into());
-    }
+        .any(|method| !method.eq_ignore_ascii_case("GET"));
+    let change = match posts {
+        true => Some(issue_link(&parsed, &endpoint[prefix.len()..])?),
+        false if parsed.flags.iter().any(|(name, _)| field(name)) => {
+            return Err(
+                "the Broker passes -f/-F fields to gh api only to link sub-issues and blocking issues"
+                    .into(),
+            );
+        }
+        false => None,
+    };
     no_env_in_jq(&parsed)?;
     let said = format!("gh api {endpoint}");
     parsed.positionals.clear();
-    let mut args = strings(&["api", &endpoint, "--method", "GET"]);
+    let method = match change {
+        Some(_) => "POST",
+        None => "GET",
+    };
+    let mut args = strings(&["api", &endpoint, "--method", method]);
     args.extend(parsed.args());
-    Ok(GhCall {
-        args,
-        said,
-        change: None,
-    })
+    Ok(GhCall { args, said, change })
+}
+
+fn field(name: &str) -> bool {
+    matches!(name, "field" | "raw-field")
+}
+
+fn issue_link(parsed: &Parsed, path: &str) -> Result<Change, String> {
+    let refused = || {
+        "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues"
+            .to_string()
+    };
+    let link = path.strip_prefix("/issues/").and_then(|rest| {
+        let (number, link) = rest.split_once('/')?;
+        number.bytes().all(|b| b.is_ascii_digit()).then_some(link)
+    });
+    let id_field = match link {
+        Some("sub_issues") => "sub_issue_id",
+        Some("dependencies/blocked_by") => "issue_id",
+        _ => return Err(refused()),
+    };
+    let fields: Vec<_> = parsed
+        .flags
+        .iter()
+        .filter(|(name, _)| field(name))
+        .collect();
+    let valid = |value: &str| {
+        value.split_once('=').is_some_and(|(name, id)| {
+            name == id_field && !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())
+        })
+    };
+    match fields.as_slice() {
+        [(_, Some(value))] if valid(value) => Ok(Change::Issue),
+        _ => Err(format!(
+            "linking issues takes exactly one numeric {id_field} field"
+        )),
+    }
 }
 
 fn strings(args: &[&str]) -> Vec<String> {
@@ -490,7 +580,7 @@ fn strings(args: &[&str]) -> Vec<String> {
 
 fn refused(what: &str) -> String {
     format!(
-        "the Broker doesn't run `{what}`: it passes reads of this Repo, and creating or editing this Session's PR"
+        "the Broker doesn't run `{what}`: it passes reads of this Repo, creating or editing this Session's PR, and filing or updating issues"
     )
 }
 
@@ -636,30 +726,121 @@ mod tests {
             created.args.join(" "),
             "pr create --head orch/work --base main --fill --repo acme/app"
         );
-        assert_eq!(created.change, Some(PrChange::Create));
+        assert_eq!(created.change, Some(Change::PrCreate));
         let edited = call("pr edit https://github.com/acme/app/pull/42 -t New").unwrap();
         assert_eq!(
             edited.args.join(" "),
             "pr edit orch/work --title New --repo acme/app"
         );
-        assert_eq!(edited.change, Some(PrChange::Edit { pr: Some(42) }));
+        assert_eq!(edited.change, Some(Change::PrEdit { pr: Some(42) }));
         assert!(refusal("pr create --head other").contains("Branch orch/work"));
         assert!(refusal("pr ready other-branch").contains("Session's PR"));
     }
 
     #[test]
-    fn writes_other_than_pr_create_and_edit_are_refused() {
+    fn writes_other_than_pr_and_issue_changes_are_refused() {
         for line in [
             "pr merge 42",
             "pr close 42",
             "pr comment 42",
-            "issue comment 1",
-            "issue edit 1",
+            "issue delete 1",
+            "issue transfer 1 other/app",
+            "issue lock 1",
+            "issue pin 1",
+            "issue develop 1",
             "label create bug",
             "repo delete",
             "auth token",
         ] {
             assert!(refusal(line).contains("doesn't run"), "{line}");
+        }
+    }
+
+    #[test]
+    fn issue_writes_pass_with_normalised_flags_and_this_repo_pinned() {
+        for (line, args) in [
+            (
+                "issue create -t Bug -b Why -l bug -a @me",
+                "issue create --title Bug --body Why --label bug --assignee @me --repo acme/app",
+            ),
+            (
+                "issue comment 7 -b hi",
+                "issue comment 7 --body hi --repo acme/app",
+            ),
+            (
+                "issue edit 7 -t New --add-label x --remove-label y --add-assignee @me --remove-assignee @me",
+                "issue edit 7 --title New --add-label x --remove-label y --add-assignee @me --remove-assignee @me --repo acme/app",
+            ),
+            (
+                "issue close https://github.com/acme/app/issues/7 -c done -r completed",
+                "issue close https://github.com/acme/app/issues/7 --comment done --reason completed --repo acme/app",
+            ),
+            (
+                "issue reopen 7 -c back",
+                "issue reopen 7 --comment back --repo acme/app",
+            ),
+        ] {
+            let call = call(line).unwrap();
+            assert_eq!(call.args.join(" "), args);
+            assert_eq!(call.change, Some(Change::Issue), "{line}");
+        }
+    }
+
+    #[test]
+    fn issue_writes_assign_only_the_user_and_stay_in_this_repo() {
+        for (line, says) in [
+            ("issue create -t x -a someone", "@me"),
+            ("issue edit 7 --add-assignee bob", "@me"),
+            ("issue edit 7 --remove-assignee @me,bob", "@me"),
+            ("issue comment 7 --edit-last", "--edit-last"),
+            ("issue create --web", "--web"),
+            ("issue edit 7 --milestone v1", "--milestone"),
+            ("issue create -t x --project Roadmap", "--project"),
+            ("issue comment 7 8 -b x", "too many"),
+            (
+                "issue comment https://github.com/other/app/issues/1 -b x",
+                "acme/app",
+            ),
+            ("issue close 1 -R other/app", "acme/app"),
+        ] {
+            assert!(refusal(line).contains(says), "{line}: {}", refusal(line));
+        }
+    }
+
+    #[test]
+    fn api_writes_only_link_sub_issues_and_blocking_issues() {
+        for (line, args) in [
+            (
+                "api --method POST repos/acme/app/issues/3/sub_issues -F sub_issue_id=123",
+                "api repos/acme/app/issues/3/sub_issues --method POST --field sub_issue_id=123",
+            ),
+            (
+                "api -X post /repos/{owner}/{repo}/issues/3/dependencies/blocked_by -F issue_id=9",
+                "api repos/acme/app/issues/3/dependencies/blocked_by --method POST --field issue_id=9",
+            ),
+        ] {
+            let call = call(line).unwrap();
+            assert_eq!(call.args.join(" "), args);
+            assert_eq!(call.change, Some(Change::Issue), "{line}");
+        }
+        assert_eq!(
+            call("api repos/acme/app/issues/3/sub_issues")
+                .unwrap()
+                .change,
+            None
+        );
+        for line in [
+            "api -X POST repos/acme/app/issues -F title=x",
+            "api -X POST repos/acme/app/issues/3/sub_issues/priority -F sub_issue_id=1",
+            "api -X DELETE repos/acme/app/issues/3/sub_issue -F sub_issue_id=1",
+            "api -X POST repos/acme/app/issues/3/sub_issues -F sub_issue_id=@id.txt",
+            "api -X POST repos/acme/app/issues/3/sub_issues -F title=x",
+            "api -X POST repos/acme/app/issues/3/dependencies/blocked_by -F sub_issue_id=1",
+            "api -X POST repos/acme/app/issues/x/sub_issues -F sub_issue_id=1",
+            "api repos/acme/app/issues/3/sub_issues -F sub_issue_id=1",
+            "api -X POST repos/other/app/issues/3/sub_issues -F sub_issue_id=1",
+        ] {
+            assert!(call(line).is_err(), "{line}");
         }
     }
 }

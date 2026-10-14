@@ -9,7 +9,7 @@ use orch_holder::{BrokerReply, BrokerRequest, GuardId, RefUpdate, RemoteRef, ToH
 use orch_store::SessionRecord;
 use tokio::sync::oneshot;
 
-use crate::broker_gh::{GitHubRepo, Limits, PrChange, gh_call, not_this_sessions_pr};
+use crate::broker_gh::{Change, GitHubRepo, Limits, gh_call, not_this_sessions_pr};
 use crate::lifecycle::{select_preset, with_git};
 use crate::pr::{gh_brokered, open_pr_of, pr_number};
 use crate::state::{Daemon, PendingGuard};
@@ -242,25 +242,23 @@ impl Daemon {
                 };
                 let call = gh_call(&args, &limits)?;
                 if let Some(change) = &call.change {
-                    if let PrChange::Edit { pr: Some(number) } = change
+                    if let Change::PrEdit { pr: Some(number) } = change
                         && open_pr_of(&repo, &record.branch).await != Some(*number)
                     {
                         return Err(not_this_sessions_pr(&record.branch));
                     }
                     if self.change_asks(&record, &repo).await {
                         let tool = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
-                        self.ask(
-                            id,
-                            broker,
-                            GuardKind::PullRequest,
-                            &record.branch,
-                            &format!("gh {tool}"),
-                        )
-                        .await?;
+                        let (kind, target) = match change {
+                            Change::Issue => (GuardKind::Issue, github.slug()),
+                            _ => (GuardKind::PullRequest, record.branch.clone()),
+                        };
+                        self.ask(id, broker, kind, &target, &format!("gh {tool}"))
+                            .await?;
                     }
                 }
                 let output = gh_brokered(&repo, &call.args).await?;
-                if call.change == Some(PrChange::Create)
+                if call.change == Some(Change::PrCreate)
                     && output.code == 0
                     && let Some(number) = pr_number(&output.stdout)
                 {
@@ -287,12 +285,12 @@ impl Daemon {
         id: &SessionId,
         broker: GuardId,
         kind: GuardKind,
-        branch: &str,
+        target: &str,
         tool: &str,
     ) -> Result<(), String> {
         let hit = GuardHit {
             kind,
-            target: branch.into(),
+            target: target.into(),
         };
         let (waiter, answer) = oneshot::channel();
         {

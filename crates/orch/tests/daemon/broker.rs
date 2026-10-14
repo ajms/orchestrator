@@ -242,6 +242,10 @@ async fn answer_pr_change(client: &mut TestClient, id: &SessionId, choice: Guard
     answer_broker(client, id, GuardKindView::PullRequest, choice).await;
 }
 
+async fn answer_issue_change(client: &mut TestClient, id: &SessionId, choice: GuardChoice) {
+    answer_broker(client, id, GuardKindView::Issue, choice).await;
+}
+
 async fn answer_broker(
     client: &mut TestClient,
     id: &SessionId,
@@ -253,7 +257,10 @@ async fn answer_broker(
         .await;
     let prompt = &asking.guard_prompts[0];
     assert_eq!(prompt.kind, kind);
-    assert_eq!(prompt.target, asking.branch);
+    match kind {
+        GuardKindView::Issue => assert_eq!(prompt.target, "acme/app"),
+        _ => assert_eq!(prompt.target, asking.branch),
+    }
     let reply = client
         .request(Request::AnswerGuard {
             session: id.clone(),
@@ -520,4 +527,63 @@ async fn a_pr_the_agent_creates_puts_the_session_in_pr_open() {
         .until(&id, "PR open", |view| view.phase == PhaseView::PrOpen)
         .await;
     assert_eq!(view.flags.pr_number, Some(42));
+}
+
+#[tokio::test]
+async fn a_sandboxed_agent_files_comments_on_and_links_issues_in_its_repo() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (body, out) = (view.worktree.join("body.md"), view.worktree.join("out"));
+    std::fs::write(&body, "Why").unwrap();
+
+    let create = format!(
+        "gh issue create -t Bug --body-file {} -l bug > {}",
+        body.display(),
+        out.display()
+    );
+    assert_eq!(shell(&mut pane, &create).await, "exit 0");
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        "https://github.com/acme/app/issues/8\n"
+    );
+    let comment = format!("gh issue comment 8 -F {}", body.display());
+    assert_eq!(shell(&mut pane, &comment).await, "exit 0");
+    let link = "gh api -X POST repos/acme/app/issues/3/sub_issues -F sub_issue_id=99";
+    assert_eq!(shell(&mut pane, link).await, "exit 0");
+    assert_ne!(shell(&mut pane, "gh issue delete 8 --yes").await, "exit 0");
+
+    assert_eq!(
+        gh_calls(&env),
+        [
+            args("issue create --title Bug --body Why --label bug --repo acme/app"),
+            args("issue comment 8 --body Why --repo acme/app"),
+            args("api repos/acme/app/issues/3/sub_issues --method POST --field sub_issue_id=99"),
+        ]
+    );
+    client.until_notice(&id, "Broker: gh issue create").await;
+}
+
+#[tokio::test]
+async fn an_ask_session_prompts_before_an_issue_change_and_once_for_the_session() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _, mut pane) = session(&env, &mut client, "ask").await;
+
+    let comment = "gh issue comment 8 -b hi";
+    pane.type_line(&format!("sh {comment}")).await;
+    answer_issue_change(&mut client, &id, GuardChoice::Deny).await;
+    assert_ne!(shell_result(&mut pane, comment).await, "exit 0");
+    assert_eq!(gh_calls(&env).len(), 0);
+
+    pane.type_line(&format!("sh {comment} ")).await;
+    answer_issue_change(&mut client, &id, GuardChoice::AllowForSession).await;
+    assert_eq!(
+        shell_result(&mut pane, &format!("{comment} ")).await,
+        "exit 0"
+    );
+    assert_eq!(shell(&mut pane, "gh issue close 8").await, "exit 0");
+    assert_eq!(gh_calls(&env).len(), 2);
 }

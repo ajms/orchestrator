@@ -233,6 +233,8 @@ case "$1 $2" in
     echo https://github.com/acme/app/pull/42 ;;
   'pr view') cat DIR/view.json ;;
   'pr edit'|'pr ready') ;;
+  'issue create') echo https://github.com/acme/app/issues/8 ;;
+  'issue comment'|'issue edit'|'issue close'|'issue reopen') ;;
   'issue view') echo "issue $3" ;;
   'api '*) echo '{"name":"app"}' ;;
   'pr list') cat DIR/list.json 2>/dev/null || echo '[]' ;;
