@@ -399,6 +399,7 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::WriteOutsideWorktree => GuardKindView::WriteOutsideWorktree,
         GuardKind::Push => GuardKindView::Push,
         GuardKind::PullRequest => GuardKindView::PullRequest,
+        GuardKind::Issue => GuardKindView::Issue,
     }
 }
 
@@ -677,6 +678,16 @@ impl State {
                     text: text.clone(),
                 });
             }
+        }
+    }
+
+    pub(crate) fn relay_notice(&self, session: &SessionId, text: String, warning: bool) {
+        for client in self.clients.values() {
+            client.outbox.send(FromDaemon::Notice {
+                session: session.clone(),
+                text: text.clone(),
+                warning,
+            });
         }
     }
 

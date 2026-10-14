@@ -184,6 +184,27 @@ pub(crate) enum Popup {
     Retarget(RetargetPicker),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StatusMessage {
+    pub(crate) text: String,
+    pub(crate) warning: bool,
+}
+
+impl From<String> for StatusMessage {
+    fn from(text: String) -> Self {
+        Self {
+            text,
+            warning: false,
+        }
+    }
+}
+
+impl From<&str> for StatusMessage {
+    fn from(text: &str) -> Self {
+        text.to_string().into()
+    }
+}
+
 pub(crate) struct App {
     pub config: TuiConfig,
     pub sessions: Sessions,
@@ -192,7 +213,7 @@ pub(crate) struct App {
     pub focus: Focus,
     pub mode: Mode,
     pub prefix: Option<Prefix>,
-    pub message: Option<String>,
+    pub message: Option<StatusMessage>,
     pub rate_limits: RateLimits,
     pub popup: Option<Popup>,
     pub review: Option<ReviewView>,
@@ -271,10 +292,10 @@ impl App {
                 result,
             } => self.review_loaded(session, purpose, result),
             Event::VersionMismatch { message } => self.mismatch = Some(message),
-            Event::Notice(text) => self.message = Some(text),
+            Event::Notice(text) => self.message = Some(text.into()),
             Event::Tick => crate::mouse::tick(self),
             Event::Disconnected { reason } => {
-                self.message = Some(format!("lost the Daemon: {reason}"));
+                self.message = Some(format!("lost the Daemon: {reason}").into());
             }
         }
         self.fail_abandoned_trust();
@@ -315,6 +336,11 @@ impl App {
                     self.copy(&text);
                 }
             }
+            FromDaemon::Notice {
+                session,
+                text,
+                warning,
+            } => self.notice(&session, text, warning),
             FromDaemon::SubagentTranscript(update) => {
                 if let Some(transcript) = self
                     .transcript
@@ -376,7 +402,8 @@ impl App {
                 let command = match result {
                     Ok(Reply::RepoSettings(settings)) => settings.review_command,
                     Err(err) => {
-                        self.message = Some(format!("using the default review command: {err}"));
+                        self.message =
+                            Some(format!("using the default review command: {err}").into());
                         None
                     }
                     Ok(_) => None,
@@ -409,10 +436,13 @@ impl App {
             (Pending::Trust(retry), Ok(_)) => self.request(retry.request, retry.pending),
             (Pending::Draft(session, mode), result) => self.drafted(&session, mode, result),
             (Pending::Land, Ok(Reply::Landed { commit, warning })) => {
-                self.message = Some(match warning {
-                    Some(warning) => format!("Landed as {commit}; warning: {warning}"),
-                    None => format!("Landed as {commit}"),
-                });
+                self.message = Some(
+                    match warning {
+                        Some(warning) => format!("Landed as {commit}; warning: {warning}"),
+                        None => format!("Landed as {commit}"),
+                    }
+                    .into(),
+                );
             }
             (
                 Pending::Land,
@@ -426,11 +456,12 @@ impl App {
                         "opened PR #{number}; uncommitted changes were committed with the PR title as the message"
                     ),
                     false => format!("opened PR #{number}"),
-                });
+                }.into());
             }
             (Pending::Land, Err(RequestError::Conflict { paths })) => {
                 let conflict = RequestError::Conflict { paths };
-                self.message = Some(format!("{conflict}; the rebase was handed to the Agent"));
+                self.message =
+                    Some(format!("{conflict}; the rebase was handed to the Agent").into());
             }
             (
                 Pending::DiscardPreview(session),
@@ -464,16 +495,16 @@ impl App {
                 self.reconciled(*report, true)
             }
             (Pending::Fix(fix), Ok(_)) => {
-                self.message = Some(format!("Done: {}", fix.label()));
+                self.message = Some(format!("Done: {}", fix.label()).into());
                 self.request_reconcile();
             }
             (Pending::Resume(session), Err(err)) => {
                 if self.insert_when_open.as_ref() == Some(&session) {
                     self.insert_when_open = None;
                 }
-                self.message = Some(err.to_string());
+                self.message = Some(err.to_string().into());
             }
-            (_, Err(err)) => self.message = Some(err.to_string()),
+            (_, Err(err)) => self.message = Some(err.to_string().into()),
             (_, Ok(_)) => {}
         }
     }
@@ -501,7 +532,7 @@ impl App {
             }
             FromDaemon::Resized(size) => mirror.resized(size),
             FromDaemon::InputDropped { reason } => {
-                self.message = Some(format!("input not sent: {reason}"));
+                self.message = Some(format!("input not sent: {reason}").into());
             }
             FromDaemon::PaneClosed { reason } => {
                 mirror.closed = Some(reason);
@@ -563,9 +594,19 @@ impl App {
         match (result, &mut self.popup) {
             (Ok(text), Some(Popup::New(form))) => form.set_prompt(text.trim_end().to_string()),
             (Ok(text), Some(Popup::Land(form))) => form.edited_text(&text),
-            (Err(err), _) => self.message = Some(format!("editor failed: {err}")),
+            (Err(err), _) => self.message = Some(format!("editor failed: {err}").into()),
             _ => {}
         }
+    }
+
+    fn notice(&mut self, session: &SessionId, text: String, warning: bool) {
+        let text = match self.sessions.get(session) {
+            Some(view) if self.selected.as_ref() != Some(session) => {
+                format!("{}: {text}", view.title_or_slug())
+            }
+            _ => text,
+        };
+        self.message = Some(StatusMessage { text, warning });
     }
 
     fn ring(&mut self, session: &SessionId, title: &str, body: &str) {
@@ -1071,7 +1112,7 @@ impl App {
             ReviewAction::Close => self.review = None,
             ReviewAction::CommandLine => self.mode = Mode::CommandLine(String::new()),
             ReviewAction::Open(target) => self.edit(target),
-            ReviewAction::Notice(text) => self.message = Some(text),
+            ReviewAction::Notice(text) => self.message = Some(text.into()),
         }
     }
 
@@ -1213,7 +1254,7 @@ impl App {
             return;
         };
         if let Some(refusal) = landing_refusal(view) {
-            self.message = Some(refusal);
+            self.message = Some(refusal.into());
             return;
         }
         let session = view.id.clone();
@@ -1246,7 +1287,7 @@ impl App {
             Ok(_) => form.draft_failed(),
             Err(err) => {
                 form.draft_failed();
-                self.message = Some(format!("no draft: {err}"));
+                self.message = Some(format!("no draft: {err}").into());
             }
         }
     }
@@ -1310,7 +1351,7 @@ impl App {
             },
             purpose,
         };
-        self.message = Some(format!("diffing {} against {}…", view.slug, view.base));
+        self.message = Some(format!("diffing {} against {}…", view.slug, view.base).into());
         self.push(Call::Local(effect));
     }
 
@@ -1326,7 +1367,7 @@ impl App {
         let data = match result {
             Ok(data) => data,
             Err(err) => {
-                self.message = Some(format!("Review failed: {err}"));
+                self.message = Some(format!("Review failed: {err}").into());
                 return;
             }
         };

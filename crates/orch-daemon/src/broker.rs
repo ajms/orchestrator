@@ -9,7 +9,7 @@ use orch_holder::{BrokerReply, BrokerRequest, GuardId, RefUpdate, RemoteRef, ToH
 use orch_store::SessionRecord;
 use tokio::sync::oneshot;
 
-use crate::broker_gh::{GitHubRepo, Limits, PrChange, gh_call, not_this_sessions_pr};
+use crate::broker_gh::{Change, GitHubRepo, Limits, gh_call, not_this_sessions_pr};
 use crate::lifecycle::{select_preset, with_git};
 use crate::pr::{gh_brokered, open_pr_of, pr_number};
 use crate::state::{Daemon, PendingGuard};
@@ -126,6 +126,18 @@ pub(crate) fn install_shims(dir: &Path, orch: &Path) -> Result<EnvVars, String> 
     ])
 }
 
+fn notice(reply: &BrokerReply) -> Option<(String, bool)> {
+    match reply {
+        BrokerReply::Done { said } => Some((format!("Broker: {said}"), false)),
+        BrokerReply::Refused { reason } => Some((format!("Broker refused: {reason}"), true)),
+        BrokerReply::Gh { said, output } => match output.code {
+            0 => Some((format!("Broker: {said}"), false)),
+            code => Some((format!("Broker: {said} failed (exit {code})"), true)),
+        },
+        BrokerReply::Refs { .. } => None,
+    }
+}
+
 async fn origin_url(repo: &Path) -> Option<String> {
     let mut command = crate::subprocess::command("git");
     command
@@ -149,7 +161,11 @@ impl Daemon {
             .serve_broker(&id, broker, request)
             .await
             .unwrap_or_else(|reason| BrokerReply::Refused { reason });
-        if let Some(live) = self.lock().sessions.get(&id) {
+        let state = self.lock();
+        if let Some((text, warning)) = notice(&reply) {
+            state.relay_notice(&id, text, warning);
+        }
+        if let Some(live) = state.sessions.get(&id) {
             live.send_to_holder(ToHolder::BrokerReply { id: broker, reply });
         }
     }
@@ -226,25 +242,23 @@ impl Daemon {
                 };
                 let call = gh_call(&args, &limits)?;
                 if let Some(change) = &call.change {
-                    if let PrChange::Edit { pr: Some(number) } = change
+                    if let Change::PrEdit { pr: Some(number) } = change
                         && open_pr_of(&repo, &record.branch).await != Some(*number)
                     {
                         return Err(not_this_sessions_pr(&record.branch));
                     }
                     if self.change_asks(&record, &repo).await {
                         let tool = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
-                        self.ask(
-                            id,
-                            broker,
-                            GuardKind::PullRequest,
-                            &record.branch,
-                            &format!("gh {tool}"),
-                        )
-                        .await?;
+                        let (kind, target) = match change {
+                            Change::Issue => (GuardKind::Issue, github.slug()),
+                            _ => (GuardKind::PullRequest, record.branch.clone()),
+                        };
+                        self.ask(id, broker, kind, &target, &format!("gh {tool}"))
+                            .await?;
                     }
                 }
                 let output = gh_brokered(&repo, &call.args).await?;
-                if call.change == Some(PrChange::Create)
+                if call.change == Some(Change::PrCreate)
                     && output.code == 0
                     && let Some(number) = pr_number(&output.stdout)
                 {
@@ -271,12 +285,12 @@ impl Daemon {
         id: &SessionId,
         broker: GuardId,
         kind: GuardKind,
-        branch: &str,
+        target: &str,
         tool: &str,
     ) -> Result<(), String> {
         let hit = GuardHit {
             kind,
-            target: branch.into(),
+            target: target.into(),
         };
         let (waiter, answer) = oneshot::channel();
         {
@@ -304,7 +318,34 @@ impl Daemon {
 
 #[cfg(test)]
 mod tests {
+    use orch_holder::GhOutput;
+
     use super::*;
+
+    #[test]
+    fn refusals_and_failed_gh_calls_are_warnings_and_successes_are_not() {
+        let gh = |code| BrokerReply::Gh {
+            said: "gh pr view".into(),
+            output: GhOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code,
+            },
+        };
+        let refused = BrokerReply::Refused {
+            reason: "no".into(),
+        };
+        let pushed = BrokerReply::Done {
+            said: "pushed".into(),
+        };
+        assert_eq!(notice(&refused), Some(("Broker refused: no".into(), true)));
+        assert_eq!(
+            notice(&gh(1)),
+            Some(("Broker: gh pr view failed (exit 1)".into(), true))
+        );
+        assert_eq!(notice(&gh(0)), Some(("Broker: gh pr view".into(), false)));
+        assert_eq!(notice(&pushed), Some(("Broker: pushed".into(), false)));
+    }
 
     const COMMIT: &str = "c0ffee0000000000000000000000000000000000";
 

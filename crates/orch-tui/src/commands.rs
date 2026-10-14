@@ -90,7 +90,7 @@ pub(crate) fn run(app: &mut App, line: &str) {
         .find(|command| command.names.contains(&name))
     {
         Some(command) => (command.run)(app, args.trim()),
-        None => app.message = Some(format!("unknown command: {name}")),
+        None => app.message = Some(format!("unknown command: {name}").into()),
     }
 }
 

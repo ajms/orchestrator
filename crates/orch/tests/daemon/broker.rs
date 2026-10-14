@@ -75,7 +75,7 @@ async fn a_sandboxed_agent_pushes_its_own_branch_through_the_broker() {
     let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
     commit(&view.worktree, "feature.rs", "feature\n");
 
     let push = format!("git push -u origin {}", view.branch);
@@ -84,7 +84,28 @@ async fn a_sandboxed_agent_pushes_its_own_branch_through_the_broker() {
         remote_tip(&remote, &view.branch),
         Some(git(&view.worktree, &["rev-parse", "HEAD"]))
     );
-    pane.wait_for_text("Broker: pushed").await;
+    client.until_notice(&id, "Broker: pushed").await;
+    assert!(!pane.text().contains("Broker:"), "{}", pane.text());
+}
+
+#[tokio::test]
+async fn a_push_that_reached_origin_succeeds_even_if_tracking_cannot_be_written() {
+    let Pushing { env, remote } = pushing();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    commit(&view.worktree, "feature.rs", "feature\n");
+    let lock = env.path("repos/app/.git/config.lock");
+    std::fs::write(&lock, "").unwrap();
+
+    let push = format!("git push origin {}", view.branch);
+    assert_eq!(shell(&mut pane, &push).await, "exit 0");
+    std::fs::remove_file(&lock).unwrap();
+    assert_eq!(
+        remote_tip(&remote, &view.branch),
+        Some(git(&view.worktree, &["rev-parse", "HEAD"]))
+    );
+    client.until_notice(&id, "Broker: pushed").await;
 }
 
 #[tokio::test]
@@ -92,7 +113,7 @@ async fn a_rewritten_branch_goes_through_with_a_lease_but_not_with_a_plain_force
     let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
     commit(&view.worktree, "feature.rs", "feature\n");
     let push = format!("git push -u origin {}", view.branch);
     assert_eq!(shell(&mut pane, &push).await, "exit 0");
@@ -103,7 +124,7 @@ async fn a_rewritten_branch_goes_through_with_a_lease_but_not_with_a_plain_force
     let rewritten = git(&view.worktree, &["rev-parse", "HEAD"]);
 
     assert_ne!(shell(&mut pane, "git push --force").await, "exit 0");
-    pane.wait_for_text("--force-with-lease").await;
+    client.until_notice(&id, "--force-with-lease").await;
     assert_ne!(remote_tip(&remote, &view.branch), Some(rewritten.clone()));
 
     assert_eq!(
@@ -118,7 +139,7 @@ async fn other_refs_tags_and_the_base_branch_are_refused() {
     let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
     commit(&view.worktree, "feature.rs", "feature\n");
     let main_before = remote_tip(&remote, "main");
 
@@ -126,7 +147,8 @@ async fn other_refs_tags_and_the_base_branch_are_refused() {
         shell(&mut pane, "git push origin HEAD:main").await,
         "exit 0"
     );
-    pane.wait_for_text("never pushes the Base branch main")
+    client
+        .until_notice(&id, "never pushes the Base branch main")
         .await;
     assert_ne!(
         shell(&mut pane, "git push origin HEAD:refs/heads/other").await,
@@ -220,6 +242,10 @@ async fn answer_pr_change(client: &mut TestClient, id: &SessionId, choice: Guard
     answer_broker(client, id, GuardKindView::PullRequest, choice).await;
 }
 
+async fn answer_issue_change(client: &mut TestClient, id: &SessionId, choice: GuardChoice) {
+    answer_broker(client, id, GuardKindView::Issue, choice).await;
+}
+
 async fn answer_broker(
     client: &mut TestClient,
     id: &SessionId,
@@ -231,7 +257,10 @@ async fn answer_broker(
         .await;
     let prompt = &asking.guard_prompts[0];
     assert_eq!(prompt.kind, kind);
-    assert_eq!(prompt.target, asking.branch);
+    match kind {
+        GuardKindView::Issue => assert_eq!(prompt.target, "acme/app"),
+        _ => assert_eq!(prompt.target, asking.branch),
+    }
     let reply = client
         .request(Request::AnswerGuard {
             session: id.clone(),
@@ -259,7 +288,7 @@ async fn an_ask_session_prompts_before_each_push_and_a_denial_pushes_nothing() {
     pane.type_line(&format!("sh {push}")).await;
     answer_push(&mut client, &id, GuardChoice::Deny).await;
     assert_ne!(shell_result(&mut pane, &push).await, "exit 0");
-    pane.wait_for_text("denied").await;
+    client.until_notice(&id, "denied").await;
     assert_eq!(remote_tip(&remote, &view.branch), None);
 
     pane.type_line(&format!("sh {push} ")).await;
@@ -333,7 +362,7 @@ async fn a_sandboxed_agent_reads_its_repo_through_gh() {
     let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
     let out = view.worktree.join("out");
 
     let read = format!("gh issue view 7 --json title -q .title > {}", out.display());
@@ -345,7 +374,7 @@ async fn a_sandboxed_agent_reads_its_repo_through_gh() {
             "issue view 7 --json title --jq .title --repo acme/app"
         )]
     );
-    pane.wait_for_text("Broker: gh issue view 7").await;
+    client.until_notice(&id, "Broker: gh issue view 7").await;
 }
 
 #[tokio::test]
@@ -353,7 +382,7 @@ async fn a_sandboxed_agent_creates_and_edits_its_own_pr_with_the_base_fixed() {
     let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
     let (body, out) = (view.worktree.join("body.md"), view.worktree.join("out"));
     std::fs::write(&body, "Why").unwrap();
     let branch = view.branch.as_str();
@@ -385,7 +414,7 @@ async fn a_sandboxed_agent_creates_and_edits_its_own_pr_with_the_base_fixed() {
         &fixed("pr ready BRANCH --undo --repo acme/app")
     );
     assert!(calls.contains(&fixed("pr edit BRANCH --title New --repo acme/app")));
-    pane.wait_for_text("Broker: gh pr ready").await;
+    client.until_notice(&id, "Broker: gh pr ready").await;
 }
 
 #[tokio::test]
@@ -393,7 +422,7 @@ async fn merges_other_repos_and_a_changed_base_are_refused_with_a_message() {
     let env = on_github();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
     let err = view.worktree.join("err");
 
     for (call, says) in [
@@ -417,8 +446,32 @@ async fn merges_other_repos_and_a_changed_base_are_refused_with_a_message() {
         assert!(message.contains(says), "{call}: {message}");
     }
     assert_eq!(gh_calls(&env), Vec::<Vec<String>>::new());
-    pane.wait_for_text("Broker refused: the Broker doesn't run `gh pr merge`")
+    client
+        .until_notice(&id, "Broker refused: the Broker doesn't run `gh pr merge`")
         .await;
+    assert!(!pane.text().contains("Broker refused"), "{}", pane.text());
+}
+
+#[tokio::test]
+async fn gh_auth_answers_as_logged_out_without_a_notice() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let err = view.worktree.join("err");
+
+    for call in ["gh auth token", "gh auth status"] {
+        let quiet = format!("{call} 2> {}", err.display());
+        assert_eq!(shell(&mut pane, &quiet).await, "exit 1", "{call}");
+        let message = std::fs::read_to_string(&err).unwrap();
+        assert!(message.contains("not logged in"), "{call}: {message}");
+        assert_eq!(message.lines().count(), 1, "{call}: {message}");
+    }
+    assert_ne!(shell(&mut pane, "gh pr merge 42").await, "exit 0");
+    client.until_notice(&id, "`gh pr merge`").await;
+
+    assert_eq!(client.notices.len(), 1, "{:?}", client.notices);
+    assert_eq!(gh_calls(&env), Vec::<Vec<String>>::new());
 }
 
 #[tokio::test]
@@ -474,4 +527,63 @@ async fn a_pr_the_agent_creates_puts_the_session_in_pr_open() {
         .until(&id, "PR open", |view| view.phase == PhaseView::PrOpen)
         .await;
     assert_eq!(view.flags.pr_number, Some(42));
+}
+
+#[tokio::test]
+async fn a_sandboxed_agent_files_comments_on_and_links_issues_in_its_repo() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let (body, out) = (view.worktree.join("body.md"), view.worktree.join("out"));
+    std::fs::write(&body, "Why").unwrap();
+
+    let create = format!(
+        "gh issue create -t Bug --body-file {} -l bug > {}",
+        body.display(),
+        out.display()
+    );
+    assert_eq!(shell(&mut pane, &create).await, "exit 0");
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        "https://github.com/acme/app/issues/8\n"
+    );
+    let comment = format!("gh issue comment 8 -F {}", body.display());
+    assert_eq!(shell(&mut pane, &comment).await, "exit 0");
+    let link = "gh api -X POST repos/acme/app/issues/3/sub_issues -F sub_issue_id=99";
+    assert_eq!(shell(&mut pane, link).await, "exit 0");
+    assert_ne!(shell(&mut pane, "gh issue delete 8 --yes").await, "exit 0");
+
+    assert_eq!(
+        gh_calls(&env),
+        [
+            args("issue create --title Bug --body Why --label bug --repo acme/app"),
+            args("issue comment 8 --body Why --repo acme/app"),
+            args("api repos/acme/app/issues/3/sub_issues --method POST --field sub_issue_id=99"),
+        ]
+    );
+    client.until_notice(&id, "Broker: gh issue create").await;
+}
+
+#[tokio::test]
+async fn an_ask_session_prompts_before_an_issue_change_and_once_for_the_session() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _, mut pane) = session(&env, &mut client, "ask").await;
+
+    let comment = "gh issue comment 8 -b hi";
+    pane.type_line(&format!("sh {comment}")).await;
+    answer_issue_change(&mut client, &id, GuardChoice::Deny).await;
+    assert_ne!(shell_result(&mut pane, comment).await, "exit 0");
+    assert_eq!(gh_calls(&env).len(), 0);
+
+    pane.type_line(&format!("sh {comment} ")).await;
+    answer_issue_change(&mut client, &id, GuardChoice::AllowForSession).await;
+    assert_eq!(
+        shell_result(&mut pane, &format!("{comment} ")).await,
+        "exit 0"
+    );
+    assert_eq!(shell(&mut pane, "gh issue close 8").await, "exit 0");
+    assert_eq!(gh_calls(&env).len(), 2);
 }
