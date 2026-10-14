@@ -191,7 +191,7 @@ impl Daemon {
         }
     }
 
-    async fn global_config(&self) -> Result<GlobalConfig, RequestError> {
+    pub(crate) async fn global_config(&self) -> Result<GlobalConfig, RequestError> {
         let loader = self.config.loader.clone();
         tokio::task::spawn_blocking(move || loader.global())
             .await

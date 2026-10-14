@@ -54,6 +54,7 @@ pub struct SandboxLayout {
     pub git_common_dir: PathBuf,
     pub read_only: Vec<PathBuf>,
     pub hidden: Vec<PathBuf>,
+    pub masked: Vec<PathBuf>,
     pub configured: SandboxPaths,
 }
 
@@ -217,6 +218,10 @@ pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String>
             .iter()
             .filter(|mount| !mount.maskable && mount.target.starts_with(hidden));
         args.extend(kept.flat_map(Mount::args));
+    }
+
+    for masked in &layout.masked {
+        args.extend(["--ro-bind".into(), "/dev/null".into(), text(masked)]);
     }
 
     for var in UNSET {

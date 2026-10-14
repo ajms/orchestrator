@@ -141,3 +141,16 @@ fn global_path_follows_xdg_config_home_then_home() {
 
     assert!(ConfigLoader::from_env_vars(|_| None).is_none());
 }
+
+#[test]
+fn the_agent_signing_key_is_unset_by_default_and_expands_a_home_path() {
+    let dir = TempDir::new().unwrap();
+    let loader = loader_in(&dir).with_home("/home/u");
+    assert_eq!(loader.global().unwrap().signing_key, None);
+
+    std::fs::write(loader.global_path(), "[signing]\nkey = \"~/keys/orch\"\n").unwrap();
+    assert_eq!(
+        loader.global().unwrap().signing_key,
+        Some(std::path::PathBuf::from("/home/u/keys/orch"))
+    );
+}

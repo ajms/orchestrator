@@ -23,6 +23,7 @@ fn layout() -> SandboxLayout {
         git_common_dir: GIT.into(),
         read_only: vec!["/home/dev/bin/orch".into()],
         hidden: vec!["/home/other".into(), "/mnt".into()],
+        masked: Vec::new(),
         configured: SandboxPaths::default(),
     }
 }
@@ -417,4 +418,23 @@ fn a_nested_configured_path_wins_over_its_parent_but_never_over_the_agents_own()
         effective(&args, "/home/dev/.agent/projects/p"),
         mount("--bind-try", "/home/dev/.agent")
     );
+}
+
+#[test]
+fn a_masked_file_reads_as_empty_even_inside_a_readable_path() {
+    let key = "/home/dev/.config/git/orch-key";
+    let args = sandbox_args(
+        &SandboxLayout {
+            masked: vec![key.into()],
+            configured: SandboxPaths {
+                readable: vec!["/home/dev/.config".into()],
+                ..SandboxPaths::default()
+            },
+            ..layout()
+        },
+        &needs(),
+    );
+    assert_eq!(effective(&args, key), mount("--ro-bind", key));
+    let masked = at(&args, &["--ro-bind", "/dev/null", key]);
+    assert_eq!(last_at(&args, &["--ro-bind"]), masked);
 }

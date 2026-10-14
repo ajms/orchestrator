@@ -60,7 +60,7 @@ impl ConfigLoader {
     }
 
     pub fn global(&self) -> Result<GlobalConfig, ConfigError> {
-        Ok(self.global_file()?.resolve())
+        Ok(self.global_file()?.resolve(self.home.as_deref()))
     }
 
     pub fn repo(
@@ -114,11 +114,7 @@ impl ConfigLoader {
     }
 
     fn key_path(&self, key: &str) -> PathBuf {
-        let expanded = match (key.strip_prefix("~/"), &self.home) {
-            (Some(rest), Some(home)) => home.join(rest),
-            _ => PathBuf::from(key),
-        };
-        canonical(&expanded)
+        canonical(&expand_home(key, self.home.as_deref()))
     }
 
     fn sandbox_context(&self) -> SandboxContext {
@@ -162,6 +158,13 @@ fn read_toml<T: DeserializeOwned + Default>(path: &Path) -> Result<T, ConfigErro
         path: path.into(),
         message: err.to_string(),
     })
+}
+
+pub(crate) fn expand_home(path: &str, home: Option<&Path>) -> PathBuf {
+    match (path.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => PathBuf::from(path),
+    }
 }
 
 fn canonical(path: &Path) -> PathBuf {

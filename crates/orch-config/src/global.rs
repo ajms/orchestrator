@@ -1,8 +1,11 @@
+use std::path::{Path, PathBuf};
+
 use std::time::Duration;
 
 use serde::Deserialize;
 
 use crate::error::ConfigProblem;
+use crate::loader::expand_home;
 use crate::notifications::{Notifications, NotificationsLayer};
 use crate::ports::PortRange;
 use crate::repo::{PersonalOverrides, RepoLayer};
@@ -13,6 +16,7 @@ pub struct GlobalConfig {
     pub stalled_after: Duration,
     pub ports: PortRange,
     pub notifications: Notifications,
+    pub signing_key: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -27,6 +31,13 @@ pub(crate) struct GlobalFile {
     pub(crate) defaults: RepoLayer,
     #[serde(default)]
     pub(crate) repos: PersonalOverrides,
+    signing: Option<SigningFile>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SigningFile {
+    key: String,
 }
 
 impl GlobalFile {
@@ -43,12 +54,16 @@ impl GlobalFile {
         Ok(())
     }
 
-    pub(crate) fn resolve(&self) -> GlobalConfig {
+    pub(crate) fn resolve(&self, home: Option<&Path>) -> GlobalConfig {
         GlobalConfig {
             branch_prefix: self.branch_prefix.clone().unwrap_or_else(|| "orch/".into()),
             stalled_after: Duration::from_secs(60 * self.stalled_minutes.unwrap_or(10)),
             ports: self.ports.unwrap_or_default(),
             notifications: Notifications::layered([&self.notifications]),
+            signing_key: self
+                .signing
+                .as_ref()
+                .map(|signing| expand_home(&signing.key, home)),
         }
     }
 }

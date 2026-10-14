@@ -11,6 +11,7 @@ use orch_store::SessionRecord;
 
 use crate::agents::default_adapter;
 use crate::broker::{EnvVars, SHIMS_DIR, install_shims};
+use crate::broker_sign::{IDENTITY_FILE, public_key, user_identity};
 use crate::private_dir;
 use crate::state::Daemon;
 
@@ -50,9 +51,32 @@ impl Daemon {
     ) -> Result<(Vec<String>, EnvVars), String> {
         let paths = self.session_paths(record, repo, self.holder_socket(&record.id))?;
         let shims = self.session_dir(&record.id).join(SHIMS_DIR);
-        let env = install_shims(&shims, &self.config.orch_program)?;
+        let key = self
+            .config
+            .loader
+            .global()
+            .map_err(|err| err.to_string())?
+            .signing_key;
+        let public = key.as_deref().map(public_key).transpose()?;
+        let identity = user_identity(repo)?;
+        let identity_file = self.session_dir(&record.id).join(IDENTITY_FILE);
+        let recorded = match &identity {
+            Some(identity) => std::fs::write(&identity_file, identity.line()),
+            None => std::fs::remove_file(&identity_file).or_else(|err| match err.kind() {
+                io::ErrorKind::NotFound => Ok(()),
+                _ => Err(err),
+            }),
+        };
+        recorded.map_err(|err| format!("recording the Agent identity: {err}"))?;
+        let env = install_shims(
+            &shims,
+            &self.config.orch_program,
+            identity.as_ref(),
+            public.as_deref(),
+        )?;
         let mut layout = layout(paths, self.config.orch_program.clone(), configured)?;
         layout.read_only.push(shims);
+        layout.masked.extend(key.filter(|key| key.exists()));
         let args = carved_args(&layout, &adapter.sandbox_needs(&xdg::process_env))?;
         Ok((args, env))
     }
@@ -179,6 +203,7 @@ fn layout(
         main_checkout: paths.main_checkout,
         git_common_dir: paths.git_common_dir,
         read_only: vec![orch_program],
+        masked: Vec::new(),
         configured: prepared_on_disk(configured)?,
     })
 }

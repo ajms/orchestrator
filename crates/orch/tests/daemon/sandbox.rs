@@ -155,6 +155,32 @@ async fn secrets_in_home_are_invisible_to_a_sandboxed_agent() {
 }
 
 #[tokio::test]
+async fn the_agent_signing_key_reads_as_empty_inside_the_sandbox_wherever_it_lives() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.real_bwrap();
+    let key = seed(env.path("home/.config/git/orch"), "private key");
+    seed(
+        env.path("home/.config/git/orch.pub"),
+        "ssh-ed25519 AAAA orch",
+    );
+    env.write_config(&format!(
+        "[signing]\nkey = {:?}\n",
+        key.display().to_string()
+    ));
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, mut pane) = sandboxed_session(&env, &mut client).await;
+
+    let readable = format!("test -s {}", key.display());
+    assert_ne!(shell(&mut pane, &readable).await, "exit 0");
+    let public = format!("test -s {}.pub", key.display());
+    assert_eq!(shell(&mut pane, &public).await, "exit 0");
+}
+
+#[tokio::test]
 async fn claude_json_saves_from_inside_the_sandbox_persist() {
     if !bwrap_runs() {
         return;
