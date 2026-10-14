@@ -210,7 +210,7 @@ Inside, `$HOME` is a private tmpfs with only an allowlist bound back ([ADR 0009]
 
 ```toml
 [defaults.presets.open]
-mode = "edits"
+mode = "acceptEdits"
 sandbox = false
 ```
 
