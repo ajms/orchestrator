@@ -315,6 +315,7 @@ impl App {
                     self.copy(&text);
                 }
             }
+            FromDaemon::Notice { session, text } => self.notice(&session, text),
             FromDaemon::SubagentTranscript(update) => {
                 if let Some(transcript) = self
                     .transcript
@@ -566,6 +567,15 @@ impl App {
             (Err(err), _) => self.message = Some(format!("editor failed: {err}")),
             _ => {}
         }
+    }
+
+    fn notice(&mut self, session: &SessionId, text: String) {
+        self.message = Some(match self.sessions.get(session) {
+            Some(view) if self.selected.as_ref() != Some(session) => {
+                format!("{}: {text}", view.title_or_slug())
+            }
+            _ => text,
+        });
     }
 
     fn ring(&mut self, session: &SessionId, title: &str, body: &str) {

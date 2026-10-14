@@ -276,7 +276,7 @@ async fn a_sandboxed_agent_pushes_its_branch_through_the_broker() {
         git(&remote, &["log", "-1", "--format=%s", &view.branch]),
         "boxed"
     );
-    pane.wait_for_text("Broker: pushed").await;
+    client.until_notice(&id, "Broker: pushed").await;
 }
 
 #[tokio::test]

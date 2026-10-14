@@ -446,17 +446,6 @@ impl State {
             return;
         };
         self.log.settle_broker(id);
-        match &reply {
-            BrokerReply::Done { said } => self.output(&notice(&format!("Broker: {said}"))),
-            BrokerReply::Refused { reason } => {
-                self.output(&notice(&format!("Broker refused: {reason}")))
-            }
-            BrokerReply::Gh { said, output } => match output.code {
-                0 => self.output(&notice(&format!("Broker: {said}"))),
-                code => self.output(&notice(&format!("Broker: {said} failed (exit {code})"))),
-            },
-            BrokerReply::Refs { .. } => {}
-        }
         let _ = waiter.send(reply);
     }
 

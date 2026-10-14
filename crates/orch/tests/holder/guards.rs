@@ -224,6 +224,4 @@ async fn only_the_daemon_answers_a_broker_request() {
     })
     .await;
     assert_eq!(answered, real);
-    let screen = wait_for_screen(&mut daemon, |text| text.contains("not now")).await;
-    assert!(!screen.text().contains("pushed everything"));
 }

@@ -126,6 +126,18 @@ pub(crate) fn install_shims(dir: &Path, orch: &Path) -> Result<EnvVars, String> 
     ])
 }
 
+fn notice(reply: &BrokerReply) -> Option<String> {
+    match reply {
+        BrokerReply::Done { said } => Some(format!("Broker: {said}")),
+        BrokerReply::Refused { reason } => Some(format!("Broker refused: {reason}")),
+        BrokerReply::Gh { said, output } => match output.code {
+            0 => Some(format!("Broker: {said}")),
+            code => Some(format!("Broker: {said} failed (exit {code})")),
+        },
+        BrokerReply::Refs { .. } => None,
+    }
+}
+
 async fn origin_url(repo: &Path) -> Option<String> {
     let mut command = crate::subprocess::command("git");
     command
@@ -149,7 +161,11 @@ impl Daemon {
             .serve_broker(&id, broker, request)
             .await
             .unwrap_or_else(|reason| BrokerReply::Refused { reason });
-        if let Some(live) = self.lock().sessions.get(&id) {
+        let state = self.lock();
+        if let Some(text) = notice(&reply) {
+            state.relay_notice(&id, text);
+        }
+        if let Some(live) = state.sessions.get(&id) {
             live.send_to_holder(ToHolder::BrokerReply { id: broker, reply });
         }
     }

@@ -680,6 +680,15 @@ impl State {
         }
     }
 
+    pub(crate) fn relay_notice(&self, session: &SessionId, text: String) {
+        for client in self.clients.values() {
+            client.outbox.send(FromDaemon::Notice {
+                session: session.clone(),
+                text: text.clone(),
+            });
+        }
+    }
+
     fn focus_recent_client(&self, session: SessionId) {
         if let Some(client) = self
             .clients

@@ -53,3 +53,29 @@ fn a_rate_limit_badge_appears_above_80_percent_and_turns_red_at_95() {
     assert!(statusline(&mut tui).contains("7d 96%"));
     assert_eq!(tui.colour_of("7d 96%"), Color::Red);
 }
+
+fn noticed(session_id: &str) -> String {
+    let mut tui = Harness::new();
+    tui.sessions(vec![
+        session("webshop", "first"),
+        session("webshop", "second"),
+    ]);
+    tui.send(Event::Daemon(FromDaemon::Notice {
+        session: id(session_id),
+        text: "Broker: pushed".into(),
+    }));
+    statusline(&mut tui)
+}
+
+#[test]
+fn a_notice_for_the_shown_session_appears_in_the_statusline() {
+    let status = noticed("first");
+    assert!(status.contains("Broker: pushed"), "{status}");
+    assert!(!status.contains("first"), "{status}");
+}
+
+#[test]
+fn a_notice_for_another_session_names_it() {
+    let status = noticed("second");
+    assert!(status.contains("second: Broker: pushed"), "{status}");
+}

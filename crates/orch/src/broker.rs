@@ -43,6 +43,11 @@ pub fn run(command: BrokerCommand) -> ExitCode {
 }
 
 fn gh(socket: &std::path::Path, args: Vec<String>) -> ExitCode {
+    if matches!(args.get(..2), Some([auth, token_or_status]) if auth == "auth" && matches!(token_or_status.as_str(), "token" | "status"))
+    {
+        eprintln!("You are not logged in to any GitHub hosts inside the Sandbox.");
+        return ExitCode::FAILURE;
+    }
     let reply =
         inline_body_file(args).and_then(|args| request_broker(socket, BrokerRequest::Gh { args }));
     match reply {

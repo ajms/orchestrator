@@ -484,6 +484,7 @@ pub struct TestClient {
     pub focused: Vec<SessionId>,
     pub rate_limits: Vec<RateLimits>,
     pub copies: Vec<(SessionId, String)>,
+    pub notices: Vec<(SessionId, String)>,
     pub transcripts: Vec<SubagentTranscript>,
     session_in_view: Option<SessionId>,
     focused_terminal: bool,
@@ -502,6 +503,7 @@ impl From<Client> for TestClient {
             focused: Vec::new(),
             rate_limits: Vec::new(),
             copies: Vec::new(),
+            notices: Vec::new(),
             transcripts: Vec::new(),
             session_in_view: None,
             focused_terminal: false,
@@ -602,9 +604,22 @@ impl TestClient {
             FromDaemon::Clipboard { session, text } => {
                 self.copies.push((session.clone(), text.clone()))
             }
+            FromDaemon::Notice { session, text } => {
+                self.notices.push((session.clone(), text.clone()))
+            }
             FromDaemon::SubagentTranscript(transcript) => self.transcripts.push(transcript.clone()),
             _ => {}
         }
+    }
+
+    pub async fn until_notice(&mut self, session: &SessionId, text: &str) {
+        self.until_received(text, |client| {
+            client
+                .notices
+                .iter()
+                .any(|(of, notice)| of == session && notice.contains(text))
+        })
+        .await;
     }
 
     pub async fn until_received(&mut self, what: &str, ready: impl Fn(&Self) -> bool) {
