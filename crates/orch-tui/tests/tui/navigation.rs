@@ -107,6 +107,26 @@ fn the_pane_title_shows_the_session_preset_and_mode() {
 }
 
 #[test]
+fn only_an_unsandboxed_session_is_marked_in_its_row_and_pane_title() {
+    let mut open = session("webshop", "open");
+    open.unsandboxed = true;
+    let mut tui = Harness::new();
+    tui.sessions(vec![open, session("webshop", "boxed")]);
+
+    let screen = tui.screen();
+    let pane_title = screen
+        .lines()
+        .find(|line| line.contains("webshop / open"))
+        .unwrap();
+    assert!(pane_title.contains("unsandboxed"), "{pane_title}");
+    let sidebar = tui.sidebar_lines().join("\n");
+    let after_open = &sidebar[sidebar.find(" open ").unwrap()..];
+    let open_block: String = after_open.lines().take(2).collect();
+    assert!(open_block.contains("unsandboxed"), "{sidebar}");
+    assert_eq!(sidebar.matches("unsandboxed").count(), 1, "{sidebar}");
+}
+
+#[test]
 fn the_pane_title_names_a_titled_session_by_its_title_and_slug() {
     let mut tui = Harness::new();
     tui.sessions(vec![titled(

@@ -41,6 +41,12 @@ impl EventLog {
         self.entries.iter()
     }
 
+    pub(crate) fn settle_broker(&mut self, id: GuardId) {
+        self.entries.retain(
+            |(_, event)| !matches!(event, HolderEvent::Broker { id: logged, .. } if *logged == id),
+        );
+    }
+
     pub(crate) fn settle_guard(&mut self, id: GuardId) {
         for (_, event) in &mut self.entries {
             if let HolderEvent::Hook { guard, .. } = event

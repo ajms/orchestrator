@@ -17,7 +17,7 @@ use crate::lifecycle::{
     Busy, HOLDER_EXIT_WAIT, new_session_id, refused, select_preset, session_env, with_git,
 };
 use crate::pr::{open_pr_of, retarget_pr};
-use crate::state::{CommentCursor, Daemon, Live, session_worktree};
+use crate::state::{Daemon, Live, session_worktree};
 
 const HELLO_WAIT: Duration = Duration::from_secs(2);
 const FALLBACK_PRESET: &str = "inherit";
@@ -262,7 +262,10 @@ impl Daemon {
             .await?
             .map_err(refused)?;
         let adapter = self.repo_adapter(&repo).await;
-        self.lock().insert(Live::new(record.clone(), repo, adapter));
+        let preset_sandboxed = self.preset_sandboxed(&repo, &record.preset).await;
+        let mut live = Live::new(record.clone(), repo, adapter);
+        live.preset_sandboxed = preset_sandboxed;
+        self.lock().insert(live);
         Ok(record)
     }
 
@@ -350,10 +353,7 @@ impl Daemon {
         });
         self.adopt_or_suspend(id).await;
         if let Some(number) = open_pr_of(&repo, &branch).await {
-            let _ = self.update(id, |live| {
-                live.comments = CommentCursor::opened();
-                live.transition(PhaseEvent::PrOpened { number })
-            });
+            let _ = self.record_pr(id, number);
         }
         Some(())
     }

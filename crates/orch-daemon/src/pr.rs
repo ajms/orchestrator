@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use orch_config::ConfigLoader;
 use orch_core::{ChecksState, PhaseEvent, PrState, PrStatus, ReviewDecision, SessionId};
+use orch_holder::GhOutput;
 use orch_protocol::{Reply, RequestError};
 use orch_store::SessionRecord;
 use serde::Deserialize;
@@ -203,7 +204,7 @@ fn push_for_pr(
     Ok(())
 }
 
-fn pr_number(output: &str) -> Option<u64> {
+pub(crate) fn pr_number(output: &str) -> Option<u64> {
     let url = output.lines().rev().find(|line| !line.trim().is_empty())?;
     url.trim()
         .trim_end_matches('/')
@@ -221,6 +222,20 @@ async fn gh(repo: &Path, args: &[&str], limit: Duration) -> Result<String, Strin
         args.iter().take(2).copied().collect::<Vec<_>>().join(" ")
     );
     subprocess::run(command, None, limit, &what).await
+}
+
+pub(crate) async fn gh_brokered(repo: &Path, args: &[String]) -> Result<GhOutput, String> {
+    let mut command = crate::subprocess::command("gh");
+    command
+        .args(args)
+        .current_dir(repo)
+        .env("GH_PROMPT_DISABLED", "1");
+    let output = subprocess::output(command, None, GH_TIMEOUT, "gh").await?;
+    Ok(GhOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        code: output.status.code().unwrap_or(-1),
+    })
 }
 
 #[derive(Deserialize)]
@@ -282,7 +297,7 @@ impl Daemon {
         })
         .await?
         .map_err(|err| explain(err.to_string()))?;
-        let created = gh(
+        let number = match gh(
             &repo,
             &[
                 "pr",
@@ -299,16 +314,24 @@ impl Daemon {
             GH_TIMEOUT,
         )
         .await
-        .map_err(explain)?;
-        let number = pr_number(&created)
-            .ok_or_else(|| explain(format!("gh printed no PR link: {}", created.trim())))?;
-        self.update(id, |live| {
-            live.comments = CommentCursor::opened();
-            live.transition(PhaseEvent::PrOpened { number })
-        })?;
+        {
+            Ok(created) => pr_number(&created)
+                .ok_or_else(|| explain(format!("gh printed no PR link: {}", created.trim())))?,
+            Err(err) => open_pr_of(&repo, &record.branch)
+                .await
+                .ok_or_else(|| explain(err))?,
+        };
+        self.record_pr(id, number)?;
         Ok(Reply::PrOpened {
             number,
             committed_changes: committed.is_some(),
+        })
+    }
+
+    pub(crate) fn record_pr(&self, id: &SessionId, number: u64) -> Result<(), RequestError> {
+        self.update(id, |live| {
+            live.comments = CommentCursor::opened();
+            live.transition(PhaseEvent::PrOpened { number })
         })
     }
 

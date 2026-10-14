@@ -14,6 +14,8 @@ use orch_protocol::{
 use tempfile::TempDir;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
+pub const UNSANDBOXED: &str = "[defaults]\nsandbox = false\n";
+pub const OPEN_PRESET: &str = "[defaults.presets.open]\nsandbox = false\n";
 pub const WAIT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(20);
 pub const PANE: Size = Size {
@@ -56,6 +58,7 @@ impl Env {
         }
         let env = Self { dir };
         env.write_config("");
+        env.fake_bwrap();
         env
     }
 
@@ -227,7 +230,9 @@ case "$1 $2" in
     [ -f DIR/fail-create ] && { echo 'gh: permission denied' >&2; exit 1; }
     echo https://github.com/acme/app/pull/42 ;;
   'pr view') cat DIR/view.json ;;
-  'pr edit') ;;
+  'pr edit'|'pr ready') ;;
+  'issue view') echo "issue $3" ;;
+  'api '*) echo '{"name":"app"}' ;;
   'pr list') cat DIR/list.json 2>/dev/null || echo '[]' ;;
   *) exit 1 ;;
 esac
@@ -240,6 +245,40 @@ esac
         self.gh_reports(
             r#"{"state":"OPEN","statusCheckRollup":[],"reviewDecision":"","comments":[],"reviews":[]}"#,
         );
+    }
+
+    pub fn fake_bwrap(&self) {
+        let dir = self.path("bwrap");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = r#"#!/bin/sh
+[ -f DIR/outer-fails ] && { echo 'bwrap: setting up uid map: Permission denied' >&2; exit 1; }
+case " $* " in
+  *" --unshare-user "*) [ -f DIR/nested-fails ] && { echo 'bwrap: No permissions to create a new namespace' >&2; exit 1; } ;;
+  *" --json-status-fd "*) [ -f DIR/start-fails ] && { echo "bwrap: Can't find source path /gone" >&2; exit 1; } ;;
+esac
+while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
+shift
+exec "$@"
+"#
+        .replace("DIR", &dir.display().to_string());
+        let bwrap = self.path("bin/bwrap");
+        std::fs::write(&bwrap, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bwrap, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    pub fn real_bwrap(&self) {
+        std::fs::remove_file(self.path("bin/bwrap")).unwrap();
+    }
+
+    pub fn bwrap_switch(&self, name: &str, on: bool) {
+        let flag = self.path("bwrap").join(name);
+        match on {
+            true => std::fs::write(flag, "").unwrap(),
+            false => {
+                let _ = std::fs::remove_file(flag);
+            }
+        }
     }
 
     pub fn gh_switch(&self, name: &str, on: bool) {
@@ -677,7 +716,16 @@ impl PaneView {
     }
 
     pub async fn wait_for(&mut self, what: &str, predicate: impl Fn(&Self) -> bool) {
-        let deadline = Instant::now() + WAIT;
+        self.wait_for_within(WAIT, what, predicate).await;
+    }
+
+    pub async fn wait_for_within(
+        &mut self,
+        within: Duration,
+        what: &str,
+        predicate: impl Fn(&Self) -> bool,
+    ) {
+        let deadline = Instant::now() + within;
         while !predicate(self) {
             assert!(
                 self.closed.is_none(),

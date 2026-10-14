@@ -218,6 +218,7 @@ impl Daemon {
             .repo(root.path(), approval.as_ref())
             .map_err(refused)?;
         let preset = select_preset(root.path(), &config, create.preset.as_deref())?;
+        let preset_sandboxed = preset.sandboxed();
         if config.setup_script().is_err() {
             return Err(untrusted(root.path(), &config));
         }
@@ -225,6 +226,10 @@ impl Daemon {
             .agent()
             .map_err(|_| untrusted(root.path(), &config))?;
         let adapter = adapter_for(agent).map_err(refused)?;
+        if preset.sandboxed() {
+            self.probe_sandbox(None, root.path(), adapter.as_ref())
+                .map_err(refused)?;
+        }
         let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
         let base = match create.base {
@@ -288,13 +293,31 @@ impl Daemon {
         if let Err(err) = written {
             eprintln!("orch daemon: storing the prompt of {}: {err}", id.as_str());
         }
-        Ok(Live::new(record, repo.path, adapter))
+        let mut live = Live::new(record, repo.path, adapter);
+        live.preset_sandboxed = preset_sandboxed;
+        Ok(live)
     }
 
-    pub(crate) async fn check_launch(&self, repo: &Path, preset: &str) -> Result<(), RequestError> {
+    pub(crate) async fn check_launch(
+        self: &Arc<Self>,
+        record: &SessionRecord,
+        repo: &Path,
+    ) -> Result<(), RequestError> {
         let config = self.repo_config(repo).await?;
-        config.agent().map_err(|_| untrusted(repo, &config))?;
-        select_preset(repo, &config, Some(preset)).map(drop)
+        let agent = config.agent().map_err(|_| untrusted(repo, &config))?;
+        let preset = select_preset(repo, &config, Some(&record.preset))?;
+        if preset.sandboxed() {
+            let adapter = adapter_for(agent).map_err(refused)?;
+            let daemon = self.clone();
+            let (record, repo) = (record.clone(), repo.to_path_buf());
+            tokio::task::spawn_blocking(move || {
+                daemon.probe_sandbox(Some(&record), &repo, adapter.as_ref())
+            })
+            .await
+            .map_err(refused)?
+            .map_err(refused)?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn check_teardown(&self, repo: &Path) -> Result<(), RequestError> {
@@ -332,7 +355,7 @@ impl Daemon {
         id: &SessionId,
     ) -> Result<Reply, RequestError> {
         let (record, repo) = self.session_repo(id)?;
-        self.check_launch(&repo, &record.preset).await?;
+        self.check_launch(&record, &repo).await?;
         self.update(id, |live| {
             live.transition(PhaseEvent::SetupSkipped)?;
             live.launching = true;
@@ -347,7 +370,7 @@ impl Daemon {
     pub(crate) async fn resume(self: &Arc<Self>, id: &SessionId) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
         let (record, repo) = self.session_repo(id)?;
-        self.check_launch(&repo, &record.preset).await?;
+        self.check_launch(&record, &repo).await?;
         let mut replaced = None;
         self.update(id, |live| {
             if live.status.flags().worktree_missing {
@@ -394,6 +417,7 @@ impl Daemon {
         let mut restart = false;
         let mut replaced = None;
         self.update(id, |live| {
+            live.preset_sandboxed = preset.sandboxed();
             live.record.preset = preset.name;
             live.record.last_mode = None;
             live.status.forget_permission_mode();
@@ -452,12 +476,20 @@ impl Daemon {
             Err(err) => Err(err.to_string()),
         };
         let spawned = match launch {
-            Ok((adapter, argv)) => {
+            Ok(launch) => {
+                let sandbox = match launch.sandboxed {
+                    true => self.blocking_sandbox(&record, &repo, &launch.adapter).await,
+                    false => Ok(None),
+                };
                 let _ = self.update(id, |live| {
-                    live.adapter = adapter;
+                    live.adapter = launch.adapter;
+                    live.preset_sandboxed = launch.sandboxed;
                     Ok(())
                 });
-                self.spawn_holder(&record, argv).await
+                match sandbox {
+                    Ok(sandbox) => self.spawn_holder(&record, launch.argv, sandbox).await,
+                    Err(message) => Err(message),
+                }
             }
             Err(message) => Err(message),
         };
@@ -484,6 +516,23 @@ impl Daemon {
         });
     }
 
+    async fn blocking_sandbox(
+        self: &Arc<Self>,
+        record: &SessionRecord,
+        repo: &Path,
+        adapter: &Adapter,
+    ) -> Result<Option<SandboxLaunch>, String> {
+        let daemon = self.clone();
+        let (record, repo, adapter) = (record.clone(), repo.to_path_buf(), adapter.clone());
+        tokio::task::spawn_blocking(move || {
+            let warning = daemon.probe_sandbox(Some(&record), &repo, adapter.as_ref())?;
+            let (args, env) = daemon.sandbox_args(&record, &repo, adapter.as_ref())?;
+            Ok(Some(SandboxLaunch { args, warning, env }))
+        })
+        .await
+        .map_err(|err| err.to_string())?
+    }
+
     fn agent_argv(
         &self,
         repo: &Path,
@@ -491,11 +540,12 @@ impl Daemon {
         record: &SessionRecord,
         prompt: Option<String>,
         resume: bool,
-    ) -> Result<(Adapter, Vec<String>), String> {
+    ) -> Result<AgentLaunch, String> {
         let agent = config.agent().map_err(|err| err.to_string())?;
         let adapter = adapter_for(agent)?;
         let preset =
             select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
+        let sandboxed = preset.sandboxed();
         let mut spec = LaunchSpec::new(
             record.id.clone(),
             self.config.orch_program.to_string_lossy(),
@@ -510,10 +560,19 @@ impl Daemon {
             _ => None,
         };
         let argv = agent_command(adapter.as_ref(), &agent.args, spec, resume);
-        Ok((adapter, argv))
+        Ok(AgentLaunch {
+            adapter,
+            argv,
+            sandboxed,
+        })
     }
 
-    async fn spawn_holder(&self, record: &SessionRecord, argv: Vec<String>) -> Result<(), String> {
+    async fn spawn_holder(
+        &self,
+        record: &SessionRecord,
+        argv: Vec<String>,
+        sandbox: Option<SandboxLaunch>,
+    ) -> Result<(), String> {
         let mut command = crate::subprocess::command(&self.config.orch_program);
         command
             .arg("hold")
@@ -532,8 +591,21 @@ impl Daemon {
                 .arg("--port-size")
                 .arg(block.size.to_string());
         }
+        let mut broker_env = Vec::new();
+        if let Some(SandboxLaunch { args, warning, env }) = sandbox {
+            let args = serde_json::to_string(&args).map_err(|err| err.to_string())?;
+            command.arg("--sandbox").arg(args);
+            if let Some(warning) = warning {
+                command.arg("--warning").arg(warning);
+            }
+            broker_env = env;
+        }
         let display = self.lock().display.pairs();
-        for (key, value) in session_env(record).into_iter().chain(display) {
+        let env = session_env(record)
+            .into_iter()
+            .chain(display)
+            .chain(broker_env);
+        for (key, value) in env {
             command.arg("--env").arg(format!("{key}={value}"));
         }
         let size = self
@@ -606,6 +678,12 @@ impl Daemon {
         suspended
     }
 
+    pub(crate) async fn preset_sandboxed(&self, repo: &Path, preset: &str) -> bool {
+        self.repo_config(repo).await.map_or(true, |config| {
+            select_preset(repo, &config, Some(preset)).map_or(true, |preset| preset.sandboxed())
+        })
+    }
+
     pub(crate) async fn repo_adapter(&self, repo: &Path) -> Adapter {
         match self.repo_config(repo).await {
             Ok(config) => config
@@ -637,13 +715,27 @@ impl Daemon {
             };
             let adapter = self.repo_adapter(&repo.path).await;
             let id = record.id.clone();
+            let preset_sandboxed = self.preset_sandboxed(&repo.path, &record.preset).await;
             let mut live = Live::new(record, repo.path.clone(), adapter);
+            live.preset_sandboxed = preset_sandboxed;
             live.setup_output = self.read_setup_log(&id).await;
             known.push((id, live.status.phase()));
             self.lock().insert(live);
         }
         known
     }
+}
+
+struct SandboxLaunch {
+    args: Vec<String>,
+    warning: Option<crate::sandbox::SandboxWarning>,
+    env: Vec<(String, String)>,
+}
+
+struct AgentLaunch {
+    adapter: Adapter,
+    argv: Vec<String>,
+    sandboxed: bool,
 }
 
 pub(crate) fn select_preset(

@@ -25,6 +25,8 @@ pub struct SessionView {
     pub error: Option<String>,
     #[serde(default)]
     pub holder_pid: Option<u32>,
+    #[serde(default)]
+    pub unsandboxed: bool,
     pub guards_enabled: bool,
     pub guard_prompts: Vec<GuardPrompt>,
     pub context_used_percent: Option<f64>,
@@ -192,6 +194,8 @@ pub enum GuardKindView {
     OtherRef,
     WorktreeManagement,
     WriteOutsideWorktree,
+    Push,
+    PullRequest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

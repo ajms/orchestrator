@@ -1,3 +1,6 @@
+mod broker;
+#[path = "../shared/bwrap.rs"]
+mod bwrap;
 mod cli;
 mod clipboard;
 mod common;
@@ -15,6 +18,8 @@ mod preset;
 mod reconcile;
 mod recovery;
 mod repo_settings;
+mod sandbox;
+mod sandbox_failure;
 mod setup;
 mod stacking;
 mod status;

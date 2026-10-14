@@ -503,6 +503,7 @@ pub fn session(repo: &str, slug: &str) -> SessionView {
         setup_output: None,
         error: None,
         holder_pid: None,
+        unsandboxed: false,
         guards_enabled: true,
         guard_prompts: Vec::new(),
         context_used_percent: None,

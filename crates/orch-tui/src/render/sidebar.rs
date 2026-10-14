@@ -195,6 +195,7 @@ fn flag_style(flag: Flag) -> Style {
         Flag::Recovered => Color::Cyan,
         Flag::WorktreeMissing | Flag::BaseMissing => Color::Red,
         Flag::Muted => Color::DarkGray,
+        Flag::Unsandboxed => Color::Yellow,
     };
     Style::new().fg(colour)
 }

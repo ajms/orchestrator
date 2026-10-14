@@ -533,3 +533,39 @@ async fn typing_into_a_session_is_refused_while_it_is_being_landed() {
     pane.wait_for_text("typed-after-landing").await;
     assert!(!pane.text().contains("typed-mid-landing"));
 }
+
+#[tokio::test]
+async fn a_pr_landing_adopts_the_branchs_open_pr_instead_of_failing() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let repo = env.repo("app");
+    env.remote(&repo);
+    env.fake_gh();
+    env.gh_switch("fail-create", true);
+    env.gh_lists(r#"[{"number":7}]"#);
+    let (id, _pane) = idle_session(&env, &mut client, "Add caching").await;
+
+    let opened = client
+        .request(Request::Land {
+            session: id.clone(),
+            landing: Landing::Pr {
+                title: "Add caching".into(),
+                body: "Caches things.".into(),
+            },
+            skip_teardown: false,
+        })
+        .await;
+
+    assert_eq!(
+        opened,
+        Ok(Reply::PrOpened {
+            number: 7,
+            committed_changes: false,
+        })
+    );
+    let view = client
+        .until(&id, "PR open", |view| view.phase == PhaseView::PrOpen)
+        .await;
+    assert_eq!(view.flags.pr_number, Some(7));
+}

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
-use orch_agent::GuardAnswer;
+use orch_agent::{BWRAP, GuardAnswer};
 use orch_config::PortBlock;
 use orch_core::SessionId;
 use orch_term::keys::encode_paste;
@@ -22,12 +22,17 @@ use crate::event_log::EventLog;
 use crate::guards::GuardTable;
 use crate::paths::{HOLDER_SOCKET_ENV, SESSION_ENV};
 use crate::{
-    AgentExit, AgentStatus, Emulator, FromHolder, Hello, HolderEvent, PROTOCOL_VERSION, ScreenCopy,
-    Size, ToHolder,
+    AgentExit, AgentStatus, BrokerReply, BrokerRequest, Emulator, FromHolder, GuardId, Hello,
+    HolderEvent, PROTOCOL_VERSION, ScreenCopy, Size, ToHolder,
 };
 
 const FINAL_OUTPUT_GRACE: Duration = Duration::from_secs(2);
 const KILL_GRACE: Duration = Duration::from_secs(1);
+const IGNORING_HANGUP: &str = r#"trap '' HUP; exec 3>"$1"; shift; exec "$0" "$@""#;
+const STATUS_FD: &str = "3";
+const EARLY_OUTPUT_LIMIT: usize = 4096;
+const BROKER_UNREACHABLE: &str = "the Orchestrator is not connected to this Session";
+const BROKER_LOST: &str = "the Orchestrator went away before it answered";
 
 #[derive(Debug, Clone)]
 pub struct HoldConfig {
@@ -35,6 +40,7 @@ pub struct HoldConfig {
     pub socket: PathBuf,
     pub cwd: PathBuf,
     pub argv: Vec<String>,
+    pub sandbox: Option<HoldSandbox>,
     pub env: Vec<(String, String)>,
     pub base: Option<String>,
     pub port_block: Option<PortBlock>,
@@ -42,6 +48,12 @@ pub struct HoldConfig {
     pub guard_timeout: Duration,
     pub event_capacity: usize,
     pub scrollback: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct HoldSandbox {
+    pub args: Vec<String>,
+    pub warning: Option<String>,
 }
 
 impl HoldConfig {
@@ -55,6 +67,7 @@ impl HoldConfig {
             socket,
             cwd,
             argv,
+            sandbox: None,
             env: Vec::new(),
             base: None,
             port_block: None,
@@ -141,6 +154,8 @@ struct State {
     base: Option<String>,
     port_block: Option<PortBlock>,
     agent_pid: Option<u32>,
+    sandboxed: bool,
+    early_output: Option<Vec<u8>>,
     emulator: Emulator,
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
@@ -159,7 +174,23 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
         .argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty Agent argv"))?;
-    let mut command = CommandBuilder::new(program);
+    let status = config
+        .sandbox
+        .as_ref()
+        .map(|_| config.socket.with_extension("status"));
+    let mut command = match (&config.sandbox, &status) {
+        (Some(sandbox), Some(status)) => {
+            let mut command = CommandBuilder::new("sh");
+            command.args(["-c", IGNORING_HANGUP, BWRAP]);
+            command.arg(status);
+            command.args(["--json-status-fd", STATUS_FD]);
+            command.args(&sandbox.args);
+            command.arg("--");
+            command.arg(program);
+            command
+        }
+        _ => CommandBuilder::new(program),
+    };
     command.args(args);
     command.cwd(&config.cwd);
     command.env("TERM", "xterm-256color");
@@ -175,6 +206,14 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
     let agent_pid = child.process_id();
 
     let (input, keystrokes) = mpsc::channel::<Vec<u8>>();
+    let mut emulator = Emulator::new(config.size, config.scrollback);
+    if let Some(warning) = config
+        .sandbox
+        .as_ref()
+        .and_then(|sandbox| sandbox.warning.as_ref())
+    {
+        emulator.process(&notice(warning));
+    }
     let mut log = EventLog::new(config.event_capacity);
     log.push(HolderEvent::Spawned { pid: agent_pid });
     let shared = Arc::new(Shared {
@@ -184,7 +223,9 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
             base: config.base.clone(),
             port_block: config.port_block,
             agent_pid,
-            emulator: Emulator::new(config.size, config.scrollback),
+            sandboxed: config.sandbox.is_some(),
+            early_output: config.sandbox.as_ref().map(|_| Vec::new()),
+            emulator,
             master: pty.master,
             killer: child.clone_killer(),
             exit: None,
@@ -220,26 +261,42 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
         let _ = drained.send(());
     });
     let exit = shared.clone();
+    let sandbox_status = status;
     std::thread::spawn(move || {
         let status = child.wait();
         let _ = output_done.recv_timeout(FINAL_OUTPUT_GRACE);
-        let exit_info = match status {
+        let mut exit_info = match status {
             Ok(status) => AgentExit {
                 code: status.exit_code(),
                 signal: status.signal().map(String::from),
+                sandbox_failure: None,
             },
             Err(err) => AgentExit {
                 code: 1,
                 signal: Some(err.to_string()),
+                sandbox_failure: None,
             },
         };
         let mut state = exit.lock();
+        if let Some(status) = &sandbox_status {
+            let reported = std::fs::read_to_string(status).unwrap_or_default();
+            let _ = std::fs::remove_file(status);
+            let started = reported.contains("\"exit-code\"");
+            if !started && exit_info.signal.is_none() && exit_info.code != 0 {
+                let said = state.early_output.take().unwrap_or_default();
+                exit_info.sandbox_failure = Some(String::from_utf8_lossy(&said).trim().into());
+            }
+        }
         state.exit = Some(exit_info.clone());
         state.record(HolderEvent::Exited(exit_info));
         drop(state);
         exit.exited.send_replace(true);
     });
     Ok(shared)
+}
+
+fn notice(text: &str) -> Vec<u8> {
+    format!("\x1b[33morch: {text}\x1b[0m\r\n").into_bytes()
 }
 
 fn pty_size(size: Size) -> PtySize {
@@ -292,13 +349,31 @@ impl Shared {
         answer
     }
 
+    fn open_broker(&self, request: BrokerRequest) -> oneshot::Receiver<BrokerReply> {
+        let (waiter, reply) = oneshot::channel();
+        let mut state = self.lock();
+        if state.upstream.is_none() {
+            let _ = waiter.send(BrokerReply::Refused {
+                reason: BROKER_UNREACHABLE.into(),
+            });
+            return reply;
+        }
+        let id = state.guards.open_broker(waiter);
+        state.record(HolderEvent::Broker { id, request });
+        reply
+    }
+
     pub(crate) fn disconnect(&self, conn: ConnId) {
         let mut state = self.lock();
         state.subscribers.remove(&conn);
-        if state.upstream.as_ref().is_some_and(|(id, _)| *id == conn) {
+        if state.is_upstream(conn) {
             state.upstream = None;
             for id in state.guards.ids() {
                 state.settle_guard(id, GuardAnswer::Ask);
+            }
+            for id in state.guards.broker_ids() {
+                let reason = BROKER_LOST.into();
+                state.settle_broker(id, BrokerReply::Refused { reason });
             }
         }
     }
@@ -342,6 +417,10 @@ impl State {
     }
 
     fn output(&mut self, bytes: &[u8]) {
+        if let Some(early) = &mut self.early_output {
+            let room = EARLY_OUTPUT_LIMIT.saturating_sub(early.len());
+            early.extend_from_slice(&bytes[..bytes.len().min(room)]);
+        }
         self.emulator.process(bytes);
         for text in self.emulator.take_copies() {
             if let Some((_, upstream)) = &self.upstream {
@@ -362,6 +441,25 @@ impl State {
         }
     }
 
+    fn settle_broker(&mut self, id: GuardId, reply: BrokerReply) {
+        let Some(waiter) = self.guards.take_broker(id) else {
+            return;
+        };
+        self.log.settle_broker(id);
+        match &reply {
+            BrokerReply::Done { said } => self.output(&notice(&format!("Broker: {said}"))),
+            BrokerReply::Refused { reason } => {
+                self.output(&notice(&format!("Broker refused: {reason}")))
+            }
+            BrokerReply::Gh { said, output } => match output.code {
+                0 => self.output(&notice(&format!("Broker: {said}"))),
+                code => self.output(&notice(&format!("Broker: {said} failed (exit {code})"))),
+            },
+            BrokerReply::Refs { .. } => {}
+        }
+        let _ = waiter.send(reply);
+    }
+
     fn hello(&self) -> Hello {
         Hello {
             version: PROTOCOL_VERSION,
@@ -375,7 +473,12 @@ impl State {
                 Some(exit) => AgentStatus::Exited(exit.clone()),
                 None => AgentStatus::Running,
             },
+            sandboxed: self.sandboxed,
         }
+    }
+
+    fn is_upstream(&self, conn: ConnId) -> bool {
+        self.upstream.as_ref().is_some_and(|(id, _)| *id == conn)
     }
 
     fn attach(&mut self, conn: ConnId, outbox: &Outbox) {
@@ -442,8 +545,18 @@ pub(crate) async fn handle(
             let shared = shared.clone();
             tokio::spawn(async move { shared.stop_agent().await });
         }
-        ToHolder::GuardHeld { id } => shared.lock().guards.hold(id),
-        ToHolder::GuardAnswer { id, answer } => shared.lock().settle_guard(id, answer),
+        ToHolder::GuardHeld { id } => {
+            let mut state = shared.lock();
+            if state.is_upstream(conn) {
+                state.guards.hold(id);
+            }
+        }
+        ToHolder::GuardAnswer { id, answer } => {
+            let mut state = shared.lock();
+            if state.is_upstream(conn) {
+                state.settle_guard(id, answer);
+            }
+        }
         ToHolder::Shutdown => {
             shared.stop_agent().await;
             shared.shutdown.notify_one();
@@ -454,6 +567,21 @@ pub(crate) async fn handle(
             guard: None,
         }),
         ToHolder::Tap { payload } => shared.lock().record(HolderEvent::Tap { payload }),
+        ToHolder::Broker { request } => {
+            let reply = shared
+                .open_broker(request)
+                .await
+                .unwrap_or(BrokerReply::Refused {
+                    reason: BROKER_LOST.into(),
+                });
+            outbox.send(FromHolder::BrokerReply { reply });
+        }
+        ToHolder::BrokerReply { id, reply } => {
+            let mut state = shared.lock();
+            if state.is_upstream(conn) {
+                state.settle_broker(id, reply);
+            }
+        }
         ToHolder::Guard { payload } => {
             let answer = shared.open_guard(payload).await.unwrap_or(GuardAnswer::Ask);
             outbox.send(FromHolder::GuardAnswer { answer });

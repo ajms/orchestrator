@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use orch_agent::{GuardHit, GuardKind, SubagentTranscripts, mode_name};
+use orch_agent::{GuardAnswer, GuardHit, GuardKind, SubagentTranscripts, mode_name};
 use orch_core::{AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus};
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
@@ -14,7 +14,7 @@ use orch_protocol::{
 };
 use orch_store::SessionRecord;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Notify, oneshot, watch};
 
 use crate::DaemonConfig;
 use crate::agents::Adapter;
@@ -94,6 +94,8 @@ pub(crate) struct Live {
     pub(crate) comments: CommentCursor,
     pub(crate) recheck: Recheck,
     pub(crate) launching: bool,
+    pub(crate) sandboxed: bool,
+    pub(crate) preset_sandboxed: bool,
     pub(crate) repo_missing: bool,
     pub(crate) transcripts: Option<Box<dyn SubagentTranscripts>>,
     end_noticed: bool,
@@ -150,6 +152,7 @@ pub(crate) struct PendingGuard {
     pub(crate) id: u64,
     pub(crate) tool: String,
     pub(crate) hit: GuardHit,
+    pub(crate) brokered: Option<oneshot::Sender<GuardAnswer>>,
 }
 
 #[derive(Default)]
@@ -205,6 +208,8 @@ impl Live {
             comments: CommentCursor::default(),
             recheck: Recheck::default(),
             launching: false,
+            sandboxed: false,
+            preset_sandboxed: true,
             repo_missing: false,
             transcripts,
             end_noticed: false,
@@ -353,6 +358,10 @@ impl Live {
             setup_output: self.setup_output.clone(),
             error: self.last_error.clone(),
             holder_pid: self.holder.as_ref().map(|link| link.pid),
+            unsandboxed: match self.holder {
+                Some(_) => !self.sandboxed,
+                None => !self.preset_sandboxed,
+            },
             guards_enabled: record.guards_enabled,
             guard_prompts: self
                 .prompts
@@ -388,6 +397,8 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::OtherRef => GuardKindView::OtherRef,
         GuardKind::WorktreeManagement => GuardKindView::WorktreeManagement,
         GuardKind::WriteOutsideWorktree => GuardKindView::WriteOutsideWorktree,
+        GuardKind::Push => GuardKindView::Push,
+        GuardKind::PullRequest => GuardKindView::PullRequest,
     }
 }
 

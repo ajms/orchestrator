@@ -125,6 +125,7 @@ fn launch_adds_the_presets_rules_to_the_users_permissions() {
         mode: Some(PermissionMode::DontAsk),
         allow: vec!["Bash(cargo test *)".into()],
         deny: vec!["WebFetch".into(), "Bash(rm *)".into()],
+        sandbox: None,
     };
     let argv = ClaudeCode::default().launch(&spec(preset));
     assert_eq!(flag(&argv.args, "--permission-mode"), Some("dontAsk"));

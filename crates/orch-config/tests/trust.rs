@@ -153,6 +153,7 @@ fn committed_default_preset_that_loosens_needs_trust() {
             mode: Some(PermissionMode::AcceptEdits),
             allow: vec![],
             deny: vec![],
+            sandbox: None,
         })]
     );
     assert_eq!(fx.approved().select_preset(None).unwrap().name, "edits");

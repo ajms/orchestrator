@@ -21,6 +21,7 @@ pub trait AgentAdapter {
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String>;
     fn worktree_request(&self, payload: &str) -> Option<WorktreeRequest>;
     fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf>;
+    fn sandbox_needs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> SandboxNeeds;
 }
 ```
 
@@ -38,6 +39,7 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | `is_guard_payload` / `guard_answer` | Marks the hook payloads that block until the Daemon answers a Guard, and renders the answer in the Agent's hook-output format. |
 | `worktree_request` | Recognises the hook payloads in which the Agent asks for a Subagent worktree to be created (`Create { name }`) or removed (`Remove { path }`). `orch worktree-hook` answers them itself, outside the event vocabulary: it makes the worktree under `.orchestrator/subagents/<slug>/` and prints its path, so Guards count it as part of the Session. Claude sends `name` in `WorktreeCreate` and `worktree_path` in `WorktreeRemove`. |
 | `agent_dirs` | Directories the Agent keeps its own state in (Claude: `projects` and `plans` under its config dir). Guards let the Agent write there, as they do in the Session's Subagent worktrees. |
+| `sandbox_needs` | What the Agent needs from the Sandbox, as `SandboxNeeds { writable, read_only, carve_outs, env }`. The Agent-agnostic `sandbox_args` (`crates/orch-agent/src/sandbox.rs`) turns these and the Session's paths into bwrap args. `writable` paths are bound back read-write, `read_only` paths read-only, and `carve_outs` are read-only again inside a writable path. Missing paths are skipped, except carve-outs, which `orch` creates empty first so the Agent can't create them. Claude: `~/.claude` (or `$CLAUDE_CONFIG_DIR`) and `~/.claude.json` writable; `settings.json`, `settings.local.json`, `hooks/`, `skills/`, `agents/`, `commands/`, `rules/`, `plugins/` and `CLAUDE.md` in it carved out; `~/.local/share/claude` and `~/.local/bin` read-only; `DISABLE_AUTOUPDATER=1`. The default needs nothing, so such an Agent sees only the shipped allowlist. |
 
 ## Capabilities and graceful degrade
 
@@ -89,6 +91,7 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
    - if the Agent writes its Subagents' transcripts to files, implement `subagent_transcripts` into the entries above;
    - for Guards, implement `is_guard_payload` and `guard_answer` for the Agent's blocking-hook protocol, and `agent_dirs` for the Agent's own state;
    - if the Agent can isolate Subagents in worktrees through a hook, route that hook to `orch worktree-hook` and implement `worktree_request`.
+   - implement `sandbox_needs` with the paths the Agent writes and reads in `$HOME`, the config inside them it must not change, and any env it needs in the Sandbox.
 4. **Never write to the user's own Agent config.** Inject everything per launch through flags or env, as the Claude adapter does with `--settings`.
 5. **Test the mapping as pure functions** (Seam 3): fixture → events, and launch/resume argv for each Preset and capability combination. Test a `TitleWatch` through `follow` / `poll` and `SubagentTranscripts` through `follow` / `locate` / `read` against temporary transcript files. See `crates/orch-agent/tests/claude_*.rs`.
 6. **Register the adapter** in `crates/orch-daemon/src/agents.rs` (`adapter_for`) under its config name, so that `[defaults.agent] name = "<agent>"` (or a Repo's `[agent]`) selects it.

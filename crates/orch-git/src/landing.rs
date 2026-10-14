@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::git::{git, head_ref};
+use crate::git::{Git, git, head_ref};
 use crate::snapshot::snapshot_commit;
 use crate::{Error, Repo, SessionWorktree};
 
@@ -133,6 +133,56 @@ impl Repo {
             .map(drop)
     }
 
+    pub fn branch_on_origin(&self, branch: &str) -> Result<Option<String>, Error> {
+        let branch_ref = head_ref(branch);
+        let listing = self
+            .pinned(&["ls-remote", "origin"])
+            .arg(&branch_ref)
+            .run()?;
+        Ok(listing.lines().find_map(|line| {
+            let (commit, name) = line.split_once('\t')?;
+            (name == branch_ref).then(|| commit.to_string())
+        }))
+    }
+
+    pub fn push_brokered(
+        &self,
+        branch: &str,
+        commit: &str,
+        lease: Option<&str>,
+    ) -> Result<(), Error> {
+        let branch_ref = head_ref(branch);
+        let mut push = self.pinned(&["push", "-q", "--no-verify"]);
+        if let Some(expected) = lease {
+            push = push.arg(format!("--force-with-lease={branch_ref}:{expected}"));
+        }
+        push.args(["--", "origin"])
+            .arg(format!("{commit}:{branch_ref}"))
+            .run()?;
+        let tracked = format!("branch.{branch}.remote");
+        if !self.git(["config", "--get", &tracked]).succeeds() {
+            self.git(["config", &tracked, "origin"]).run()?;
+            self.git(["config", &format!("branch.{branch}.merge"), &branch_ref])
+                .run()?;
+        }
+        Ok(())
+    }
+
+    fn pinned(&self, args: &[&str]) -> Git<'_> {
+        let ssh = user_ssh_command();
+        self.git([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+        ])
+        .args(["-c", "remote.origin.receivepack=git-receive-pack"])
+        .args(["-c", "remote.origin.uploadpack=git-upload-pack"])
+        .arg("-c")
+        .arg(format!("core.sshCommand={ssh}"))
+        .args(args)
+    }
+
     pub(crate) fn main_checkout_to_update(
         &self,
         base: &str,
@@ -193,6 +243,21 @@ impl Repo {
             .into()),
         }
     }
+}
+
+fn user_ssh_command() -> String {
+    ["--global", "--system"]
+        .into_iter()
+        .find_map(|scope| {
+            git(
+                Path::new("/"),
+                ["config", scope, "--get", "core.sshCommand"],
+            )
+            .run()
+            .ok()
+            .filter(|command| !command.is_empty())
+        })
+        .unwrap_or_else(|| "ssh".into())
 }
 
 fn update_would_clobber_local_changes(

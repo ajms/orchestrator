@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use orch_agent::GuardAnswer;
 use tokio::sync::oneshot;
 
-use crate::GuardId;
+use crate::{BrokerReply, GuardId};
 
 pub(crate) type GuardReply = oneshot::Sender<GuardAnswer>;
+pub(crate) type BrokerWaiter = oneshot::Sender<BrokerReply>;
 
 #[derive(Default)]
 pub(crate) struct GuardTable {
     pending: HashMap<GuardId, (GuardReply, bool)>,
+    brokered: HashMap<GuardId, BrokerWaiter>,
     next: GuardId,
 }
 
@@ -18,6 +20,20 @@ impl GuardTable {
         self.next += 1;
         self.pending.insert(self.next, (reply, false));
         self.next
+    }
+
+    pub(crate) fn open_broker(&mut self, waiter: BrokerWaiter) -> GuardId {
+        self.next += 1;
+        self.brokered.insert(self.next, waiter);
+        self.next
+    }
+
+    pub(crate) fn take_broker(&mut self, id: GuardId) -> Option<BrokerWaiter> {
+        self.brokered.remove(&id)
+    }
+
+    pub(crate) fn broker_ids(&self) -> Vec<GuardId> {
+        self.brokered.keys().copied().collect()
     }
 
     pub(crate) fn hold(&mut self, id: GuardId) {

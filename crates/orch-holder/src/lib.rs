@@ -14,14 +14,14 @@ mod screen;
 pub use client::{HolderClient, HolderReader};
 pub use detach::hold_detached;
 pub use frame::{read_frame, read_frame_async, write_frame, write_frame_async};
-pub use holder::{HoldConfig, hold};
+pub use holder::{HoldConfig, HoldSandbox, hold};
 pub use paths::{
     HOLDER_SOCKET_ENV, RUNTIME_DIR_ENV, SESSION_ENV, default_runtime_dir, holders_dir,
     locate_socket, socket_path,
 };
 pub use protocol::{
-    AgentExit, AgentStatus, FromHolder, GuardId, Hello, HolderEvent, PROTOCOL_VERSION, Size,
-    ToHolder,
+    AgentExit, AgentStatus, BrokerReply, BrokerRequest, FromHolder, GhOutput, GuardId, Hello,
+    HolderEvent, PROTOCOL_VERSION, RefUpdate, RemoteRef, Size, ToHolder,
 };
-pub use report::{report, request_guard};
+pub use report::{report, request_broker, request_guard};
 pub use screen::{Emulator, ScreenCopy, ScreenSnapshot};

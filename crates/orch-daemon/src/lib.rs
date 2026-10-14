@@ -1,4 +1,6 @@
 mod agents;
+mod broker;
+mod broker_gh;
 mod cleanup;
 mod client;
 mod discard;
@@ -14,6 +16,7 @@ mod rate_limits;
 mod recency;
 mod reconcile;
 mod repos;
+mod sandbox;
 mod setup;
 mod state;
 mod store;
@@ -36,6 +39,7 @@ use orch_store::Store;
 use tokio::net::UnixListener;
 use tokio::signal::unix::{SignalKind, signal};
 
+pub use crate::sandbox::{ProbeResult, probe_host_sandbox};
 use crate::state::Daemon;
 use crate::store::StoreHandle;
 
@@ -64,11 +68,15 @@ impl DaemonConfig {
     pub const DEFAULT_RECONCILE: Duration = Duration::from_secs(3 * 60);
 }
 
-pub fn run(config: DaemonConfig) -> io::Result<()> {
+pub(crate) fn private_dir(dir: &Path) -> io::Result<()> {
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(&config.runtime_dir)?;
+        .create(dir)
+}
+
+pub fn run(config: DaemonConfig) -> io::Result<()> {
+    private_dir(&config.runtime_dir)?;
     let Some(_lock) = lock(&config.runtime_dir)? else {
         return Ok(());
     };

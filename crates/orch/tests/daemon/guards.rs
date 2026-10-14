@@ -42,6 +42,7 @@ async fn settle(client: &mut TestClient, pane: &mut PaneView, id: &SessionId, ma
 #[tokio::test]
 async fn a_guard_hit_asks_the_user_and_relays_a_denial_to_the_agent() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = running_session(&env, &mut client, "Guarded").await;
@@ -69,6 +70,7 @@ async fn a_guard_hit_asks_the_user_and_relays_a_denial_to_the_agent() {
 #[tokio::test]
 async fn allowing_once_asks_again_but_allowing_for_the_session_does_not() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = running_session(&env, &mut client, "Guarded").await;
@@ -100,6 +102,7 @@ async fn allowing_once_asks_again_but_allowing_for_the_session_does_not() {
 #[tokio::test]
 async fn guards_switched_off_let_the_agent_act_outside_its_session() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = running_session(&env, &mut client, "Unguarded").await;
@@ -140,6 +143,7 @@ async fn guards_switched_off_let_the_agent_act_outside_its_session() {
 #[tokio::test]
 async fn guard_settings_and_session_allowances_survive_a_daemon_restart() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let mut daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = running_session(&env, &mut client, "Remember").await;

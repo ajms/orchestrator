@@ -97,6 +97,7 @@ pub(crate) enum Flag {
     WorktreeMissing,
     BaseMissing,
     Muted,
+    Unsandboxed,
 }
 
 impl Flag {
@@ -117,6 +118,7 @@ impl Flag {
             Flag::WorktreeMissing => "worktree missing".into(),
             Flag::BaseMissing => "base missing".into(),
             Flag::Muted => "muted".into(),
+            Flag::Unsandboxed => "unsandboxed".into(),
         }
     }
 }
@@ -357,6 +359,7 @@ fn flags(view: &SessionView) -> Vec<Flag> {
         (flags.worktree_missing, Flag::WorktreeMissing),
         (flags.base_missing, Flag::BaseMissing),
         (flags.muted, Flag::Muted),
+        (view.unsandboxed, Flag::Unsandboxed),
     ];
     found.extend(
         marks

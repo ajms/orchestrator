@@ -56,6 +56,52 @@ pub enum ToHolder {
     Tap {
         payload: String,
     },
+    Broker {
+        request: BrokerRequest,
+    },
+    BrokerReply {
+        id: GuardId,
+        reply: BrokerReply,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BrokerRequest {
+    Refs,
+    Push { updates: Vec<RefUpdate> },
+    Gh { args: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefUpdate {
+    pub src: String,
+    pub commit: Option<String>,
+    pub dst: String,
+    pub force: bool,
+    pub lease: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BrokerReply {
+    Refs { refs: Vec<RemoteRef> },
+    Done { said: String },
+    Refused { reason: String },
+    Gh { said: String, output: GhOutput },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GhOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub code: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteRef {
+    pub name: String,
+    pub commit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -79,6 +125,9 @@ pub enum FromHolder {
     Clipboard {
         text: String,
     },
+    BrokerReply {
+        reply: BrokerReply,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -96,6 +145,8 @@ pub struct Hello {
     pub holder_pid: u32,
     pub agent_pid: Option<u32>,
     pub agent: AgentStatus,
+    #[serde(default)]
+    pub sandboxed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +160,8 @@ pub enum AgentStatus {
 pub struct AgentExit {
     pub code: u32,
     pub signal: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_failure: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +176,10 @@ pub enum HolderEvent {
     },
     Tap {
         payload: String,
+    },
+    Broker {
+        id: GuardId,
+        request: BrokerRequest,
     },
     Exited(AgentExit),
 }

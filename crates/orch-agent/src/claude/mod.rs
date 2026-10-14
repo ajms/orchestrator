@@ -15,12 +15,23 @@ use transcript::TranscriptTitles;
 
 use crate::shell::quote;
 use crate::{
-    AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, SubagentTranscripts,
-    TitleWatch, WorktreeRequest,
+    AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, SandboxNeeds,
+    SubagentTranscripts, TitleWatch, WorktreeRequest,
 };
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
 const GUARD_WAIT_SECS: u64 = 7 * 24 * 60 * 60;
+const CONFIG_CARVE_OUTS: [&str; 9] = [
+    "settings.json",
+    "settings.local.json",
+    "hooks",
+    "skills",
+    "agents",
+    "commands",
+    "rules",
+    "plugins",
+    "CLAUDE.md",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeCode {
@@ -179,6 +190,27 @@ impl AgentAdapter for ClaudeCode {
         settings::config_dir(lookup)
             .map(|dir| vec![dir.join("projects"), dir.join("plans")])
             .unwrap_or_default()
+    }
+
+    fn sandbox_needs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> SandboxNeeds {
+        let home = lookup("HOME")
+            .filter(|home| !home.is_empty())
+            .map(PathBuf::from);
+        let config = settings::config_dir(lookup);
+        let in_home = |path: &str| home.iter().map(|home| home.join(path)).collect::<Vec<_>>();
+        SandboxNeeds {
+            writable: config
+                .iter()
+                .cloned()
+                .chain(in_home(".claude.json"))
+                .collect(),
+            read_only: [in_home(".local/share/claude"), in_home(".local/bin")].concat(),
+            carve_outs: config
+                .iter()
+                .flat_map(|dir| CONFIG_CARVE_OUTS.map(|name| dir.join(name)))
+                .collect(),
+            env: vec![("DISABLE_AUTOUPDATER".into(), "1".into())],
+        }
     }
 
     fn draft(&self, conversation: &ConversationId) -> Option<Argv> {

@@ -147,12 +147,16 @@ fn title(view: &SessionView) -> Line<'static> {
         Some(title) => format!("{title} ({})", view.slug),
         None => view.slug.clone(),
     };
-    Line::from(vec![
+    let mut spans = vec![
         Span::raw(" "),
         Span::raw(format!("{} / {title} ", repo_name(&view.repo))).bold(),
         Span::styled(label, Style::new().fg(colour)),
         Span::raw(format!(" {mode} ")),
-    ])
+    ];
+    if view.unsandboxed {
+        spans.push(Span::styled("unsandboxed ", Style::new().fg(Color::Yellow)));
+    }
+    Line::from(spans)
 }
 
 fn subagent_title(view: &SessionView, subagent: &SubagentView) -> Line<'static> {

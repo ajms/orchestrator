@@ -5,7 +5,7 @@ use orch_core::{
     TranscriptEntry,
 };
 
-use crate::{GuardAnswer, Preset};
+use crate::{GuardAnswer, Preset, SandboxNeeds};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Capabilities {
@@ -172,5 +172,9 @@ pub trait AgentAdapter {
 
     fn agent_dirs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
         Vec::new()
+    }
+
+    fn sandbox_needs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> SandboxNeeds {
+        SandboxNeeds::default()
     }
 }
