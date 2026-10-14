@@ -62,7 +62,7 @@ The settings that apply to one Repo: those committed in the Repo itself, layered
 _Avoid_: Project settings, repo file
 
 **Trust**:
-The user's approval to run the scripts a Repo config brings from the Repo itself; it lapses when those scripts change.
+The user's approval of what a Repo's committed config would run or loosen: its scripts, its Agent, Presets that loosen autonomy or leave the Sandbox, and paths it opens in the Sandbox. It lapses when any of those change.
 _Avoid_: Allow-list, permission
 
 **Session**:
@@ -122,8 +122,16 @@ A per-Repo command run in a Worktree just before it is removed.
 _Avoid_: Cleanup hook, archive script
 
 **Preset**:
-A named level of Agent autonomy: a permission mode plus allow and deny rules, chosen per Session.
+A named level of Agent autonomy: a permission mode, allow and deny rules, and whether its Agent runs in the Sandbox (it does unless the Preset says otherwise), chosen per Session.
 _Avoid_: Profile, policy, autonomy level
+
+**Sandbox**:
+An OS enclosure around a Session's Agent and everything it runs, limiting which files it can change and hiding secrets. An action outside it fails; it never asks.
+_Avoid_: Jail, container
+
+**Broker**:
+The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: pushing its Branch, managing its pull request and reading its Repo on GitHub, with the user's credentials, which never enter the Sandbox.
+_Avoid_: Proxy, relay, credential helper
 
 **Guard**:
 An Orchestrator rule that stops an Agent from acting outside its Session (its Worktree and Branch), or through tools that reach beyond it, unless the user allows it.
