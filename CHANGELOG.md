@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/ajms/orchestrator/compare/v0.3.0...v0.4.0) - 2026-10-14
+
+### Added
+
+- *(tui)* show Broker refusals and failures in yellow
+- *(broker)* let sandboxed Agents write issues in their Repo
+
+### Fixed
+
+- *(broker)* report a push that reached origin as pushed
+- *(broker)* quiet gh auth and move Broker notices out of the pane
+
 ## [0.3.0](https://github.com/ajms/orchestrator/compare/v0.2.0...v0.3.0) - 2026-10-14
 
 ### Added
