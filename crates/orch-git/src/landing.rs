@@ -161,9 +161,13 @@ impl Repo {
             .run()?;
         let tracked = format!("branch.{branch}.remote");
         if !self.git(["config", "--get", &tracked]).succeeds() {
-            self.git(["config", &tracked, "origin"]).run()?;
-            self.git(["config", &format!("branch.{branch}.merge"), &branch_ref])
-                .run()?;
+            let _ = self
+                .git(["config", &tracked, "origin"])
+                .run()
+                .and_then(|_| {
+                    self.git(["config", &format!("branch.{branch}.merge"), &branch_ref])
+                        .run()
+                });
         }
         Ok(())
     }

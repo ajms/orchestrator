@@ -89,6 +89,26 @@ async fn a_sandboxed_agent_pushes_its_own_branch_through_the_broker() {
 }
 
 #[tokio::test]
+async fn a_push_that_reached_origin_succeeds_even_if_tracking_cannot_be_written() {
+    let Pushing { env, remote } = pushing();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    commit(&view.worktree, "feature.rs", "feature\n");
+    let lock = env.path("repos/app/.git/config.lock");
+    std::fs::write(&lock, "").unwrap();
+
+    let push = format!("git push origin {}", view.branch);
+    assert_eq!(shell(&mut pane, &push).await, "exit 0");
+    std::fs::remove_file(&lock).unwrap();
+    assert_eq!(
+        remote_tip(&remote, &view.branch),
+        Some(git(&view.worktree, &["rev-parse", "HEAD"]))
+    );
+    client.until_notice(&id, "Broker: pushed").await;
+}
+
+#[tokio::test]
 async fn a_rewritten_branch_goes_through_with_a_lease_but_not_with_a_plain_force() {
     let Pushing { env, remote } = pushing();
     let _daemon = env.start_daemon().await;
