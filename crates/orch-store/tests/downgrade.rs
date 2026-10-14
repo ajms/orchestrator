@@ -122,7 +122,7 @@ fn usage_and_sessions_are_written_again_after_leaving_the_antigravity_release() 
 }
 
 #[test]
-fn a_session_allowed_to_push_by_the_sandbox_release_still_loads_without_that_allowance() {
+fn a_session_allowed_by_a_later_release_still_loads_without_that_allowance() {
     let mut fx = Fixture::new();
     let repo = fx.register("proj");
     let session = fx.session(&repo, "boxed");
@@ -130,7 +130,7 @@ fn a_session_allowed_to_push_by_the_sandbox_release_still_loads_without_that_all
     conn.execute_batch(&format!(
         "INSERT INTO guard_allowances VALUES
             ('{id}', 0, 'push', 'orch/boxed'),
-            ('{id}', 1, 'other_ref', 'refs/heads/main'),
+            ('{id}', 1, 'from_a_later_release', 'refs/heads/main'),
             ('{id}', 2, 'pull_request', 'orch/boxed');",
         id = session.id.0
     ))
@@ -141,10 +141,16 @@ fn a_session_allowed_to_push_by_the_sandbox_release_still_loads_without_that_all
     let loaded = fx.store.session(&session.id).unwrap().unwrap();
     assert_eq!(
         loaded.guard_allowances,
-        [orch_agent::GuardHit {
-            kind: orch_agent::GuardKind::OtherRef,
-            target: "refs/heads/main".into(),
-        }]
+        [
+            orch_agent::GuardHit {
+                kind: orch_agent::GuardKind::Push,
+                target: "orch/boxed".into(),
+            },
+            orch_agent::GuardHit {
+                kind: orch_agent::GuardKind::PullRequest,
+                target: "orch/boxed".into(),
+            },
+        ]
     );
     assert_eq!(fx.store.sessions().unwrap().len(), 1);
 }
