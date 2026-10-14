@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/ajms/orchestrator/compare/v0.1.2...v0.2.0) - 2026-10-14
+
+### Added
+
+- *(sandbox)* [sandbox] config widens and tightens the Sandbox
+- *(sandbox)* [**breaking**] the Sandbox is on by default
+- *(broker)* gh for sandboxed Agents
+- *(broker)* push for sandboxed Agents
+- *(sandbox)* fail closed when the Sandbox can't run
+- *(sandbox)* a Preset runs Claude in bubblewrap
+
+### Fixed
+
+- *(sandbox)* close review gaps in [sandbox] config
+
+### Other
+
+- *(store)* the downgrade test knows push and pull_request
+
 ## [0.1.2](https://github.com/ajms/orchestrator/compare/v0.1.1...v0.1.2) - 2026-10-13
 
 ### Fixed
