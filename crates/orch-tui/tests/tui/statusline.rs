@@ -63,6 +63,7 @@ fn noticed(session_id: &str) -> String {
     tui.send(Event::Daemon(FromDaemon::Notice {
         session: id(session_id),
         text: "Broker: pushed".into(),
+        warning: false,
     }));
     statusline(&mut tui)
 }
@@ -78,4 +79,23 @@ fn a_notice_for_the_shown_session_appears_in_the_statusline() {
 fn a_notice_for_another_session_names_it() {
     let status = noticed("second");
     assert!(status.contains("second: Broker: pushed"), "{status}");
+}
+
+#[test]
+fn a_warning_notice_is_yellow_and_a_plain_one_is_not() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![session("webshop", "first")]);
+    tui.send(Event::Daemon(FromDaemon::Notice {
+        session: id("first"),
+        text: "Broker refused: not that".into(),
+        warning: true,
+    }));
+    assert_eq!(tui.colour_of("Broker refused"), Color::Yellow);
+
+    tui.send(Event::Daemon(FromDaemon::Notice {
+        session: id("first"),
+        text: "Broker: pushed".into(),
+        warning: false,
+    }));
+    assert_ne!(tui.colour_of("Broker: pushed"), Color::Yellow);
 }

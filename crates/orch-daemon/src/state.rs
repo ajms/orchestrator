@@ -681,11 +681,12 @@ impl State {
         }
     }
 
-    pub(crate) fn relay_notice(&self, session: &SessionId, text: String) {
+    pub(crate) fn relay_notice(&self, session: &SessionId, text: String, warning: bool) {
         for client in self.clients.values() {
             client.outbox.send(FromDaemon::Notice {
                 session: session.clone(),
                 text: text.clone(),
+                warning,
             });
         }
     }

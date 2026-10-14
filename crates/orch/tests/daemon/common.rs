@@ -606,7 +606,7 @@ impl TestClient {
             FromDaemon::Clipboard { session, text } => {
                 self.copies.push((session.clone(), text.clone()))
             }
-            FromDaemon::Notice { session, text } => {
+            FromDaemon::Notice { session, text, .. } => {
                 self.notices.push((session.clone(), text.clone()))
             }
             FromDaemon::SubagentTranscript(transcript) => self.transcripts.push(transcript.clone()),

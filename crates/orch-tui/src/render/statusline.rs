@@ -29,7 +29,7 @@ fn mode_line(app: &App) -> Line<'static> {
     };
     let rest = match (&app.mode, &app.message) {
         (Mode::CommandLine(line), _) => format!(":{line}▏"),
-        (_, Some(message)) => message.clone(),
+        (_, Some(message)) => message.text.clone(),
         _ if app.guard_waiting_hidden() => "Guard prompt waiting — :guard to answer".into(),
         (Mode::Insert, None) => {
             "keys go to the Agent · Ctrl-\\ Ctrl-n → Normal · Ctrl-h → sidebar".into()
@@ -47,6 +47,12 @@ fn mode_line(app: &App) -> Line<'static> {
             "j/k select · i insert · za fold · Ctrl-w h/l focus · d review · : commands".into()
         }
     };
+    let style = match &app.message {
+        Some(message) if message.warning && !matches!(app.mode, Mode::CommandLine(_)) => {
+            Style::new().fg(Color::Yellow)
+        }
+        _ => Style::new(),
+    };
     Line::from(vec![
         Span::styled(
             label,
@@ -55,7 +61,7 @@ fn mode_line(app: &App) -> Line<'static> {
                 .bg(colour)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!(" {rest}")),
+        Span::styled(format!(" {rest}"), style),
     ])
 }
 

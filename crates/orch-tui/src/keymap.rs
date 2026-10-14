@@ -261,7 +261,7 @@ fn visual(app: &mut App, mut selection: Selection, key: KeyEvent) {
             let text = selected_text(pane, selection, last_col);
             let lines = text.lines().count();
             app.copy(&text);
-            app.message = Some(format!("yanked {lines} line(s)"));
+            app.message = Some(format!("yanked {lines} line(s)").into());
             app.mode = Mode::Normal;
             return;
         }
@@ -297,7 +297,7 @@ fn enter_insert(app: &mut App) {
         return app.resume_selected(true);
     }
     if !view.phase.is_live() {
-        app.message = Some(format!("no live Agent while {}", phase_label(view.phase)));
+        app.message = Some(format!("no live Agent while {}", phase_label(view.phase)).into());
         return;
     }
     scroll_to_end(app);

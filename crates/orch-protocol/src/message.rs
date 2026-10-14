@@ -272,6 +272,8 @@ pub enum FromDaemon {
     Notice {
         session: SessionId,
         text: String,
+        #[serde(default)]
+        warning: bool,
     },
     SubagentTranscript(SubagentTranscript),
 }

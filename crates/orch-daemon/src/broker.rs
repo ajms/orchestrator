@@ -126,13 +126,13 @@ pub(crate) fn install_shims(dir: &Path, orch: &Path) -> Result<EnvVars, String> 
     ])
 }
 
-fn notice(reply: &BrokerReply) -> Option<String> {
+fn notice(reply: &BrokerReply) -> Option<(String, bool)> {
     match reply {
-        BrokerReply::Done { said } => Some(format!("Broker: {said}")),
-        BrokerReply::Refused { reason } => Some(format!("Broker refused: {reason}")),
+        BrokerReply::Done { said } => Some((format!("Broker: {said}"), false)),
+        BrokerReply::Refused { reason } => Some((format!("Broker refused: {reason}"), true)),
         BrokerReply::Gh { said, output } => match output.code {
-            0 => Some(format!("Broker: {said}")),
-            code => Some(format!("Broker: {said} failed (exit {code})")),
+            0 => Some((format!("Broker: {said}"), false)),
+            code => Some((format!("Broker: {said} failed (exit {code})"), true)),
         },
         BrokerReply::Refs { .. } => None,
     }
@@ -162,8 +162,8 @@ impl Daemon {
             .await
             .unwrap_or_else(|reason| BrokerReply::Refused { reason });
         let state = self.lock();
-        if let Some(text) = notice(&reply) {
-            state.relay_notice(&id, text);
+        if let Some((text, warning)) = notice(&reply) {
+            state.relay_notice(&id, text, warning);
         }
         if let Some(live) = state.sessions.get(&id) {
             live.send_to_holder(ToHolder::BrokerReply { id: broker, reply });
@@ -318,7 +318,34 @@ impl Daemon {
 
 #[cfg(test)]
 mod tests {
+    use orch_holder::GhOutput;
+
     use super::*;
+
+    #[test]
+    fn refusals_and_failed_gh_calls_are_warnings_and_successes_are_not() {
+        let gh = |code| BrokerReply::Gh {
+            said: "gh pr view".into(),
+            output: GhOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                code,
+            },
+        };
+        let refused = BrokerReply::Refused {
+            reason: "no".into(),
+        };
+        let pushed = BrokerReply::Done {
+            said: "pushed".into(),
+        };
+        assert_eq!(notice(&refused), Some(("Broker refused: no".into(), true)));
+        assert_eq!(
+            notice(&gh(1)),
+            Some(("Broker: gh pr view failed (exit 1)".into(), true))
+        );
+        assert_eq!(notice(&gh(0)), Some(("Broker: gh pr view".into(), false)));
+        assert_eq!(notice(&pushed), Some(("Broker: pushed".into(), false)));
+    }
 
     const COMMIT: &str = "c0ffee0000000000000000000000000000000000";
 
