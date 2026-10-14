@@ -10,6 +10,7 @@ use orch_store::SessionRecord;
 use tokio::sync::oneshot;
 
 use crate::broker_gh::{Change, GitHubRepo, Limits, gh_call, not_this_sessions_pr};
+use crate::broker_sign::{IDENTITY_FILE, Identity, sign};
 use crate::lifecycle::{select_preset, with_git};
 use crate::pr::{gh_brokered, open_pr_of, pr_number};
 use crate::state::{Daemon, PendingGuard};
@@ -19,6 +20,7 @@ pub(crate) type EnvVars = Vec<(String, String)>;
 pub(crate) const SHIMS_DIR: &str = "shims";
 const REMOTE_HELPER: &str = "git-remote-orch";
 const GH_SHIM: &str = "gh";
+const SIGN_SHIM: &str = "orch-ssh-keygen";
 const PUSH_URL: &str = "orch::origin";
 const DENIED: &str = "the user denied this in the Orchestrator";
 
@@ -97,10 +99,20 @@ fn change_asks(mode: Option<PermissionMode>) -> bool {
     matches!(mode, Some(PermissionMode::Plan | PermissionMode::Default))
 }
 
-pub(crate) fn install_shims(dir: &Path, orch: &Path) -> Result<EnvVars, String> {
+pub(crate) fn install_shims(
+    dir: &Path,
+    orch: &Path,
+    identity: Option<&Identity>,
+    signing_with: Option<&str>,
+) -> Result<EnvVars, String> {
     let quoted = orch.to_string_lossy().replace('\'', r"'\''");
     std::fs::create_dir_all(dir).map_err(|err| format!("installing the Broker's shims: {err}"))?;
-    for (name, command) in [(REMOTE_HELPER, "git-remote"), (GH_SHIM, "gh")] {
+    let shims = [
+        (REMOTE_HELPER, "git-remote"),
+        (GH_SHIM, "gh"),
+        (SIGN_SHIM, "ssh-keygen"),
+    ];
+    for (name, command) in shims {
         let shim = dir.join(name);
         let script = format!("#!/bin/sh\nexec '{quoted}' broker {command} \"$@\"\n");
         std::fs::write(&shim, script)
@@ -111,19 +123,40 @@ pub(crate) fn install_shims(dir: &Path, orch: &Path) -> Result<EnvVars, String> 
         Ok(path) if !path.is_empty() => format!("{}:{path}", dir.display()),
         _ => dir.display().to_string(),
     };
-    let next: u32 = std::env::var("GIT_CONFIG_COUNT")
+    let mut config = vec![("remote.origin.pushurl", PUSH_URL.to_string())];
+    let mut env = vec![("PATH".to_string(), path)];
+    env.extend(identity.map(identity_env).unwrap_or_default());
+    match signing_with.filter(|_| identity.is_some()) {
+        Some(public) => config.extend([
+            ("gpg.format", "ssh".into()),
+            ("gpg.ssh.program", dir.join(SIGN_SHIM).display().to_string()),
+            ("user.signingkey", format!("key::{public}")),
+            ("commit.gpgsign", "true".into()),
+        ]),
+        None => config.push(("commit.gpgsign", "false".into())),
+    }
+    let next: usize = std::env::var("GIT_CONFIG_COUNT")
         .ok()
         .and_then(|count| count.parse().ok())
         .unwrap_or(0);
-    Ok(vec![
-        ("PATH".into(), path),
-        ("GIT_CONFIG_COUNT".into(), (next + 1).to_string()),
-        (
-            format!("GIT_CONFIG_KEY_{next}"),
-            "remote.origin.pushurl".into(),
-        ),
-        (format!("GIT_CONFIG_VALUE_{next}"), PUSH_URL.into()),
-    ])
+    env.push(("GIT_CONFIG_COUNT".into(), (next + config.len()).to_string()));
+    for (offset, (key, value)) in config.into_iter().enumerate() {
+        env.push((format!("GIT_CONFIG_KEY_{}", next + offset), key.into()));
+        env.push((format!("GIT_CONFIG_VALUE_{}", next + offset), value));
+    }
+    Ok(env)
+}
+
+fn identity_env(identity: &Identity) -> EnvVars {
+    ["AUTHOR", "COMMITTER"]
+        .into_iter()
+        .flat_map(|role| {
+            [
+                (format!("GIT_{role}_NAME"), identity.name.clone()),
+                (format!("GIT_{role}_EMAIL"), identity.email.clone()),
+            ]
+        })
+        .collect()
 }
 
 fn notice(reply: &BrokerReply) -> Option<(String, bool)> {
@@ -134,7 +167,7 @@ fn notice(reply: &BrokerReply) -> Option<(String, bool)> {
             0 => Some((format!("Broker: {said}"), false)),
             code => Some((format!("Broker: {said} failed (exit {code})"), true)),
         },
-        BrokerReply::Refs { .. } => None,
+        BrokerReply::Refs { .. } | BrokerReply::Signed { .. } => None,
     }
 }
 
@@ -229,6 +262,16 @@ impl Daemon {
                 Ok(BrokerReply::Done {
                     said: format!("pushed {} to origin{how}", record.branch),
                 })
+            }
+            BrokerRequest::Sign { payload } => {
+                let key = self
+                    .global_config()
+                    .await
+                    .ok()
+                    .and_then(|global| global.signing_key);
+                let agent = std::fs::read_to_string(self.session_dir(id).join(IDENTITY_FILE)).ok();
+                let signature = sign(agent, key, payload).await?;
+                Ok(BrokerReply::Signed { signature })
             }
             BrokerRequest::Gh { args } => {
                 let origin = origin_url(&repo).await;

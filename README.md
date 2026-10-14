@@ -145,6 +145,9 @@ ports = { start = 20000, end = 29999, block_size = 10 }   # ORCH_PORT_BASE per S
 [notifications.desktop]
 turn_ended = false            # needs_input, errored, setup_failed, checks_failing, …
 
+[signing]
+key = "~/.ssh/orch_signing"   # signs sandboxed Agents' commits (see Broker)
+
 [defaults]                    # defaults for every Repo
 preset = "edits"
 review_command = "git -p diff \"$ORCH_MERGE_BASE\" \"$ORCH_REVIEW_TREE\""
@@ -240,6 +243,19 @@ A sandboxed Agent gets none of your GitHub credentials, so `orch` pushes for it 
 
 A `gh` shim on the Sandbox's `PATH` forwards `gh` the same way, for this Repo's GitHub remote only (origin, passed to `gh` as `--repo`). Reads go through: `issue view/list`, `pr view/list/diff/checks`, `run view/list`, `repo view` (of this Repo only), and GET-only `gh api` under `repos/<owner>/<repo>`. The Agent can also `pr create` for its own Branch and `pr edit` its title and body or `pr ready [--undo]` its draft state; the base is always the Session's Base branch, and `--body-file` is read inside the Sandbox. A PR the Agent creates is followed like one from `:land`: the Session moves to PR open and `orch` polls it. It can file and update issues in this Repo: `issue create` (title, body, labels), `issue comment`, `issue edit` (title, body, labels), `issue close [--comment --reason]` and `issue reopen [--comment]`, assigning or unassigning only you, as `@me`. For linking issues, `gh api -X POST` reaches exactly `repos/<owner>/<repo>/issues/<n>/sub_issues` with one numeric `sub_issue_id` and `.../issues/<n>/dependencies/blocked_by` with one numeric `issue_id`. The Daemon rebuilds every call from an allowlist of flags, so anything else (merging or closing PRs, PR comments, deleting or transferring issues, another repo, a changed base, `--web`, other `gh api` writes, `--input`, or a jq query that reads the environment) fails with a reason. PR and issue changes ask first under `plan` and `ask`, like a push, as separate Guards; reads never ask. Each call shows in the TUI's status line. `gh auth token` and `gh auth status` answer as a `gh` that isn't logged in, without reaching the Daemon.
 
+**Signed commits:** a sandboxed Agent commits as you, with ` (orch)` after your name and your email, so its commits stand apart from yours. It never holds a signing key ([ADR 0011](docs/adr/0011-sandboxed-agents-sign-commits-through-the-broker.md)). With a key configured, git's `gpg.ssh.program` in the Sandbox is an `orch-ssh-keygen` shim, which signs over the Holder socket: the Daemon signs with `ssh-keygen -Y sign`, but only a commit whose committer is the Agent, and it never asks. Other `ssh-keygen` calls, such as verifying, go to the real one. The key file reads as empty inside the Sandbox wherever it lives. The Agent's name and email are fixed when the Agent starts, so a change to your git identity applies after a restart. Tags aren't signed, so a host `tag.gpgsign=true` makes the Agent's tags fail. Without one, the Sandbox sets `commit.gpgsign=false`, so your own `commit.gpgsign` doesn't break the Agent's commits. To have Agent commits show as Verified on GitHub:
+
+1. Generate a dedicated key without a passphrase: `ssh-keygen -t ed25519 -N '' -C orch-agent -f ~/.ssh/orch_signing`.
+2. Point `orch` at it in your global config:
+   ```toml
+   [signing]
+   key = "~/.ssh/orch_signing"
+   ```
+3. Add `~/.ssh/orch_signing.pub` on GitHub under *Settings → SSH and GPG keys → New SSH key*, with key type *Signing Key*.
+4. To check signatures locally, add `<your email> <contents of orch_signing.pub>` to the file your `gpg.ssh.allowedSignersFile` names.
+
+A change applies the next time the Agent starts. Unsandboxed Sessions, Landing and snapshots commit with your own config and key as before.
+
 ### Trust
 
 Scripts (`setup`, `teardown`), the Agent command, permission-loosening Presets (including a Preset with `sandbox = false`) and `readable` or `writable` Sandbox paths that come from a Repo's own file only run after you approve them, in the TUI's Trust prompt or with `orch trust <repo>`. If they change, you have to approve them again: the action that needs them (new Session, resume, `:preset`, Setup retry, Landing, Discarding) asks first and then continues. An untrusted Teardown can also be skipped for one Landing or Discard. Trust is stored in `orch`'s own state and never in your Claude configuration.
@@ -267,6 +283,7 @@ To let CI run on the release PR, add a `RELEASE_PLZ_TOKEN` secret (a fine-graine
 - [ADR 0008](docs/adr/0008-sandbox-on-by-default.md): every Preset runs its Agent in the Sandbox unless it opts out.
 - [ADR 0009](docs/adr/0009-sandbox-home-is-an-allowlist.md): the Sandbox's `$HOME` is an allowlist.
 - [ADR 0010](docs/adr/0010-sandboxed-agents-reach-github-through-the-broker.md): sandboxed Agents reach GitHub through the Broker.
+- [ADR 0011](docs/adr/0011-sandboxed-agents-sign-commits-through-the-broker.md): sandboxed Agents sign commits through the Broker.
 - [Agent adapters](docs/agent-adapters.md): the adapter trait, capabilities, and a checklist for adding another Agent.
 
 The crates under `crates/`:

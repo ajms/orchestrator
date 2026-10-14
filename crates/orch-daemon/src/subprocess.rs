@@ -15,7 +15,7 @@ pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
 
 pub(crate) async fn run(
     command: Command,
-    input: Option<String>,
+    input: Option<Vec<u8>>,
     limit: Duration,
     what: &str,
 ) -> Result<String, String> {
@@ -31,7 +31,7 @@ pub(crate) async fn run(
 
 pub(crate) async fn output(
     mut command: Command,
-    input: Option<String>,
+    input: Option<Vec<u8>>,
     limit: Duration,
     what: &str,
 ) -> Result<std::process::Output, String> {
@@ -47,7 +47,7 @@ pub(crate) async fn output(
         .spawn()
         .map_err(|err| format!("cannot run {what}: {err}"))?;
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
-        let _ = stdin.write_all(input.as_bytes()).await;
+        let _ = stdin.write_all(&input).await;
     }
     tokio::time::timeout(limit, child.wait_with_output())
         .await

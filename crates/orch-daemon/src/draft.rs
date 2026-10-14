@@ -54,7 +54,7 @@ impl Daemon {
             .current_dir(&record.worktree);
         let drafted = subprocess::run(
             command,
-            Some(instruction(mode, &record.base)),
+            Some(instruction(mode, &record.base).into()),
             DRAFT_TIMEOUT,
             "the Agent's draft",
         )

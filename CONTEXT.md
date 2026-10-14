@@ -130,8 +130,16 @@ An OS enclosure around a Session's Agent and everything it runs, limiting which 
 _Avoid_: Jail, container
 
 **Broker**:
-The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: pushing its Branch, managing its pull request and reading its Repo on GitHub, with the user's credentials, which never enter the Sandbox.
+The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: pushing its Branch, managing its pull request, reading its Repo on GitHub and signing its commits, with the user's credentials and the Agent signing key, which never enter the Sandbox.
 _Avoid_: Proxy, relay, credential helper
+
+**Agent identity**:
+The name and email a sandboxed Agent commits as: the user's name followed by ` (orch)`, and the user's email. It is fixed when the Agent starts.
+_Avoid_: Bot user, agent author
+
+**Agent signing key**:
+A dedicated SSH key, set up by the user, that the Broker signs the Agent's commits with. Inside the Sandbox it reads as empty.
+_Avoid_: Sandbox key, deploy key
 
 **Guard**:
 An Orchestrator rule that stops an Agent from acting outside its Session (its Worktree and Branch), or through tools that reach beyond it, unless the user allows it.

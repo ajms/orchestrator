@@ -21,6 +21,11 @@ pub enum BrokerCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    #[command(disable_help_flag = true)]
+    SshKeygen {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 pub fn run(command: BrokerCommand) -> ExitCode {
@@ -28,8 +33,10 @@ pub fn run(command: BrokerCommand) -> ExitCode {
         eprintln!("orch: this goes through the Broker, which only a sandboxed Session has");
         return ExitCode::FAILURE;
     };
-    if let BrokerCommand::Gh { args } = command {
-        return gh(&socket, args);
+    match command {
+        BrokerCommand::Gh { args } => return gh(&socket, args),
+        BrokerCommand::SshKeygen { args } => return ssh_keygen(&socket, args),
+        BrokerCommand::GitRemote { .. } => {}
     }
     let ask = |request| request_broker(&socket, request);
     let stdin = io::stdin().lock();
@@ -63,7 +70,7 @@ fn gh(socket: &std::path::Path, args: Vec<String>) -> ExitCode {
             print!("{stdout}");
             eprint!("{stderr}");
             let _ = io::stdout().flush();
-            ExitCode::from(u8::try_from(code).unwrap_or(1))
+            exit_code(Some(code))
         }
         Ok(BrokerReply::Refused { reason }) => {
             eprintln!("orch: {reason}");
@@ -78,6 +85,45 @@ fn gh(socket: &std::path::Path, args: Vec<String>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn ssh_keygen(socket: &std::path::Path, args: Vec<String>) -> ExitCode {
+    let signs = args.windows(2).any(|pair| pair == ["-Y", "sign"]);
+    let buffer = args.last().filter(|_| signs).map(PathBuf::from);
+    let Some(buffer) = buffer else {
+        return match Command::new("ssh-keygen").args(&args).status() {
+            Ok(status) => exit_code(status.code()),
+            Err(err) => {
+                eprintln!("orch: running ssh-keygen: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    };
+    let reply = std::fs::read(&buffer)
+        .and_then(|payload| request_broker(socket, BrokerRequest::Sign { payload }));
+    let written = match reply {
+        Ok(BrokerReply::Signed { signature }) => {
+            let mut sig = buffer.into_os_string();
+            sig.push(".sig");
+            std::fs::write(sig, signature)
+        }
+        Ok(BrokerReply::Refused { reason }) => Err(io::Error::other(reason)),
+        Ok(other) => Err(io::Error::other(format!(
+            "the Broker answered out of turn: {other:?}"
+        ))),
+        Err(err) => Err(err),
+    };
+    match written {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("orch: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn exit_code(code: Option<i32>) -> ExitCode {
+    ExitCode::from(code.and_then(|code| u8::try_from(code).ok()).unwrap_or(1))
 }
 
 fn inline_body_file(args: Vec<String>) -> io::Result<Vec<String>> {

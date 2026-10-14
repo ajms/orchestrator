@@ -587,3 +587,117 @@ async fn an_ask_session_prompts_before_an_issue_change_and_once_for_the_session(
     assert_eq!(shell(&mut pane, "gh issue close 8").await, "exit 0");
     assert_eq!(gh_calls(&env).len(), 2);
 }
+
+fn signing_key(env: &Env) -> (PathBuf, String) {
+    let key = env.path("keys/orch");
+    std::fs::create_dir_all(key.parent().unwrap()).unwrap();
+    let made = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-C", "orch", "-f"])
+        .arg(&key)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let public = std::fs::read_to_string(key.with_extension("pub")).unwrap();
+    (key, public.trim().into())
+}
+
+fn with_signing_key(env: &Env, key: &std::path::Path) {
+    env.write_config(&format!(
+        "[signing]\nkey = {:?}\n",
+        key.display().to_string()
+    ));
+}
+
+fn last_commit(worktree: &std::path::Path, format: &str) -> String {
+    git(worktree, &["log", "-1", &format!("--format={format}")])
+}
+
+async fn signing_daemon(env: &Env) -> Daemon {
+    let global = env.path("user/gitconfig");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, "[commit]\n\tgpgsign = true\n").unwrap();
+    let mut daemon_command = env.daemon_command(std::time::Duration::from_secs(600));
+    daemon_command.env("GIT_CONFIG_GLOBAL", &global);
+    env.spawn_daemon(&mut daemon_command).await
+}
+
+#[tokio::test]
+async fn without_a_signing_key_a_sandboxed_commit_goes_through_unsigned_as_the_agent() {
+    let Pushing { env, .. } = pushing();
+    let _daemon = signing_daemon(&env).await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+
+    let made = shell(&mut pane, "git commit -q --allow-empty -m work").await;
+    assert_eq!(made, "exit 0");
+    assert_eq!(
+        last_commit(&view.worktree, "%an|%cn|%ce|%G?"),
+        "Test (orch)|Test (orch)|test@example.com|N"
+    );
+}
+
+#[tokio::test]
+async fn with_a_signing_key_the_broker_signs_a_sandboxed_commit() {
+    let Pushing { env, .. } = pushing();
+    let (key, public) = signing_key(&env);
+    with_signing_key(&env, &key);
+    let _daemon = signing_daemon(&env).await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+
+    let made = shell(&mut pane, "git commit -q --allow-empty -m work").await;
+    assert_eq!(made, "exit 0");
+    let signers = env.path("keys/signers");
+    std::fs::write(&signers, format!("test@example.com {public}\n")).unwrap();
+    let signers = format!("gpg.ssh.allowedSignersFile={}", signers.display());
+    git(&view.worktree, &["-c", &signers, "verify-commit", "HEAD"]);
+    assert_eq!(last_commit(&view.worktree, "%cn"), "Test (orch)");
+}
+
+#[tokio::test]
+async fn the_broker_signs_a_commit_whose_message_is_not_utf8() {
+    let Pushing { env, .. } = pushing();
+    let (key, public) = signing_key(&env);
+    with_signing_key(&env, &key);
+    let _daemon = signing_daemon(&env).await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+
+    let latin1 = r"printf 'caf\351\n' > ../msg && git -c i18n.commitEncoding=latin1 commit -q --allow-empty -F ../msg";
+    assert_eq!(shell(&mut pane, latin1).await, "exit 0");
+    let signers = env.path("keys/signers");
+    std::fs::write(&signers, format!("test@example.com {public}\n")).unwrap();
+    let signers = format!("gpg.ssh.allowedSignersFile={}", signers.display());
+    git(&view.worktree, &["-c", &signers, "verify-commit", "HEAD"]);
+}
+
+#[tokio::test]
+async fn the_broker_refuses_to_sign_a_commit_by_another_committer() {
+    let Pushing { env, .. } = pushing();
+    let (key, _) = signing_key(&env);
+    with_signing_key(&env, &key);
+    let _daemon = signing_daemon(&env).await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let before = last_commit(&view.worktree, "%H");
+
+    let forged = "GIT_COMMITTER_NAME=Test git commit -q --allow-empty -m forged";
+    assert_ne!(shell(&mut pane, forged).await, "exit 0");
+    client
+        .until_notice(&id, "Broker refused: the Broker signs only commits")
+        .await;
+    assert_eq!(last_commit(&view.worktree, "%H"), before);
+}
+
+#[tokio::test]
+async fn an_unsandboxed_agent_commits_as_the_user() {
+    let Pushing { env, .. } = pushing();
+    env.write_config(OPEN_PRESET);
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "open").await;
+
+    let made = shell(&mut pane, "git commit -q --allow-empty -m work").await;
+    assert_eq!(made, "exit 0");
+    assert_eq!(last_commit(&view.worktree, "%cn|%G?"), "Test|N");
+}
