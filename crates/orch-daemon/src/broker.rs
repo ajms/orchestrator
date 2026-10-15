@@ -10,7 +10,7 @@ use orch_store::SessionRecord;
 use tokio::sync::oneshot;
 
 use crate::broker_gh::{Change, GitHubRepo, Limits, gh_call, not_this_sessions_pr};
-use crate::broker_sign::{IDENTITY_FILE, Identity, sign};
+use crate::broker_sign::{IDENTITY_FILE, Identity, Origin, sign};
 use crate::lifecycle::{select_preset, with_git};
 use crate::pr::{gh_brokered, open_pr_of, pr_number};
 use crate::state::{Daemon, PendingGuard};
@@ -102,7 +102,7 @@ fn change_asks(mode: Option<PermissionMode>) -> bool {
 pub(crate) fn install_shims(
     dir: &Path,
     orch: &Path,
-    origin: Option<&str>,
+    origin: &Origin,
     identity: Option<&Identity>,
     signing_with: Option<&str>,
 ) -> Result<EnvVars, String> {
@@ -124,10 +124,14 @@ pub(crate) fn install_shims(
         Ok(path) if !path.is_empty() => format!("{}:{path}", dir.display()),
         _ => dir.display().to_string(),
     };
-    let mut config: Vec<(String, String)> = vec![match origin {
-        Some(url) => (format!("url.{PUSH_URL}.pushInsteadOf"), url.to_string()),
-        None => ("remote.origin.pushurl".into(), PUSH_URL.into()),
-    }];
+    let mut config: Vec<(String, String)> = match (&origin.push_urls[..], &origin.url) {
+        ([], Some(url)) => vec![(format!("url.{PUSH_URL}.pushInsteadOf"), url.clone())],
+        ([], None) => vec![("remote.origin.pushurl".into(), PUSH_URL.into())],
+        (push_urls, _) => push_urls
+            .iter()
+            .map(|url| (format!("url.{PUSH_URL}.insteadOf"), url.clone()))
+            .collect(),
+    };
     let mut env = vec![("PATH".to_string(), path)];
     env.extend(identity.map(identity_env).unwrap_or_default());
     match signing_with.filter(|_| identity.is_some()) {

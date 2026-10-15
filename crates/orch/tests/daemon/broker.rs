@@ -219,6 +219,24 @@ async fn hooks_and_an_ssh_command_planted_in_the_repo_do_not_run_in_the_daemon()
 }
 
 #[tokio::test]
+async fn a_repo_with_its_own_push_url_still_pushes_through_the_broker() {
+    let Pushing { env, remote } = pushing();
+    let push_url = format!("file://{}", remote.display());
+    git(
+        &env.path("repos/app"),
+        &["config", "remote.origin.pushurl", &push_url],
+    );
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    commit(&view.worktree, "feature.rs", "feature\n");
+
+    let push = format!("git push -u origin {}", view.branch);
+    assert_eq!(shell(&mut pane, &push).await, "exit 0");
+    client.until_notice(&id, "Broker: pushed").await;
+}
+
+#[tokio::test]
 async fn a_repo_the_agent_makes_itself_pushes_to_its_own_origin() {
     let Pushing { env, .. } = pushing();
     let _daemon = env.start_daemon().await;
