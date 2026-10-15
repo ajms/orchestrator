@@ -31,6 +31,37 @@ pub(crate) fn user_identity(repo: &Path) -> Result<Option<Identity>, String> {
     Ok(agent_identity(&String::from_utf8_lossy(&output.stdout)))
 }
 
+pub(crate) struct Origin {
+    pub(crate) url: Option<String>,
+    pub(crate) push_urls: Vec<String>,
+}
+
+pub(crate) fn origin(repo: &Path) -> Result<Origin, String> {
+    Ok(Origin {
+        url: origin_config(repo, "remote.origin.url")?.pop(),
+        push_urls: origin_config(repo, "remote.origin.pushurl")?,
+    })
+}
+
+fn origin_config(repo: &Path, key: &str) -> Result<Vec<String>, String> {
+    let mut config = std::process::Command::new("git");
+    for key in ENV_REDIRECTING_GIT {
+        config.env_remove(key);
+    }
+    let output = config
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--get-all", key])
+        .output()
+        .map_err(|err| format!("running git config: {err}"))?;
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(String::from)
+        .collect())
+}
+
 pub(crate) fn public_key(key: &Path) -> Result<String, String> {
     let mut public = key.as_os_str().to_owned();
     public.push(".pub");

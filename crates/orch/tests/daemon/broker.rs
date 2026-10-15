@@ -219,6 +219,44 @@ async fn hooks_and_an_ssh_command_planted_in_the_repo_do_not_run_in_the_daemon()
 }
 
 #[tokio::test]
+async fn a_repo_with_its_own_push_url_still_pushes_through_the_broker() {
+    let Pushing { env, remote } = pushing();
+    let push_url = format!("file://{}", remote.display());
+    git(
+        &env.path("repos/app"),
+        &["config", "remote.origin.pushurl", &push_url],
+    );
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    commit(&view.worktree, "feature.rs", "feature\n");
+
+    let push = format!("git push -u origin {}", view.branch);
+    assert_eq!(shell(&mut pane, &push).await, "exit 0");
+    client.until_notice(&id, "Broker: pushed").await;
+}
+
+#[tokio::test]
+async fn a_repo_the_agent_makes_itself_pushes_to_its_own_origin() {
+    let Pushing { env, .. } = pushing();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let scratch = view.worktree.join("scratch");
+
+    let push = format!(
+        "cd {} && git init -q --bare remote.git && git init -q -b main work && cd work \
+         && git remote add origin ../remote.git \
+         && git -c commit.gpgsign=false commit -q --allow-empty -m init \
+         && git push -q origin main",
+        scratch.display()
+    );
+    std::fs::create_dir_all(&scratch).unwrap();
+    assert_eq!(shell(&mut pane, &push).await, "exit 0");
+    assert!(remote_tip(&scratch.join("remote.git"), "main").is_some());
+}
+
+#[tokio::test]
 async fn git_config_the_user_passes_in_the_environment_still_reaches_the_agent() {
     let Pushing { env, .. } = pushing();
     let mut daemon_command = env.daemon_command(std::time::Duration::from_secs(600));

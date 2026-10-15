@@ -10,7 +10,7 @@ use orch_store::SessionRecord;
 use tokio::sync::oneshot;
 
 use crate::broker_gh::{Change, GitHubRepo, Limits, gh_call, not_this_sessions_pr};
-use crate::broker_sign::{IDENTITY_FILE, Identity, sign};
+use crate::broker_sign::{IDENTITY_FILE, Identity, Origin, sign};
 use crate::lifecycle::{select_preset, with_git};
 use crate::pr::{gh_brokered, open_pr_of, pr_number};
 use crate::state::{Daemon, PendingGuard};
@@ -102,6 +102,7 @@ fn change_asks(mode: Option<PermissionMode>) -> bool {
 pub(crate) fn install_shims(
     dir: &Path,
     orch: &Path,
+    origin: &Origin,
     identity: Option<&Identity>,
     signing_with: Option<&str>,
 ) -> Result<EnvVars, String> {
@@ -123,17 +124,27 @@ pub(crate) fn install_shims(
         Ok(path) if !path.is_empty() => format!("{}:{path}", dir.display()),
         _ => dir.display().to_string(),
     };
-    let mut config = vec![("remote.origin.pushurl", PUSH_URL.to_string())];
+    let mut config: Vec<(String, String)> = match (&origin.push_urls[..], &origin.url) {
+        ([], Some(url)) => vec![(format!("url.{PUSH_URL}.pushInsteadOf"), url.clone())],
+        ([], None) => vec![("remote.origin.pushurl".into(), PUSH_URL.into())],
+        (push_urls, _) => push_urls
+            .iter()
+            .map(|url| (format!("url.{PUSH_URL}.insteadOf"), url.clone()))
+            .collect(),
+    };
     let mut env = vec![("PATH".to_string(), path)];
     env.extend(identity.map(identity_env).unwrap_or_default());
     match signing_with.filter(|_| identity.is_some()) {
         Some(public) => config.extend([
-            ("gpg.format", "ssh".into()),
-            ("gpg.ssh.program", dir.join(SIGN_SHIM).display().to_string()),
-            ("user.signingkey", format!("key::{public}")),
-            ("commit.gpgsign", "true".into()),
+            ("gpg.format".into(), "ssh".into()),
+            (
+                "gpg.ssh.program".into(),
+                dir.join(SIGN_SHIM).display().to_string(),
+            ),
+            ("user.signingkey".into(), format!("key::{public}")),
+            ("commit.gpgsign".into(), "true".into()),
         ]),
-        None => config.push(("commit.gpgsign", "false".into())),
+        None => config.push(("commit.gpgsign".into(), "false".into())),
     }
     let next: usize = std::env::var("GIT_CONFIG_COUNT")
         .ok()
@@ -141,7 +152,7 @@ pub(crate) fn install_shims(
         .unwrap_or(0);
     env.push(("GIT_CONFIG_COUNT".into(), (next + config.len()).to_string()));
     for (offset, (key, value)) in config.into_iter().enumerate() {
-        env.push((format!("GIT_CONFIG_KEY_{}", next + offset), key.into()));
+        env.push((format!("GIT_CONFIG_KEY_{}", next + offset), key));
         env.push((format!("GIT_CONFIG_VALUE_{}", next + offset), value));
     }
     Ok(env)

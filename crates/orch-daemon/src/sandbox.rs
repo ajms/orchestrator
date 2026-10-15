@@ -11,7 +11,7 @@ use orch_store::SessionRecord;
 
 use crate::agents::default_adapter;
 use crate::broker::{EnvVars, SHIMS_DIR, install_shims};
-use crate::broker_sign::{IDENTITY_FILE, public_key, user_identity};
+use crate::broker_sign::{IDENTITY_FILE, origin, public_key, user_identity};
 use crate::private_dir;
 use crate::state::Daemon;
 
@@ -68,9 +68,11 @@ impl Daemon {
             }),
         };
         recorded.map_err(|err| format!("recording the Agent identity: {err}"))?;
+        let origin = origin(repo)?;
         let env = install_shims(
             &shims,
             &self.config.orch_program,
+            &origin,
             identity.as_ref(),
             public.as_deref(),
         )?;
