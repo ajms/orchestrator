@@ -490,6 +490,7 @@ impl Daemon {
                 let _ = self.update(id, |live| {
                     live.adapter = launch.adapter;
                     live.preset_sandboxed = launch.sandbox.is_some();
+                    live.record.holder_seq = 0;
                     Ok(())
                 });
                 match sandbox {

@@ -41,6 +41,7 @@ pub struct SessionRecord {
     pub conversations: Vec<ConversationId>,
     pub port_block: Option<PortBlock>,
     pub queued_prompt: Option<String>,
+    pub holder_seq: u64,
     pub created_at: SystemTime,
     pub updated_at: SystemTime,
 }
@@ -58,7 +59,8 @@ impl SessionRecord {
 const COLUMNS: &str = "id, repo_id, slug, branch, base, worktree, phase, preset, last_mode,
     unseen, stalled, needs_rebase, recovered, worktree_missing, base_missing, muted,
     pr_number, pr_checks, pr_review, pr_new_comments, pr_state,
-    port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title";
+    port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title,
+    holder_seq";
 
 fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
     let pr = match row.get::<_, Option<i64>>("pr_number")? {
@@ -102,6 +104,7 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         conversations: Vec::new(),
         port_block: port_block_from(row)?,
         queued_prompt: row.get("queued_prompt")?,
+        holder_seq: row.get::<_, i64>("holder_seq")? as u64,
         created_at: from_millis(row.get("created_at")?),
         updated_at: from_millis(row.get("updated_at")?),
     })
@@ -139,7 +142,7 @@ impl Store {
                 worktree_missing = ?13, base_missing = ?14, muted = ?15, pr_number = ?16,
                 pr_checks = ?17, pr_review = ?18, pr_new_comments = ?19, pr_state = ?20,
                 updated_at = ?21, agent_state = ?22, guards_enabled = ?23, queued_prompt = ?24,
-                title = ?25
+                title = ?25, holder_seq = ?26
              WHERE id = ?1",
             params![
                 session.id.as_str(),
@@ -167,6 +170,7 @@ impl Store {
                 session.guards_enabled,
                 session.queued_prompt,
                 session.title,
+                session.holder_seq as i64,
             ],
         )?;
         if changed == 0 {

@@ -155,6 +155,9 @@ INSERT INTO usage_daily
     FROM usage_daily_with_agents WHERE agent = 'claude';
 DROP TABLE usage_daily_with_agents;
 ",
+    "
+ALTER TABLE sessions ADD COLUMN holder_seq INTEGER NOT NULL DEFAULT 0;
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {

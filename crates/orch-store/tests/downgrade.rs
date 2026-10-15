@@ -26,6 +26,7 @@ fn reshape_as_left_by_the_antigravity_release(fx: &Fixture, antigravity_session:
     let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
     conn.execute_batch(&format!(
         "
+ALTER TABLE sessions DROP COLUMN holder_seq;
 ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude';
 UPDATE sessions SET agent = 'antigravity' WHERE id = '{antigravity_session}';
 ALTER TABLE usage RENAME TO usage_old;
