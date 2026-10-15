@@ -716,9 +716,9 @@ impl State {
         self.notifier.dismiss(id.clone());
     }
 
-    fn forward_attention(&mut self, id: &SessionId) {
+    fn raised_attention(&mut self, id: &SessionId) -> Vec<(AttentionEvent, PathBuf, bool)> {
         let Some(live) = self.sessions.get_mut(id) else {
-            return;
+            return Vec::new();
         };
         let raised = live.status.take_attention();
         let ended = live.status.phase().is_terminal() && !live.end_noticed;
@@ -731,22 +731,24 @@ impl State {
             .repo
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        for attention in raised {
-            let event = AttentionEvent {
-                session: id.clone(),
-                title: live
-                    .record
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| live.record.slug.clone()),
-                repo: repo_name.clone(),
-                branch: live.record.branch.clone(),
-                attention,
-                at: now,
-            };
-            self.notifier
-                .attention(event, live.repo.clone(), live.status.flags().muted);
-        }
+        raised
+            .into_iter()
+            .map(|attention| {
+                let event = AttentionEvent {
+                    session: id.clone(),
+                    title: live
+                        .record
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| live.record.slug.clone()),
+                    repo: repo_name.clone(),
+                    branch: live.record.branch.clone(),
+                    attention,
+                    at: now,
+                };
+                (event, live.repo.clone(), live.status.flags().muted)
+            })
+            .collect()
     }
 
     fn refresh_watched(&mut self) {
@@ -771,7 +773,11 @@ impl State {
     }
 
     pub(crate) fn changed(&mut self, id: &SessionId) {
-        self.forward_attention(id);
+        let raised = self.raised_attention(id);
+        let gate = (!raised.is_empty()).then(|| self.notifier.save_gate());
+        for (event, repo, muted) in raised {
+            self.notifier.attention(event, repo, muted);
+        }
         let Some(live) = self.sessions.get_mut(id) else {
             return;
         };
@@ -780,6 +786,9 @@ impl State {
         self.store.write(move |store| {
             if let Err(err) = store.save_session(&record) {
                 eprintln!("orch daemon: saving Session {}: {err}", record.id.as_str());
+            }
+            if let Some(gate) = gate {
+                gate.open();
             }
         });
         let view = Box::new(live.view());

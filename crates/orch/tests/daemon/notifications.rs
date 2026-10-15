@@ -352,3 +352,101 @@ async fn a_restarted_daemon_and_reconciliation_do_not_replay_old_attention() {
         client.rings
     );
 }
+
+async fn hold_replaying(
+    socket: std::path::PathBuf,
+    session: SessionId,
+    holder_pid: u32,
+    events: Vec<(u64, String)>,
+) {
+    use orch_holder::{
+        AgentStatus, FromHolder, Hello, HolderEvent, PROTOCOL_VERSION, ToHolder, read_frame_async,
+        write_frame_async,
+    };
+    let _ = std::fs::remove_file(&socket);
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let (session, events) = (session.clone(), events.clone());
+            tokio::spawn(async move {
+                let (mut reader, mut writer) = stream.into_split();
+                while let Ok(Some(message)) = read_frame_async::<ToHolder>(&mut reader).await {
+                    if !matches!(message, ToHolder::Attach { .. }) {
+                        continue;
+                    }
+                    let hello = Hello {
+                        version: PROTOCOL_VERSION,
+                        session: session.clone(),
+                        cwd: None,
+                        base: None,
+                        port_block: None,
+                        holder_pid,
+                        agent_pid: None,
+                        agent: AgentStatus::Running,
+                        sandboxed: false,
+                    };
+                    let _ = write_frame_async(&mut writer, &FromHolder::Hello(hello)).await;
+                    for (seq, payload) in &events {
+                        let event = HolderEvent::Hook {
+                            payload: payload.clone(),
+                            guard: None,
+                        };
+                        let event = FromHolder::Event { seq: *seq, event };
+                        let _ = write_frame_async(&mut writer, &event).await;
+                    }
+                }
+            });
+        }
+    });
+}
+
+#[tokio::test]
+async fn a_restarted_daemon_skips_the_holder_events_it_already_applied() {
+    let env = Env::new();
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = idle_session(&env, &mut client, "Replayed").await;
+    needs_input(&mut client, &id, &mut pane).await;
+    env.until_notified("the call", |log| !about(log, &id).is_empty())
+        .await;
+    let holder = client.holder_pid(&id).unwrap();
+    daemon.kill();
+    kill(holder, "-KILL");
+    wait_until("the Holder is gone", || process_gone(holder)).await;
+
+    let mut stand_in = std::process::Command::new("sleep")
+        .arg("60")
+        .spawn()
+        .unwrap();
+    let applied = vec![
+        (1, hook("Stop", "")),
+        (2, hook("PermissionRequest", r#""tool_name":"Bash""#)),
+    ];
+    let unseen = (1000, hook("StopFailure", r#""error":"server_error""#));
+    hold_replaying(
+        env.holder_socket(&id),
+        id.clone(),
+        stand_in.id(),
+        [applied, vec![unseen]].concat(),
+    )
+    .await;
+    let _daemon = env.start_daemon().await;
+
+    let log = env
+        .until_notified("the unseen event", |log| {
+            about(log, &id).iter().any(|entry| says(entry, "Errored"))
+        })
+        .await;
+    let _ = stand_in.kill();
+    let _ = stand_in.wait();
+    let calls: Vec<_> = about(&log, &id)
+        .iter()
+        .map(|entry| entry["body"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls[0].starts_with("Needs input"));
+    assert!(calls[1].starts_with("Errored"));
+}

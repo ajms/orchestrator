@@ -101,6 +101,22 @@ fn a_queued_prompt_for_the_agent_persists_until_cleared() {
 }
 
 #[test]
+fn the_last_applied_holder_seq_outlives_a_reopen() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut session = fx.session(&repo, "remembered");
+    assert_eq!(session.holder_seq, 0);
+
+    session.holder_seq = 42;
+    fx.store.save_session(&session).unwrap();
+    fx.reopen();
+    assert_eq!(
+        fx.store.session(&session.id).unwrap().unwrap().holder_seq,
+        42
+    );
+}
+
+#[test]
 fn a_session_title_outlives_a_reopen_and_can_be_cleared() {
     let mut fx = Fixture::new();
     let repo = fx.register("proj");

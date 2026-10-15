@@ -31,11 +31,20 @@ enum Notice {
         muted: bool,
     },
     Dismiss(SessionId),
+    SaveGate(mpsc::Receiver<()>),
     ClientView {
         view: ClientView,
         outbox: Arc<Outbox>,
     },
     ClientGone(ClientId),
+}
+
+pub(crate) struct SaveGate(mpsc::SyncSender<()>);
+
+impl SaveGate {
+    pub(crate) fn open(self) {
+        let _ = self.0.send(());
+    }
 }
 
 pub(crate) struct Notifier {
@@ -75,6 +84,12 @@ impl Notifier {
 
     pub(crate) fn dismiss(&self, session: SessionId) {
         self.send(Notice::Dismiss(session));
+    }
+
+    pub(crate) fn save_gate(&self) -> SaveGate {
+        let (gate, waiting) = mpsc::sync_channel(1);
+        self.send(Notice::SaveGate(waiting));
+        SaveGate(gate)
     }
 
     pub(crate) fn client_view(&self, view: ClientView, outbox: Arc<Outbox>) {
@@ -128,6 +143,10 @@ impl Delivery {
             let desktop = match notice {
                 Notice::Attention { event, repo, muted } => self.attention(event, &repo, muted),
                 Notice::Dismiss(session) => self.policy.dismiss(&session),
+                Notice::SaveGate(waiting) => {
+                    let _ = waiting.recv();
+                    Vec::new()
+                }
                 Notice::ClientView { view, outbox } => {
                     self.client_views.insert(view.id, (view, outbox));
                     Vec::new()
@@ -281,5 +300,56 @@ fn watch_clicks(path: &Path, sink: &Weak<Recorded>, on_click: impl Fn(SessionId)
             }
             line.clear();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shown_and_closed(log: &Path) -> Vec<String> {
+        std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .map(|entry| entry["action"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    fn until_logged(log: &Path, count: usize) -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let actions = shown_and_closed(log);
+            if actions.len() >= count || Instant::now() > deadline {
+                return actions;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn notices_behind_a_save_gate_wait_for_it_to_open_and_keep_their_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("notify.log");
+        let loader = ConfigLoader::new(dir.path().join("config.toml"));
+        let notifier = Notifier::spawn(NotificationTarget::Log(log.clone()), loader, |_| {});
+        let session = SessionId::parse("gated").unwrap();
+
+        let gate = notifier.save_gate();
+        let event = AttentionEvent {
+            session: session.clone(),
+            title: "Gated".into(),
+            repo: "app".into(),
+            branch: "orch/gated".into(),
+            attention: orch_core::Attention::NeedsInput,
+            at: Instant::now(),
+        };
+        notifier.attention(event, dir.path().to_path_buf(), false);
+        notifier.dismiss(session);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(shown_and_closed(&log), Vec::<String>::new());
+
+        gate.open();
+        assert_eq!(until_logged(&log, 2), ["show", "close"]);
     }
 }

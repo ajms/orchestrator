@@ -48,7 +48,7 @@ impl Daemon {
         let (reader, mut writer) = client.into_split();
         let (outbox, inbox) = mpsc::channel(HOLDER_QUEUE);
         let (closed, closed_watch) = watch::channel(false);
-        let generation = {
+        let attached = {
             let mut state = self.lock();
             match state.sessions.get_mut(id) {
                 Some(live) if !live.status.phase().is_terminal() => {
@@ -82,19 +82,21 @@ impl Daemon {
                     }
                     live.apply_pane_size();
                     live.deliver_prompt();
+                    let applied_seq = live.record.holder_seq;
                     state.changed(id);
-                    Some(generation)
+                    Some((generation, applied_seq))
                 }
                 _ => None,
             }
         };
-        let Some(generation) = generation else {
+        let Some((generation, applied_seq)) = attached else {
             let _ = write_frame_async(&mut writer, &ToHolder::Shutdown).await;
             return Err(io::Error::other("the Session has ended"));
         };
         let last_seq = match how {
             Attach::Reattach { last_seq } => last_seq,
-            _ => 0,
+            Attach::Adopt => applied_seq,
+            Attach::Fresh => 0,
         };
         tokio::spawn(write_loop(writer, inbox));
         tokio::spawn(
@@ -298,13 +300,11 @@ impl Daemon {
                 live.record.conversations.push(conversation.clone());
             }
         }
+        live.record.holder_seq = seq;
         let ack = live.holder_outbox();
-        state.changed(id);
-        for sample in &usage {
-            state.note_rate_limits(sample);
-        }
         let session = id.clone();
         let prompt = self.session_dir(id).join(PROMPT_FILE);
+        let samples = usage.clone();
         self.store.write(move |store| {
             for conversation in conversations {
                 if let Err(err) = store.record_conversation(&session, conversation) {
@@ -317,10 +317,16 @@ impl Daemon {
             if first_conversation {
                 let _ = std::fs::remove_file(prompt);
             }
-            if let Some(ack) = ack {
-                let _ = ack.try_send(ToHolder::Ack { through: seq });
-            }
         });
+        state.changed(id);
+        for sample in &samples {
+            state.note_rate_limits(sample);
+        }
+        if let Some(ack) = ack {
+            self.store.write(move |_| {
+                let _ = ack.try_send(ToHolder::Ack { through: seq });
+            });
+        }
         effects
     }
 

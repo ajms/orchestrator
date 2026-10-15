@@ -63,9 +63,11 @@ mod tests {
 
     use super::*;
 
+    const GIT_CONFIG_INJECTED: [&str; 2] = ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
+
     fn git(dir: &Path, args: &[&str]) {
         let mut command = Command::new("git");
-        for key in ENV_REDIRECTING_GIT {
+        for key in ENV_REDIRECTING_GIT.iter().chain(&GIT_CONFIG_INJECTED) {
             command.env_remove(key);
         }
         let status = command
