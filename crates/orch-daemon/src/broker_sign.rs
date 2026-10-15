@@ -31,6 +31,21 @@ pub(crate) fn user_identity(repo: &Path) -> Result<Option<Identity>, String> {
     Ok(agent_identity(&String::from_utf8_lossy(&output.stdout)))
 }
 
+pub(crate) fn origin_url(repo: &Path) -> Result<Option<String>, String> {
+    let mut config = std::process::Command::new("git");
+    for key in ENV_REDIRECTING_GIT {
+        config.env_remove(key);
+    }
+    let output = config
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--get", "remote.origin.url"])
+        .output()
+        .map_err(|err| format!("running git config: {err}"))?;
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok((!url.is_empty()).then_some(url))
+}
+
 pub(crate) fn public_key(key: &Path) -> Result<String, String> {
     let mut public = key.as_os_str().to_owned();
     public.push(".pub");
