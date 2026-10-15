@@ -6,13 +6,15 @@ use orch_git::ENV_REDIRECTING_GIT;
 use orch_tui::{ReviewTarget, load_review};
 
 static ISOLATE: Once = Once::new();
+const GIT_CONFIG_INJECTED: [&str; 2] = ["GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
+
 fn without_user_git_identity() {
     ISOLATE.call_once(|| {
         // SAFETY: every test here calls this before spawning git, and Once serialises the writes.
         unsafe {
             std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
             std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
-            for key in ENV_REDIRECTING_GIT {
+            for key in ENV_REDIRECTING_GIT.iter().chain(&GIT_CONFIG_INJECTED) {
                 std::env::remove_var(key);
             }
         }
@@ -21,7 +23,7 @@ fn without_user_git_identity() {
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let mut git = Command::new("git");
-    for key in ENV_REDIRECTING_GIT {
+    for key in ENV_REDIRECTING_GIT.iter().chain(&GIT_CONFIG_INJECTED) {
         git.env_remove(key);
     }
     let output = git
