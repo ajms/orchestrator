@@ -69,6 +69,8 @@ pub enum ToHolder {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BrokerRequest {
     Refs,
+    OriginRefs,
+    Fetch { wants: Vec<RemoteRef> },
     Push { updates: Vec<RefUpdate> },
     Gh { args: Vec<String> },
     Sign { payload: Vec<u8> },

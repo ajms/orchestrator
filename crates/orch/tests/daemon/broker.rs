@@ -215,6 +215,7 @@ async fn hooks_and_an_ssh_command_planted_in_the_repo_do_not_run_in_the_daemon()
         remote_tip(&remote, &view.branch),
         Some(git(&view.worktree, &["rev-parse", "HEAD"]))
     );
+    assert_eq!(shell(&mut pane, "git fetch origin").await, "exit 0");
     assert_eq!(std::fs::read_to_string(&ran).ok(), None);
 }
 
@@ -234,6 +235,102 @@ async fn a_repo_with_its_own_push_url_still_pushes_through_the_broker() {
     let push = format!("git push -u origin {}", view.branch);
     assert_eq!(shell(&mut pane, &push).await, "exit 0");
     client.until_notice(&id, "Broker: pushed").await;
+}
+
+fn advance_origin_main(env: &Env, remote: &std::path::Path) -> String {
+    let elsewhere = env.path("elsewhere");
+    git(
+        &env.path("repos"),
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "main",
+            remote.to_str().unwrap(),
+            elsewhere.to_str().unwrap(),
+        ],
+    );
+    commit(&elsewhere, "upstream.rs", "upstream\n");
+    git(&elsewhere, &["push", "-q", "origin", "main"]);
+    git(&elsewhere, &["rev-parse", "HEAD"])
+}
+
+#[tokio::test]
+async fn a_sandboxed_agent_fetches_origin_through_the_broker() {
+    let Pushing { env, remote } = pushing();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let upstream = advance_origin_main(&env, &remote);
+
+    assert_eq!(shell(&mut pane, "git fetch origin").await, "exit 0");
+    assert_eq!(git(&view.worktree, &["rev-parse", "origin/main"]), upstream);
+    client.until_notice(&id, "Broker: fetched origin").await;
+}
+
+#[tokio::test]
+async fn a_sandboxed_agent_fetches_annotated_tags_from_origin() {
+    let Pushing { env, remote } = pushing();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    advance_origin_main(&env, &remote);
+    let elsewhere = env.path("elsewhere");
+    git(&elsewhere, &["tag", "-a", "v1", "-m", "release"]);
+    git(&elsewhere, &["push", "-q", "origin", "v1"]);
+
+    assert_eq!(shell(&mut pane, "git fetch --tags origin").await, "exit 0");
+    assert_eq!(
+        git(&view.worktree, &["rev-parse", "v1^{commit}"]),
+        git(&elsewhere, &["rev-parse", "HEAD"])
+    );
+}
+
+#[tokio::test]
+async fn a_sandboxed_agent_rebases_onto_origin_with_pull() {
+    let Pushing { env, remote } = pushing();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    commit(&view.worktree, "feature.rs", "feature\n");
+    let upstream = advance_origin_main(&env, &remote);
+
+    let pull = "git -c commit.gpgsign=false pull -q --rebase origin main";
+    assert_eq!(shell(&mut pane, pull).await, "exit 0");
+    assert_eq!(git(&view.worktree, &["rev-parse", "HEAD~1"]), upstream);
+    client.until_notice(&id, "Broker: fetched origin").await;
+}
+
+#[tokio::test]
+async fn an_ask_session_fetches_without_a_prompt() {
+    let Pushing { env, remote } = pushing();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "ask").await;
+    let upstream = advance_origin_main(&env, &remote);
+
+    assert_eq!(shell(&mut pane, "git fetch origin").await, "exit 0");
+    assert_eq!(git(&view.worktree, &["rev-parse", "origin/main"]), upstream);
+    client.until_notice(&id, "Broker: fetched origin").await;
+    let after = client.until(&id, "the fetch", |_| true).await;
+    assert!(after.guard_prompts.is_empty());
+}
+
+#[tokio::test]
+async fn a_repo_with_its_own_push_url_still_fetches_through_the_broker() {
+    let Pushing { env, remote } = pushing();
+    let push_url = format!("file://{}", remote.display());
+    git(
+        &env.path("repos/app"),
+        &["config", "remote.origin.pushurl", &push_url],
+    );
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _, mut pane) = session(&env, &mut client, "inherit").await;
+    advance_origin_main(&env, &remote);
+
+    assert_eq!(shell(&mut pane, "git fetch origin").await, "exit 0");
+    client.until_notice(&id, "Broker: fetched origin").await;
 }
 
 #[tokio::test]

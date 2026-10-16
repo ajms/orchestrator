@@ -145,6 +145,40 @@ impl Repo {
         }))
     }
 
+    pub fn origin_refs(&self) -> Result<Vec<(String, String)>, Error> {
+        let listing = self.pinned(&["ls-remote", "origin"]).run()?;
+        Ok(listing
+            .lines()
+            .filter_map(|line| {
+                let (commit, name) = line.split_once('\t')?;
+                Some((name.to_string(), commit.to_string()))
+            })
+            .collect())
+    }
+
+    pub fn fetch_brokered(&self, wants: &[(String, String)]) -> Result<Vec<String>, Error> {
+        let fetch = [
+            "fetch",
+            "-q",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--refmap=",
+            "origin",
+        ];
+        self.pinned(&fetch)
+            .args(wants.iter().map(|(name, _)| name))
+            .run()?;
+        Ok(wants
+            .iter()
+            .filter(|(_, commit)| !self.has_object(commit))
+            .map(|(name, _)| name.clone())
+            .collect())
+    }
+
+    fn has_object(&self, commit: &str) -> bool {
+        self.git(["cat-file", "-e", commit]).succeeds()
+    }
+
     pub fn push_brokered(
         &self,
         branch: &str,
