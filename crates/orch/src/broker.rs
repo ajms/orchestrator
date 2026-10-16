@@ -5,7 +5,7 @@ use std::process::{Command, ExitCode};
 
 use clap::Subcommand;
 use orch_holder::{
-    BrokerReply, BrokerRequest, GhOutput, HOLDER_SOCKET_ENV, RefUpdate, request_broker,
+    BrokerReply, BrokerRequest, GhOutput, HOLDER_SOCKET_ENV, RefUpdate, RemoteRef, request_broker,
 };
 
 const ABSENT: &str = "0000000000000000000000000000000000000000";
@@ -165,11 +165,12 @@ fn remote_helper(
 ) -> io::Result<()> {
     let mut leases: HashMap<String, String> = HashMap::new();
     let mut batch: Vec<RefUpdate> = Vec::new();
+    let mut wants: Vec<RemoteRef> = Vec::new();
     for line in input.lines() {
         let line = line?;
         let (command, rest) = line.split_once(' ').unwrap_or((&line, ""));
         match command {
-            "capabilities" => write!(out, "option\npush\n\n")?,
+            "capabilities" => write!(out, "option\nfetch\npush\n\n")?,
             "option" => {
                 let reply = match rest.split_once(' ') {
                     Some(("cas", lease)) => {
@@ -184,7 +185,11 @@ fn remote_helper(
                 writeln!(out, "{reply}")?;
             }
             "list" => {
-                let refs = match ask(BrokerRequest::Refs)? {
+                let listing = match rest {
+                    "for-push" => BrokerRequest::Refs,
+                    _ => BrokerRequest::OriginRefs,
+                };
+                let refs = match ask(listing)? {
                     BrokerReply::Refs { refs } => refs,
                     BrokerReply::Refused { reason } => return Err(io::Error::other(reason)),
                     other => return Err(io::Error::other(format!("{other:?}"))),
@@ -195,6 +200,22 @@ fn remote_helper(
                 writeln!(out)?;
             }
             "push" => batch.push(ref_update(rest, &leases)),
+            "fetch" => {
+                let (commit, name) = rest.split_once(' ').unwrap_or((rest, ""));
+                wants.push(RemoteRef {
+                    name: name.into(),
+                    commit: commit.into(),
+                });
+            }
+            "" if !wants.is_empty() => {
+                match ask(BrokerRequest::Fetch {
+                    wants: std::mem::take(&mut wants),
+                })? {
+                    BrokerReply::Done { .. } => writeln!(out)?,
+                    BrokerReply::Refused { reason } => return Err(io::Error::other(reason)),
+                    other => return Err(io::Error::other(format!("{other:?}"))),
+                }
+            }
             "" if !batch.is_empty() => {
                 let updates = std::mem::take(&mut batch);
                 let dsts: Vec<String> = updates.iter().map(|update| update.dst.clone()).collect();

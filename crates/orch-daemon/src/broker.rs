@@ -21,7 +21,7 @@ pub(crate) const SHIMS_DIR: &str = "shims";
 const REMOTE_HELPER: &str = "git-remote-orch";
 const GH_SHIM: &str = "gh";
 const SIGN_SHIM: &str = "orch-ssh-keygen";
-const PUSH_URL: &str = "orch::origin";
+const HELPER_URL: &str = "orch::origin";
 const DENIED: &str = "the user denied this in the Orchestrator";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -95,6 +95,24 @@ fn allowed_update(update: &RefUpdate, branch: &str, base: &str) -> Result<Allowe
     })
 }
 
+pub(crate) fn allowed_fetch(wants: &[RemoteRef]) -> Result<Vec<(String, String)>, String> {
+    wants
+        .iter()
+        .map(|want| {
+            let name = want.name.as_str();
+            let named = name == "HEAD"
+                || (name.starts_with("refs/")
+                    && !name.contains(':')
+                    && !name.chars().any(char::is_whitespace));
+            match (named, is_object_id(&want.commit)) {
+                (false, _) => Err(format!("the Broker fetches only refs, not {name}")),
+                (_, false) => Err(format!("{} is not a full object id", want.commit)),
+                _ => Ok((want.name.clone(), want.commit.clone())),
+            }
+        })
+        .collect()
+}
+
 fn change_asks(mode: Option<PermissionMode>) -> bool {
     matches!(mode, Some(PermissionMode::Plan | PermissionMode::Default))
 }
@@ -125,11 +143,11 @@ pub(crate) fn install_shims(
         _ => dir.display().to_string(),
     };
     let mut config: Vec<(String, String)> = match (&origin.push_urls[..], &origin.url) {
-        ([], Some(url)) => vec![(format!("url.{PUSH_URL}.pushInsteadOf"), url.clone())],
-        ([], None) => vec![("remote.origin.pushurl".into(), PUSH_URL.into())],
-        (push_urls, _) => push_urls
+        ([], None) => vec![("remote.origin.pushurl".into(), HELPER_URL.into())],
+        (push_urls, url) => url
             .iter()
-            .map(|url| (format!("url.{PUSH_URL}.insteadOf"), url.clone()))
+            .chain(push_urls)
+            .map(|url| (format!("url.{HELPER_URL}.insteadOf"), url.clone()))
             .collect(),
     };
     let mut env = vec![("PATH".to_string(), path)];
@@ -242,6 +260,38 @@ impl Daemon {
                 Ok(BrokerReply::Refs {
                     refs: refs.into_iter().collect(),
                 })
+            }
+            BrokerRequest::OriginRefs => {
+                let listed = with_git(repo, |git| git.origin_refs())
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .map_err(|err| format!("listing origin failed: {err}"))?;
+                let refs = listed
+                    .into_iter()
+                    .map(|(name, commit)| RemoteRef { name, commit })
+                    .collect();
+                Ok(BrokerReply::Refs { refs })
+            }
+            BrokerRequest::Fetch { wants } => {
+                let wants = allowed_fetch(&wants)?;
+                let missing = with_git(repo, move |git| git.fetch_brokered(&wants))
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .map_err(|err| match err {
+                        orch_git::Error::Git { stderr, .. } => {
+                            format!("fetching failed: {}", stderr.trim())
+                        }
+                        other => format!("fetching failed: {other}"),
+                    })?;
+                match missing.is_empty() {
+                    true => Ok(BrokerReply::Done {
+                        said: "fetched origin".into(),
+                    }),
+                    false => Err(format!(
+                        "origin moved while fetching {}; fetch again",
+                        missing.join(", ")
+                    )),
+                }
             }
             BrokerRequest::Push { updates } => {
                 let push = allowed_push(&updates, &record.branch, &record.base)?;
@@ -484,6 +534,28 @@ mod tests {
         leased.force = true;
         leased.lease = Some(COMMIT.into());
         assert!(check(&[leased]).is_ok());
+    }
+
+    #[test]
+    fn a_fetch_wants_refs_by_full_object_id() {
+        let want = |name: &str, commit: &str| RemoteRef {
+            name: name.into(),
+            commit: commit.into(),
+        };
+        let fetched = allowed_fetch(&[want("HEAD", COMMIT), want("refs/tags/v1", COMMIT)]);
+        assert_eq!(fetched.map(|wants| wants.len()), Ok(2));
+        for forged in [
+            want("--upload-pack=evil", COMMIT),
+            want("refs/heads/a:refs/heads/b", COMMIT),
+            want("refs/heads/a b", COMMIT),
+            want("main", COMMIT),
+            want("refs/heads/main", "c0ffee"),
+        ] {
+            assert!(
+                allowed_fetch(std::slice::from_ref(&forged)).is_err(),
+                "{forged:?} went through"
+            );
+        }
     }
 
     #[test]
