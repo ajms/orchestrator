@@ -319,7 +319,7 @@ impl App {
                 self.sessions.replace(sessions);
                 self.request(Request::Repos, Pending::Repos);
             }
-            FromDaemon::SessionChanged { session } => self.sessions.upsert(*session),
+            FromDaemon::SessionChanged { session } => self.session_changed(*session),
             FromDaemon::SessionRemoved { session } => self.remove_session(&session),
             FromDaemon::Reconciled { report } => self.reconciled(*report, false),
             FromDaemon::Ring {
@@ -537,8 +537,8 @@ impl App {
             }
             FromDaemon::PaneClosed { reason } => {
                 mirror.closed = Some(reason);
-                if matches!(self.mode, Mode::Insert | Mode::Visual(_)) {
-                    self.mode = Mode::Normal;
+                if self.shown_shell().is_none() {
+                    self.leave_terminal();
                 }
             }
             _ => {}
@@ -679,13 +679,35 @@ impl App {
         }
     }
 
-    fn remove_session(&mut self, session: &SessionId) {
-        let before = self.sidebar.stops(&self.sessions, &self.preparing);
-        self.sessions.remove(session);
+    fn session_changed(&mut self, view: SessionView) {
+        let ending = matches!(
+            view.phase,
+            PhaseView::Suspended | PhaseView::Landed | PhaseView::Discarded
+        );
+        let was = self.sessions.get(&view.id).map(|old| old.phase);
+        if ending && was.is_some_and(|was| was != view.phase) {
+            if self
+                .shown_shell()
+                .is_some_and(|_| self.selected.as_ref() == Some(&view.id))
+            {
+                self.leave_terminal();
+            }
+            self.close_shell(&view.id);
+        }
+        self.sessions.upsert(view);
+    }
+
+    fn close_shell(&mut self, session: &SessionId) {
         if let Some(shell) = self.shells.remove(session).filter(Shell::running) {
             let pane = shell.mirror.id;
             self.push(Call::Local(Effect::CloseShell { pane }));
         }
+    }
+
+    fn remove_session(&mut self, session: &SessionId) {
+        let before = self.sidebar.stops(&self.sessions, &self.preparing);
+        self.sessions.remove(session);
+        self.close_shell(session);
         self.step_off(Stop::Session(session.clone()), &before);
     }
 

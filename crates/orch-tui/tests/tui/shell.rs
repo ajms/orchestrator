@@ -266,6 +266,55 @@ fn a_removed_session_closes_its_shell() {
 }
 
 #[test]
+fn the_agents_pane_closing_keeps_you_typing_in_the_shell() {
+    let mut tui = two_sessions();
+    let shell = open_sh(&mut tui);
+    tui.pane(
+        "first",
+        FromDaemon::PaneClosed {
+            reason: "Agent exited".into(),
+        },
+    );
+    assert!(statusline(&mut tui).contains("INSERT"));
+    tui.keys("x");
+    assert_eq!(shell_input(&tui.take_effects(), shell), "x");
+}
+
+#[test]
+fn a_session_that_suspends_lands_or_is_discarded_closes_its_shell() {
+    for phase in [
+        PhaseView::Suspended,
+        PhaseView::Landed,
+        PhaseView::Discarded,
+    ] {
+        let mut tui = two_sessions();
+        let shell = open_sh(&mut tui);
+        tui.changed(in_phase(session("webshop", "first"), phase));
+        assert!(
+            tui.take_effects()
+                .contains(&Effect::CloseShell { pane: shell }),
+            "{phase:?}"
+        );
+        assert!(!tui.screen().contains("$ shell prompt"), "{phase:?}");
+        assert!(statusline(&mut tui).contains("NORMAL"), "{phase:?}");
+    }
+}
+
+#[test]
+fn a_shell_opened_on_a_suspended_session_survives_its_updates() {
+    let mut tui = Harness::new();
+    let asleep = in_phase(session("webshop", "first"), PhaseView::Suspended);
+    tui.sessions(vec![asleep.clone()]);
+    let shell = open_sh(&mut tui);
+    tui.changed(asleep);
+    assert!(
+        !tui.take_effects()
+            .contains(&Effect::CloseShell { pane: shell })
+    );
+    assert!(tui.screen().contains("$ shell prompt"));
+}
+
+#[test]
 fn the_wheel_scrolls_the_shell() {
     let mut tui = two_sessions();
     let shell = open_sh(&mut tui);
