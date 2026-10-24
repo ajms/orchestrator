@@ -20,6 +20,7 @@ mod review;
 mod review_mouse;
 mod scroll;
 mod selection;
+mod shell;
 mod sidebar;
 mod sidebar_mouse;
 mod socket_link;

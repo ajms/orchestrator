@@ -4,7 +4,7 @@ use std::process::ExitStatus;
 
 use crossterm::event::Event as TermEvent;
 use orch_core::SessionId;
-use orch_protocol::FromDaemon;
+use orch_protocol::{FromDaemon, Size};
 
 use crate::review::FileDiff;
 
@@ -19,6 +19,10 @@ pub enum Event {
         message: FromDaemon,
     },
     Terminal(TermEvent),
+    Shell {
+        pane: PaneId,
+        event: ShellEvent,
+    },
     EditorClosed(Result<String, EditorError>),
     Review {
         session: SessionId,
@@ -33,6 +37,12 @@ pub enum Event {
     },
     Notice(String),
     Tick,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellEvent {
+    Output(Vec<u8>),
+    Exited(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,9 +113,22 @@ pub enum Effect {
         cwd: PathBuf,
         env: Vec<(String, String)>,
     },
-    RunShell {
+    OpenShell {
+        pane: PaneId,
         command: Option<String>,
         cwd: PathBuf,
+        size: Size,
+    },
+    ShellInput {
+        pane: PaneId,
+        bytes: Vec<u8>,
+    },
+    ResizeShell {
+        pane: PaneId,
+        size: Size,
+    },
+    CloseShell {
+        pane: PaneId,
     },
     OpenUrl {
         url: String,

@@ -2,12 +2,13 @@ use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use vt100::MouseProtocolMode;
 
-use crate::app::{App, Call, Focus, Mode};
+use crate::app::{App, Focus, Mode};
 use crate::hyperlinks::{Hyperlink, HyperlinkTarget, hyperlink_at};
 use crate::layout::Columns;
 use crate::passthrough;
 use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::sessions::agent_running;
+use crate::shells::shown_mirror;
 use crate::sidebar::Stop;
 
 const WHEEL_LINES: isize = 3;
@@ -96,7 +97,7 @@ fn pane(app: &mut App, event: MouseEvent) {
     match requested {
         Some((mode, encoding)) => {
             if let Some(bytes) = passthrough::encode(event, point, mode, encoding) {
-                app.push(Call::Report(bytes));
+                app.send_report(bytes);
             }
         }
         None => {
@@ -122,7 +123,9 @@ fn pane_selection(app: &mut App, event: MouseEvent, point: PanePoint) {
     if app.shown_pane().is_none() {
         return;
     }
-    let (Some(pane), selector) = (app.pane.as_mut(), &mut app.pane_selection) else {
+    let selected = app.selected.as_ref();
+    let pane = shown_mirror(&mut app.pane, &mut app.shells, selected);
+    let (Some(pane), selector) = (pane, &mut app.pane_selection) else {
         return;
     };
     match event.kind {
@@ -166,7 +169,7 @@ pub(crate) fn tick(app: &mut App) {
         && let Some(review) = app.review.as_mut()
     {
         review.tick(body);
-    } else if let Some(pane) = app.pane.as_mut() {
+    } else if let Some(pane) = shown_mirror(&mut app.pane, &mut app.shells, app.selected.as_ref()) {
         app.pane_selection.tick(pane);
     }
 }
@@ -203,7 +206,7 @@ fn pane_links(app: &mut App, event: MouseEvent, point: PanePoint) -> bool {
 
 fn link_under(app: &mut App, point: PanePoint) -> Option<Hyperlink> {
     let worktree = app.selected_view()?.worktree.clone();
-    let pane = app.pane.as_mut()?;
+    let pane = app.shown_pane_mut()?;
     let line = pane.line_of(point.row);
     hyperlink_at(pane, (line, point.col), &worktree)
 }

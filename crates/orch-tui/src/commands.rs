@@ -1,6 +1,6 @@
 use orch_protocol::Request;
 
-use crate::app::{App, Call, NO_SESSION};
+use crate::app::{App, Call};
 use crate::event::{Effect, ReviewPurpose};
 
 struct Command {
@@ -79,7 +79,7 @@ const COMMANDS: &[Command] = &[
     },
     Command {
         names: &["sh", "shell"],
-        run: |app, _| run_shell(app, None),
+        run: |app, _| app.toggle_shell(),
     },
 ];
 
@@ -130,16 +130,6 @@ fn mute(app: &mut App, _: &str) {
 fn bang(app: &mut App, command: &str) {
     match command.is_empty() {
         true => app.message = Some("usage: :!<command>".into()),
-        false => run_shell(app, Some(command.to_string())),
-    }
-}
-
-fn run_shell(app: &mut App, command: Option<String>) {
-    match app.selected_view() {
-        Some(view) => {
-            let cwd = view.worktree.clone();
-            app.push(Call::Local(Effect::RunShell { command, cwd }));
-        }
-        None => app.message = Some(NO_SESSION.into()),
+        false => app.run_in_shell(command.to_string()),
     }
 }
