@@ -42,7 +42,24 @@ pub enum Event {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellEvent {
     Output(Vec<u8>),
-    Exited(String),
+    Exited(ShellExit),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellExit {
+    Code(u32),
+    Signal(String),
+    Failed(String),
+}
+
+impl fmt::Display for ShellExit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Code(code) => write!(f, "exit status: {code}"),
+            Self::Signal(signal) => write!(f, "killed by {signal}"),
+            Self::Failed(err) => write!(f, "failed to start: {err}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

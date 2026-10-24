@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use orch_protocol::PhaseView;
 use orch_term::keys::{encode_key, is_ctrl_backslash};
 
-use crate::app::{App, Call, Focus, Mode, Prefix, Selection};
+use crate::app::{App, Call, Focus, Mode, Prefix, Selection, Shown, TerminalInput};
 use crate::event::{Effect, ReviewPurpose};
 use crate::guard::GuardId;
 use crate::layout::Columns;
@@ -71,19 +71,8 @@ pub(crate) fn paste(app: &mut App, text: String) {
     if app.popup.is_some() {
         return crate::popup::paste(app, &text);
     }
-    if app.mode != Mode::Insert {
-        return;
-    }
-    match app.shown_shell() {
-        Some(shell) => {
-            let bytes = match shell.mirror.input_modes().bracketed_paste {
-                true => format!("\x1b[200~{text}\x1b[201~"),
-                false => text,
-            };
-            app.send_input(bytes.into_bytes());
-        }
-        None if app.pane.is_some() => app.push(Call::Paste(text)),
-        None => {}
+    if app.mode == Mode::Insert {
+        app.send(TerminalInput::Paste(text));
     }
 }
 
@@ -121,7 +110,7 @@ fn send_key(app: &mut App, key: KeyEvent) {
     };
     let bytes = encode_key(key, modes);
     if !bytes.is_empty() {
-        app.send_input(bytes);
+        app.send(TerminalInput::Keys(bytes));
     }
 }
 
@@ -140,9 +129,7 @@ fn normal(app: &mut App, key: KeyEvent) {
             _ => {}
         }
     }
-    if app.shown_shell().is_some_and(|shell| !shell.running())
-        && matches!(key.code, KeyCode::Enter | KeyCode::Esc)
-    {
+    if app.shown() == Shown::FinishedShell && matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
         return app.dismiss_shell();
     }
     let in_pane = app.focus == Focus::Pane;
@@ -181,7 +168,7 @@ fn normal(app: &mut App, key: KeyEvent) {
 }
 
 fn interrupt(app: &mut App, key: KeyEvent) {
-    if app.shown_shell().is_some() {
+    if app.shown() != Shown::Agent {
         return send_key(app, key);
     }
     let live = app
@@ -313,12 +300,13 @@ fn selected_text(
 
 fn enter_insert(app: &mut App) {
     app.leave_subagent();
-    if let Some(shell) = app.shown_shell() {
-        if shell.running() {
+    match app.shown() {
+        Shown::Shell(_) => {
             scroll_to_end(app);
-            app.enter_terminal();
+            return app.enter_terminal();
         }
-        return;
+        Shown::FinishedShell => return,
+        Shown::Agent => {}
     }
     let Some(view) = app.selected_view() else {
         return;

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crossterm::event::{Event as TermEvent, KeyCode, MouseEventKind};
 use orch_protocol::{FromDaemon, PhaseView, Request, Size};
-use orch_tui::{Effect, Event, PaneId, ShellEvent};
+use orch_tui::{Effect, Event, PaneId, ShellEvent, ShellExit};
 
 use crate::common::*;
 
@@ -65,10 +65,10 @@ fn output(tui: &mut Harness, pane: PaneId, text: &str) {
     });
 }
 
-fn exited(tui: &mut Harness, pane: PaneId, status: &str) {
+fn exited(tui: &mut Harness, pane: PaneId, code: u32) {
     tui.send(Event::Shell {
         pane,
-        event: ShellEvent::Exited(status.into()),
+        event: ShellEvent::Exited(ShellExit::Code(code)),
     });
 }
 
@@ -168,7 +168,7 @@ fn i_enters_the_shown_shell_even_without_a_live_agent() {
 fn exiting_the_shell_goes_back_to_the_agent() {
     let mut tui = two_sessions();
     let shell = open_sh(&mut tui);
-    exited(&mut tui, shell, "exit status: 0");
+    exited(&mut tui, shell, 0);
     assert!(tui.screen().contains("agent says hi"));
     assert!(statusline(&mut tui).contains("NORMAL"));
     assert!(
@@ -188,7 +188,7 @@ fn bang_runs_its_command_in_the_pane_and_keeps_the_output_until_enter() {
     assert_eq!(command.as_deref(), Some("cargo test"));
     assert_eq!(cwd, worktree("first"));
     output(&mut tui, shell, "test result: ok");
-    exited(&mut tui, shell, "exit status: 0");
+    exited(&mut tui, shell, 0);
 
     let screen = tui.screen();
     assert!(screen.contains("test result: ok"), "{screen}");
@@ -204,7 +204,7 @@ fn esc_also_dismisses_a_finished_command() {
     let mut tui = two_sessions();
     tui.command("!true");
     let (shell, ..) = opened_shell(&mut tui);
-    exited(&mut tui, shell, "exit status: 0");
+    exited(&mut tui, shell, 0);
     tui.press(KeyCode::Esc);
     assert!(tui.screen().contains("agent says hi"));
 }
@@ -298,6 +298,48 @@ fn a_session_that_suspends_lands_or_is_discarded_closes_its_shell() {
         assert!(!tui.screen().contains("$ shell prompt"), "{phase:?}");
         assert!(statusline(&mut tui).contains("NORMAL"), "{phase:?}");
     }
+}
+
+#[test]
+fn a_full_session_list_closes_the_shell_of_a_session_that_suspended() {
+    let mut tui = two_sessions();
+    let shell = open_sh(&mut tui);
+    tui.sessions(vec![
+        in_phase(session("webshop", "first"), PhaseView::Suspended),
+        session("webshop", "second"),
+    ]);
+    assert!(
+        tui.take_effects()
+            .contains(&Effect::CloseShell { pane: shell })
+    );
+    assert!(!tui.screen().contains("$ shell prompt"));
+    assert!(statusline(&mut tui).contains("NORMAL"));
+}
+
+#[test]
+fn a_full_session_list_closes_the_shell_of_a_session_that_is_gone() {
+    let mut tui = two_sessions();
+    let shell = open_sh(&mut tui);
+    tui.sessions(vec![session("webshop", "second")]);
+    assert!(
+        tui.take_effects()
+            .contains(&Effect::CloseShell { pane: shell })
+    );
+}
+
+#[test]
+fn a_full_session_list_keeps_the_shells_of_unchanged_sessions() {
+    let mut tui = two_sessions();
+    let shell = open_sh(&mut tui);
+    tui.sessions(vec![
+        session("webshop", "first"),
+        session("webshop", "second"),
+    ]);
+    assert!(
+        !tui.take_effects()
+            .contains(&Effect::CloseShell { pane: shell })
+    );
+    assert!(tui.screen().contains("$ shell prompt"));
 }
 
 #[test]

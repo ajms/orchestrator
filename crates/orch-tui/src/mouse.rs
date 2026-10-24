@@ -2,7 +2,7 @@ use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use vt100::MouseProtocolMode;
 
-use crate::app::{App, Focus, Mode};
+use crate::app::{App, Focus, Mode, TerminalInput};
 use crate::hyperlinks::{Hyperlink, HyperlinkTarget, hyperlink_at};
 use crate::layout::Columns;
 use crate::passthrough;
@@ -97,7 +97,7 @@ fn pane(app: &mut App, event: MouseEvent) {
     match requested {
         Some((mode, encoding)) => {
             if let Some(bytes) = passthrough::encode(event, point, mode, encoding) {
-                app.send_report(bytes);
+                app.send(TerminalInput::Report(bytes));
             }
         }
         None => {
@@ -123,8 +123,9 @@ fn pane_selection(app: &mut App, event: MouseEvent, point: PanePoint) {
     if app.shown_pane().is_none() {
         return;
     }
+    let on_subagent = app.on_subagent();
     let selected = app.selected.as_ref();
-    let pane = shown_mirror(&mut app.pane, &mut app.shells, selected);
+    let pane = shown_mirror(&mut app.pane, &mut app.shells, selected, on_subagent);
     let (Some(pane), selector) = (pane, &mut app.pane_selection) else {
         return;
     };
@@ -165,11 +166,17 @@ pub(crate) fn tick(app: &mut App) {
         return;
     }
     let body = Columns::of(app.areas().main()).diff_body();
+    let on_subagent = app.on_subagent();
     if app.gesture == Some(Region::Review)
         && let Some(review) = app.review.as_mut()
     {
         review.tick(body);
-    } else if let Some(pane) = shown_mirror(&mut app.pane, &mut app.shells, app.selected.as_ref()) {
+    } else if let Some(pane) = shown_mirror(
+        &mut app.pane,
+        &mut app.shells,
+        app.selected.as_ref(),
+        on_subagent,
+    ) {
         app.pane_selection.tick(pane);
     }
 }

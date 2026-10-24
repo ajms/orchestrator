@@ -9,7 +9,7 @@ use portable_pty::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::event::{Event, PaneId, ShellEvent};
+use crate::event::{Event, PaneId, ShellEvent, ShellExit};
 
 struct Pty {
     master: Box<dyn MasterPty + Send>,
@@ -59,11 +59,11 @@ impl ShellPtys {
                     break;
                 }
             }
-            let status = match child.wait() {
-                Ok(status) => describe(&status),
-                Err(err) => err.to_string(),
+            let exit = match child.wait() {
+                Ok(status) => shell_exit(&status),
+                Err(err) => ShellExit::Failed(err.to_string()),
             };
-            let event = ShellEvent::Exited(status);
+            let event = ShellEvent::Exited(exit);
             let _ = events.send(Event::Shell { pane, event });
         });
         let pty = Pty {
@@ -105,10 +105,10 @@ impl Drop for ShellPtys {
     }
 }
 
-fn describe(status: &ExitStatus) -> String {
+fn shell_exit(status: &ExitStatus) -> ShellExit {
     match status.signal() {
-        Some(signal) => format!("killed by {signal}"),
-        None => format!("exit status: {}", status.exit_code()),
+        Some(signal) => ShellExit::Signal(signal.to_string()),
+        None => ShellExit::Code(status.exit_code()),
     }
 }
 
@@ -132,7 +132,7 @@ mod tests {
 
     const SIZE: Size = Size { rows: 10, cols: 40 };
 
-    fn collect(inbox: &mut UnboundedReceiver<Event>) -> (String, Option<String>) {
+    fn collect(inbox: &mut UnboundedReceiver<Event>) -> (String, Option<ShellExit>) {
         let mut output = Vec::new();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while std::time::Instant::now() < deadline {
@@ -163,7 +163,7 @@ mod tests {
         let (output, status) = collect(&mut inbox);
         let cwd = dir.path().canonicalize().unwrap();
         assert!(output.contains(cwd.to_str().unwrap()), "{output:?}");
-        assert_eq!(status.as_deref(), Some("exit status: 3"));
+        assert_eq!(status, Some(ShellExit::Code(3)));
     }
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
         ptys.input(PaneId(1), b"hello\r");
         let (output, status) = collect(&mut inbox);
         assert!(output.contains("got-hello"), "{output:?}");
-        assert_eq!(status.as_deref(), Some("exit status: 0"));
+        assert_eq!(status, Some(ShellExit::Code(0)));
     }
 
     #[test]

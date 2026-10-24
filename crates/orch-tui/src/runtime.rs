@@ -22,7 +22,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::Instant;
 
 use crate::config::TuiConfig;
-use crate::event::{EditorError, Effect, Event, ShellEvent};
+use crate::event::{EditorError, Effect, Event, ShellEvent, ShellExit};
 use crate::git::load_review;
 use crate::link::{DaemonLink, Tui};
 use crate::pty::ShellPtys;
@@ -100,7 +100,7 @@ async fn event_loop(
                     size,
                 } => {
                     if let Err(err) = shells.open(pane, command.as_deref(), &cwd, size, events) {
-                        let event = ShellEvent::Exited(format!("failed to start: {err}"));
+                        let event = ShellEvent::Exited(ShellExit::Failed(err.to_string()));
                         let _ = events.send(Event::Shell { pane, event });
                     }
                 }

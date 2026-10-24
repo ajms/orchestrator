@@ -16,7 +16,7 @@ use crate::selection::{Point, columns_on};
 
 const SELECTION: Color = Color::Rgb(70, 70, 110);
 use crate::sessions::repo_name;
-use crate::shells::Shell;
+use crate::shells::{Shell, ShellKind};
 
 pub(super) fn draw(app: &App, frame: &mut Frame, areas: &Areas) {
     let area = areas.pane;
@@ -164,9 +164,9 @@ fn title(view: &SessionView) -> Line<'static> {
 }
 
 fn shell_title(view: &SessionView, shell: &Shell) -> Line<'static> {
-    let what = match &shell.command {
-        Some(command) => format!("shell: {command}"),
-        None => "shell".into(),
+    let label = match &shell.kind {
+        ShellKind::Command(command) => format!("shell: {command}"),
+        ShellKind::Interactive => "shell".into(),
     };
     let mut spans = vec![
         Span::raw(" "),
@@ -176,11 +176,11 @@ fn shell_title(view: &SessionView, shell: &Shell) -> Line<'static> {
             view.title_or_slug()
         ))
         .bold(),
-        Span::styled(what, Style::new().fg(Color::Yellow)),
+        Span::styled(label, Style::new().fg(Color::Yellow)),
         Span::raw(" "),
     ];
-    if let Some(status) = &shell.exited {
-        spans.push(Span::raw(format!("· {status} · Enter closes ")).dark_gray());
+    if let Some(exit) = &shell.exit {
+        spans.push(Span::raw(format!("· {exit} · Enter closes ")).dark_gray());
     }
     Line::from(spans)
 }

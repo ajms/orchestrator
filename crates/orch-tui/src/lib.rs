@@ -34,6 +34,7 @@ mod transcript;
 pub use config::TuiConfig;
 pub use event::{
     EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget, ShellEvent,
+    ShellExit,
 };
 pub use git::load_review;
 pub use link::{DaemonLink, RequestId, Tui};
