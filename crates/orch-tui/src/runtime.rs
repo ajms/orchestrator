@@ -91,6 +91,15 @@ async fn event_loop(
                         let _ = events.send(Event::Notice(format!("external Review: {err}")));
                     }
                 }
+                Effect::RunShell { command, cwd } => {
+                    let result = screen
+                        .suspend(input, move || run_shell(command.as_deref(), &cwd))
+                        .await
+                        .and_then(|result| result);
+                    if let Err(err) = result {
+                        let _ = events.send(Event::Notice(format!("shell: {err}")));
+                    }
+                }
                 Effect::OpenInEditor { file, line, cwd } => {
                     let result = screen
                         .suspend(input, move || run_editor(&file, line, &cwd))
@@ -270,6 +279,22 @@ fn shell(command: &str, cwd: &Path, env: &[(String, String)]) -> io::Result<()> 
             "`{command}` exited with {status}"
         ))),
     }
+}
+
+fn run_shell(command: Option<&str>, cwd: &Path) -> io::Result<()> {
+    let Some(command) = command else {
+        let program = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
+        let mut shell = Command::new(program);
+        for key in ENV_REDIRECTING_GIT {
+            shell.env_remove(key);
+        }
+        return shell.current_dir(cwd).status().map(drop);
+    };
+    let result = shell(command, cwd, &[]);
+    print!("\nPress Enter to continue");
+    io::stdout().flush()?;
+    io::stdin().read_line(&mut String::new())?;
+    result
 }
 
 struct Screen {

@@ -175,3 +175,54 @@ fn refresh_polls_the_sessions_pr_now() {
         }
     );
 }
+
+fn first_worktree() -> std::path::PathBuf {
+    "/home/me/webshop/.orchestrator/worktrees/first".into()
+}
+
+#[test]
+fn bang_runs_a_command_in_the_selected_worktree() {
+    let mut tui = one_session();
+    let before = tui.daemon().requests();
+    tui.command("!cargo test --all");
+    let expected = Effect::RunShell {
+        command: Some("cargo test --all".into()),
+        cwd: first_worktree(),
+    };
+    assert!(tui.take_effects().contains(&expected));
+    assert_eq!(tui.daemon().requests(), before);
+}
+
+#[test]
+fn sh_opens_a_shell_in_the_selected_worktree() {
+    for name in ["sh", "shell"] {
+        let mut tui = one_session();
+        tui.command(name);
+        let expected = Effect::RunShell {
+            command: None,
+            cwd: first_worktree(),
+        };
+        assert!(tui.take_effects().contains(&expected), ":{name}");
+    }
+}
+
+#[test]
+fn bang_without_a_command_shows_usage() {
+    let mut tui = one_session();
+    tui.command("!");
+    assert!(statusline(&mut tui).contains("usage: :!<command>"));
+    assert!(tui.take_effects().is_empty());
+}
+
+#[test]
+fn shell_commands_need_a_selected_session() {
+    for line in ["!ls", "sh"] {
+        let mut tui = Harness::new();
+        tui.command(line);
+        assert!(
+            statusline(&mut tui).contains("no Session selected"),
+            ":{line}"
+        );
+        assert!(tui.take_effects().is_empty(), ":{line}");
+    }
+}

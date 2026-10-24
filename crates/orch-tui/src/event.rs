@@ -103,6 +103,10 @@ pub enum Effect {
         cwd: PathBuf,
         env: Vec<(String, String)>,
     },
+    RunShell {
+        command: Option<String>,
+        cwd: PathBuf,
+    },
     OpenUrl {
         url: String,
     },

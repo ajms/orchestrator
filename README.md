@@ -130,6 +130,7 @@ Commands:
 - `:m`, `:mute`
 - `:u`, `:usage`
 - `:reconcile`
+- `:!<command>`, `:sh`, `:shell` (run a command, or your shell, in the Session's Worktree outside the Sandbox)
 - `:refresh`, `:abandon` (PRs)
 - `:q`
 
@@ -218,6 +219,8 @@ sandbox = false
 ```
 
 In `.orchestrator.toml` that opt-out needs your Trust. `sandbox = false` under `[defaults]` in your global config is the global switch, for hosts where bubblewrap can't run: it turns the Sandbox off for every Preset that doesn't set `sandbox` itself.
+
+**Running things yourself:** `:!<command>` runs a command in the selected Session's Worktree and waits for Enter, and `:sh` opens your `$SHELL` there. Both run from the TUI, outside the Sandbox, with your own `$HOME` and credentials, while the Agent stays sandboxed. Only you can start them: the Agent has no way to ask for one. The Worktree is written by the Agent, so anything your shell or the command loads from it (a direnv `.envrc`, a mise config, a prompt that runs git) runs unsandboxed too.
 
 **Widening and tightening:** a `[sandbox]` table opens more of `$HOME` or hides more of the system. It goes in `[defaults.sandbox]`, `[repos."<path>".sandbox]` or `.orchestrator.toml`, and the lists from every layer append. Paths are absolute or start with `~/`.
 

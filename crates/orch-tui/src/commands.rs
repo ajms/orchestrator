@@ -1,6 +1,6 @@
 use orch_protocol::Request;
 
-use crate::app::{App, Call};
+use crate::app::{App, Call, NO_SESSION};
 use crate::event::{Effect, ReviewPurpose};
 
 struct Command {
@@ -77,6 +77,10 @@ const COMMANDS: &[Command] = &[
         names: &["reconcile"],
         run: |app, _| app.request_reconcile(),
     },
+    Command {
+        names: &["sh", "shell"],
+        run: |app, _| run_shell(app, None),
+    },
 ];
 
 pub(crate) fn run(app: &mut App, line: &str) {
@@ -84,6 +88,9 @@ pub(crate) fn run(app: &mut App, line: &str) {
     let (name, args) = line.split_once(' ').unwrap_or((line, ""));
     if name.is_empty() {
         return;
+    }
+    if let Some(command) = line.strip_prefix('!') {
+        return bang(app, command.trim());
     }
     match COMMANDS
         .iter()
@@ -118,4 +125,21 @@ fn preset(app: &mut App, args: &str) {
 fn mute(app: &mut App, _: &str) {
     let muted = !app.selected_view().is_some_and(|view| view.flags.muted);
     app.on_selected(|session| Request::SetMuted { session, muted });
+}
+
+fn bang(app: &mut App, command: &str) {
+    match command.is_empty() {
+        true => app.message = Some("usage: :!<command>".into()),
+        false => run_shell(app, Some(command.to_string())),
+    }
+}
+
+fn run_shell(app: &mut App, command: Option<String>) {
+    match app.selected_view() {
+        Some(view) => {
+            let cwd = view.worktree.clone();
+            app.push(Call::Local(Effect::RunShell { command, cwd }));
+        }
+        None => app.message = Some(NO_SESSION.into()),
+    }
 }
