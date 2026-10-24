@@ -16,6 +16,7 @@ use crate::selection::{Point, columns_on};
 
 const SELECTION: Color = Color::Rgb(70, 70, 110);
 use crate::sessions::repo_name;
+use crate::shells::{Shell, ShellKind};
 
 pub(super) fn draw(app: &App, frame: &mut Frame, areas: &Areas) {
     let area = areas.pane;
@@ -46,7 +47,10 @@ pub(super) fn draw(app: &App, frame: &mut Frame, areas: &Areas) {
         frame.render_widget(Paragraph::new(text).block(block), area);
         return;
     };
-    block = block.title(title(view));
+    block = match app.shown_shell() {
+        Some(shell) => block.title(shell_title(view, shell)),
+        None => block.title(title(view)),
+    };
     match app.shown_pane() {
         Some(pane) => {
             let inner = block.inner(area);
@@ -155,6 +159,28 @@ fn title(view: &SessionView) -> Line<'static> {
     ];
     if view.unsandboxed {
         spans.push(Span::styled("unsandboxed ", Style::new().fg(Color::Yellow)));
+    }
+    Line::from(spans)
+}
+
+fn shell_title(view: &SessionView, shell: &Shell) -> Line<'static> {
+    let label = match &shell.kind {
+        ShellKind::Command(command) => format!("shell: {command}"),
+        ShellKind::Interactive => "shell".into(),
+    };
+    let mut spans = vec![
+        Span::raw(" "),
+        Span::raw(format!(
+            "{} / {} ",
+            repo_name(&view.repo),
+            view.title_or_slug()
+        ))
+        .bold(),
+        Span::styled(label, Style::new().fg(Color::Yellow)),
+        Span::raw(" "),
+    ];
+    if let Some(exit) = &shell.exit {
+        spans.push(Span::raw(format!("· {exit} · Enter closes ")).dark_gray());
     }
     Line::from(spans)
 }

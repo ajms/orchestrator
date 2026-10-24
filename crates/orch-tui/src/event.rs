@@ -4,7 +4,7 @@ use std::process::ExitStatus;
 
 use crossterm::event::Event as TermEvent;
 use orch_core::SessionId;
-use orch_protocol::FromDaemon;
+use orch_protocol::{FromDaemon, Size};
 
 use crate::review::FileDiff;
 
@@ -19,6 +19,10 @@ pub enum Event {
         message: FromDaemon,
     },
     Terminal(TermEvent),
+    Shell {
+        pane: PaneId,
+        event: ShellEvent,
+    },
     EditorClosed(Result<String, EditorError>),
     Review {
         session: SessionId,
@@ -33,6 +37,29 @@ pub enum Event {
     },
     Notice(String),
     Tick,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellEvent {
+    Output(Vec<u8>),
+    Exited(ShellExit),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellExit {
+    Code(u32),
+    Signal(String),
+    Failed(String),
+}
+
+impl fmt::Display for ShellExit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Code(code) => write!(f, "exit status: {code}"),
+            Self::Signal(signal) => write!(f, "killed by {signal}"),
+            Self::Failed(err) => write!(f, "failed to start: {err}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +129,23 @@ pub enum Effect {
         command: String,
         cwd: PathBuf,
         env: Vec<(String, String)>,
+    },
+    OpenShell {
+        pane: PaneId,
+        command: Option<String>,
+        cwd: PathBuf,
+        size: Size,
+    },
+    ShellInput {
+        pane: PaneId,
+        bytes: Vec<u8>,
+    },
+    ResizeShell {
+        pane: PaneId,
+        size: Size,
+    },
+    CloseShell {
+        pane: PaneId,
     },
     OpenUrl {
         url: String,

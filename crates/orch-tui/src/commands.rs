@@ -77,6 +77,10 @@ const COMMANDS: &[Command] = &[
         names: &["reconcile"],
         run: |app, _| app.request_reconcile(),
     },
+    Command {
+        names: &["sh", "shell"],
+        run: |app, _| app.toggle_shell(),
+    },
 ];
 
 pub(crate) fn run(app: &mut App, line: &str) {
@@ -84,6 +88,9 @@ pub(crate) fn run(app: &mut App, line: &str) {
     let (name, args) = line.split_once(' ').unwrap_or((line, ""));
     if name.is_empty() {
         return;
+    }
+    if let Some(command) = line.strip_prefix('!') {
+        return bang(app, command.trim());
     }
     match COMMANDS
         .iter()
@@ -118,4 +125,11 @@ fn preset(app: &mut App, args: &str) {
 fn mute(app: &mut App, _: &str) {
     let muted = !app.selected_view().is_some_and(|view| view.flags.muted);
     app.on_selected(|session| Request::SetMuted { session, muted });
+}
+
+fn bang(app: &mut App, command: &str) {
+    match command.is_empty() {
+        true => app.message = Some("usage: :!<command>".into()),
+        false => app.run_in_shell(command.to_string()),
+    }
 }

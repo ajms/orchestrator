@@ -130,6 +130,7 @@ Commands:
 - `:m`, `:mute`
 - `:u`, `:usage`
 - `:reconcile`
+- `:sh`, `:shell`, `:!<command>` (your shell, or one command, in the Session's Worktree outside the Sandbox; `:sh` again switches back)
 - `:refresh`, `:abandon` (PRs)
 - `:q`
 
@@ -219,6 +220,8 @@ sandbox = false
 
 In `.orchestrator.toml` that opt-out needs your Trust. `sandbox = false` under `[defaults]` in your global config is the global switch, for hosts where bubblewrap can't run: it turns the Sandbox off for every Preset that doesn't set `sandbox` itself.
 
+**Running things yourself:** `:sh` opens your `$SHELL` in the selected Session's Worktree, shown in the Session pane in place of the Agent, with the sidebar still beside it. In Insert mode your keys go to it, as they would to the Agent. `:sh` again switches back to the Agent, and the next `:sh` back to the shell, which keeps running while you look at other Sessions. Each Session has its own, and `exit` closes it. `:!<command>` runs one command the same way and keeps its output and exit status in the pane until you press Enter or Esc; it is refused while the Session's shell runs. Shells run from the TUI, outside the Sandbox, with your own `$HOME` and credentials, while the Agent stays sandboxed. A shell ends when you quit the TUI or when its Session is suspended, Landed or Discarded. Only you can start one: the Agent has no way to ask for it ([ADR 0012](docs/adr/0012-user-shells-run-outside-the-sandbox-from-the-tui.md)). The Worktree is written by the Agent, so anything your shell or the command loads from it (a direnv `.envrc`, a mise config, a prompt that runs git) runs unsandboxed too.
+
 **Widening and tightening:** a `[sandbox]` table opens more of `$HOME` or hides more of the system. It goes in `[defaults.sandbox]`, `[repos."<path>".sandbox]` or `.orchestrator.toml`, and the lists from every layer append. Paths are absolute or start with `~/`.
 
 ```toml
@@ -284,6 +287,7 @@ To let CI run on the release PR, add a `RELEASE_PLZ_TOKEN` secret (a fine-graine
 - [ADR 0009](docs/adr/0009-sandbox-home-is-an-allowlist.md): the Sandbox's `$HOME` is an allowlist.
 - [ADR 0010](docs/adr/0010-sandboxed-agents-reach-github-through-the-broker.md): sandboxed Agents reach GitHub through the Broker.
 - [ADR 0011](docs/adr/0011-sandboxed-agents-sign-commits-through-the-broker.md): sandboxed Agents sign commits through the Broker.
+- [ADR 0012](docs/adr/0012-user-shells-run-outside-the-sandbox-from-the-tui.md): user Shells run outside the Sandbox, from the TUI.
 - [Agent adapters](docs/agent-adapters.md): the adapter trait, capabilities, and a checklist for adding another Agent.
 
 The crates under `crates/`:

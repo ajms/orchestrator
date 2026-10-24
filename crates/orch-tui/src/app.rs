@@ -13,7 +13,9 @@ use orch_protocol::{
 use crate::clipboard::copy_effects;
 pub use crate::config::TuiConfig;
 use crate::discard::{DiscardConfirm, DiscardTarget};
-use crate::event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};
+use crate::event::{
+    EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget, ShellEvent,
+};
 use crate::guard::{GuardId, Guards};
 use crate::hyperlinks::Hyperlinks;
 use crate::land::LandForm;
@@ -28,6 +30,7 @@ use crate::repo_picker::KnownRepo;
 use crate::review::{EditorTarget, ReviewAction, ReviewView};
 use crate::selection::Selector;
 use crate::sessions::{Sessions, phase_label, repo_name};
+use crate::shells::{Shell, ShellKind, Shells, shown_mirror};
 use crate::sidebar::{Row, SidebarView, Stop, SubagentRow, Viewport};
 use crate::transcript::Transcript;
 
@@ -66,6 +69,19 @@ fn focus_report(focused: bool) -> Vec<u8> {
         true => b"\x1b[I".to_vec(),
         false => b"\x1b[O".to_vec(),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Shown {
+    Agent,
+    Shell(PaneId),
+    FinishedShell,
+}
+
+pub(crate) enum TerminalInput {
+    Keys(Vec<u8>),
+    Report(Vec<u8>),
+    Paste(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,6 +226,7 @@ pub(crate) struct App {
     pub sessions: Sessions,
     pub selected: Option<SessionId>,
     pub pane: Option<PaneMirror>,
+    pub shells: Shells,
     pub focus: Focus,
     pub mode: Mode,
     pub prefix: Option<Prefix>,
@@ -248,6 +265,7 @@ impl App {
             sessions: Sessions::default(),
             selected: None,
             pane: None,
+            shells: Shells::default(),
             focus: Focus::Sidebar,
             mode: Mode::Normal,
             prefix: None,
@@ -285,6 +303,7 @@ impl App {
             Event::Daemon(message) => self.daemon(message),
             Event::Pane { pane, message } => self.pane_message(pane, message),
             Event::Terminal(event) => self.terminal(event),
+            Event::Shell { pane, event } => self.shell_event(pane, event),
             Event::EditorClosed(result) => self.editor_closed(result),
             Event::Review {
                 session,
@@ -310,10 +329,11 @@ impl App {
         match message {
             FromDaemon::Sessions { sessions } => {
                 self.mismatch = None;
+                self.close_ended_shells(&sessions);
                 self.sessions.replace(sessions);
                 self.request(Request::Repos, Pending::Repos);
             }
-            FromDaemon::SessionChanged { session } => self.sessions.upsert(*session),
+            FromDaemon::SessionChanged { session } => self.session_changed(*session),
             FromDaemon::SessionRemoved { session } => self.remove_session(&session),
             FromDaemon::Reconciled { report } => self.reconciled(*report, false),
             FromDaemon::Ring {
@@ -516,18 +536,12 @@ impl App {
         match message {
             FromDaemon::Screen(snapshot) => {
                 mirror.restore(&snapshot);
-                self.pane_selection.clear();
-                self.links.hover(None);
+                self.clear_pane_marks();
             }
             FromDaemon::Output { bytes } => {
                 let grown = mirror.output(&bytes);
-                match grown {
-                    Some(grown) => self.pane_selection.shift(grown),
-                    None => self.pane_selection.clear(),
-                }
-                match grown.filter(|grown| *grown != 0) {
-                    Some(grown) => self.links.shift(grown),
-                    None => self.links.hover(None),
+                if self.shown() == Shown::Agent {
+                    self.follow_output(grown);
                 }
             }
             FromDaemon::Resized(size) => mirror.resized(size),
@@ -536,11 +550,64 @@ impl App {
             }
             FromDaemon::PaneClosed { reason } => {
                 mirror.closed = Some(reason);
-                if matches!(self.mode, Mode::Insert | Mode::Visual(_)) {
-                    self.mode = Mode::Normal;
+                if self.shown() == Shown::Agent {
+                    self.leave_terminal();
                 }
             }
             _ => {}
+        }
+    }
+
+    fn follow_output(&mut self, grown: Option<i64>) {
+        match grown {
+            Some(grown) => self.pane_selection.shift(grown),
+            None => self.pane_selection.clear(),
+        }
+        match grown.filter(|grown| *grown != 0) {
+            Some(grown) => self.links.shift(grown),
+            None => self.links.hover(None),
+        }
+    }
+
+    fn shell_event(&mut self, pane: PaneId, event: ShellEvent) {
+        let Some(session) = self.shells.session_of(pane) else {
+            return;
+        };
+        let shown = self
+            .shown_shell()
+            .is_some_and(|shell| shell.mirror.id == pane);
+        let Some(shell) = self.shells.get_mut(&session) else {
+            return;
+        };
+        match event {
+            ShellEvent::Output(bytes) => {
+                let grown = shell.mirror.output(&bytes);
+                if shown {
+                    self.follow_output(grown);
+                }
+            }
+            ShellEvent::Exited(exit) => {
+                self.calls.push(Call::Local(Effect::CloseShell { pane }));
+                match shell.kind {
+                    ShellKind::Command(_) => shell.exit = Some(exit),
+                    ShellKind::Interactive => drop(self.shells.remove(&session)),
+                }
+                if shown {
+                    self.leave_terminal();
+                }
+            }
+        }
+    }
+
+    fn clear_pane_marks(&mut self) {
+        self.pane_selection.clear();
+        self.links.hover(None);
+    }
+
+    fn leave_terminal(&mut self) {
+        self.clear_pane_marks();
+        if matches!(self.mode, Mode::Insert | Mode::Visual(_)) {
+            self.mode = Mode::Normal;
         }
     }
 
@@ -569,7 +636,7 @@ impl App {
 
     fn tell_focus(&mut self) {
         let focused = self.terminal_focused;
-        let wanted = self.shown_pane().is_some_and(PaneMirror::wants_focus);
+        let wanted = self.shown_agent_pane().is_some_and(PaneMirror::wants_focus);
         let Some(pane) = self.pane.as_mut() else {
             return;
         };
@@ -585,8 +652,17 @@ impl App {
         let before = self.pane_size();
         self.size = size;
         let after = self.pane_size();
-        if before != after && self.pane.is_some() {
+        if before == after {
+            return;
+        }
+        if self.pane.is_some() {
             self.calls.push(Call::ResizePane(after));
+        }
+        for shell in self.shells.iter_mut().filter(|shell| shell.running()) {
+            shell.mirror.resized(after);
+            let pane = shell.mirror.id;
+            self.calls
+                .push(Call::Local(Effect::ResizeShell { pane, size: after }));
         }
     }
 
@@ -620,9 +696,48 @@ impl App {
         }
     }
 
+    fn session_changed(&mut self, view: SessionView) {
+        if self.ends_shell(&view) {
+            self.close_shell(&view.id);
+        }
+        self.sessions.upsert(view);
+    }
+
+    fn close_ended_shells(&mut self, listed: &[SessionView]) {
+        for session in self.shells.sessions() {
+            let ended = match listed.iter().find(|view| view.id == session) {
+                Some(view) => self.ends_shell(view),
+                None => true,
+            };
+            if ended {
+                self.close_shell(&session);
+            }
+        }
+    }
+
+    fn ends_shell(&self, view: &SessionView) -> bool {
+        let ending = matches!(
+            view.phase,
+            PhaseView::Suspended | PhaseView::Landed | PhaseView::Discarded
+        );
+        let previous = self.sessions.get(&view.id).map(|known| known.phase);
+        ending && previous.is_some_and(|previous| previous != view.phase)
+    }
+
+    fn close_shell(&mut self, session: &SessionId) {
+        if self.selected.as_ref() == Some(session) && self.shown() != Shown::Agent {
+            self.leave_terminal();
+        }
+        if let Some(shell) = self.shells.remove(session).filter(Shell::running) {
+            let pane = shell.mirror.id;
+            self.push(Call::Local(Effect::CloseShell { pane }));
+        }
+    }
+
     fn remove_session(&mut self, session: &SessionId) {
         let before = self.sidebar.stops(&self.sessions, &self.preparing);
         self.sessions.remove(session);
+        self.close_shell(session);
         self.step_off(Stop::Session(session.clone()), &before);
     }
 
@@ -700,7 +815,63 @@ impl App {
     }
 
     pub fn shown_pane(&self) -> Option<&PaneMirror> {
-        self.selected_pane().filter(|_| !self.on_subagent())
+        match self.shown_shell() {
+            Some(shell) => Some(&shell.mirror),
+            None => self.shown_agent_pane(),
+        }
+    }
+
+    pub fn shown_pane_mut(&mut self) -> Option<&mut PaneMirror> {
+        let on_subagent = self.on_subagent();
+        let selected = self.selected.as_ref();
+        shown_mirror(&mut self.pane, &mut self.shells, selected, on_subagent)
+    }
+
+    fn shown_agent_pane(&self) -> Option<&PaneMirror> {
+        self.selected_pane()
+            .filter(|_| self.shown() == Shown::Agent && !self.on_subagent())
+    }
+
+    pub fn shown_shell(&self) -> Option<&Shell> {
+        self.shells
+            .shown(self.selected.as_ref(), self.on_subagent())
+    }
+
+    pub fn shown(&self) -> Shown {
+        match self.shown_shell() {
+            Some(shell) if shell.running() => Shown::Shell(shell.mirror.id),
+            Some(_) => Shown::FinishedShell,
+            None => Shown::Agent,
+        }
+    }
+
+    pub fn send(&mut self, input: TerminalInput) {
+        let pane = match self.shown() {
+            Shown::Shell(pane) => pane,
+            Shown::FinishedShell => return,
+            Shown::Agent => return self.send_to_agent(input),
+        };
+        let bracketed = self
+            .shown_pane()
+            .is_some_and(|shell| shell.input_modes().bracketed_paste);
+        let bytes = match input {
+            TerminalInput::Keys(bytes) | TerminalInput::Report(bytes) => bytes,
+            TerminalInput::Paste(text) if bracketed => {
+                format!("\x1b[200~{text}\x1b[201~").into_bytes()
+            }
+            TerminalInput::Paste(text) => text.into_bytes(),
+        };
+        self.push(Call::Local(Effect::ShellInput { pane, bytes }));
+    }
+
+    fn send_to_agent(&mut self, input: TerminalInput) {
+        let call = match input {
+            TerminalInput::Keys(bytes) => Call::Input(bytes),
+            TerminalInput::Report(bytes) => Call::Report(bytes),
+            TerminalInput::Paste(_) if self.pane.is_none() => return,
+            TerminalInput::Paste(text) => Call::Paste(text),
+        };
+        self.push(call);
     }
 
     pub fn selected_pane(&self) -> Option<&PaneMirror> {
@@ -1125,6 +1296,77 @@ impl App {
         let id = RequestId(self.next_request);
         self.pending.insert(id, (request.clone(), pending));
         self.calls.push(Call::Request(id, request));
+    }
+
+    pub fn toggle_shell(&mut self) {
+        let Some(session) = self.selected.clone() else {
+            self.message = Some(NO_SESSION.into());
+            return;
+        };
+        match self
+            .shells
+            .get_mut(&session)
+            .filter(|shell| shell.running())
+        {
+            Some(shell) if shell.shown => {
+                shell.shown = false;
+                self.leave_terminal();
+            }
+            Some(shell) => {
+                shell.shown = true;
+                self.enter_terminal();
+            }
+            None => self.open_shell(session, ShellKind::Interactive),
+        }
+    }
+
+    pub fn run_in_shell(&mut self, command: String) {
+        let Some(session) = self.selected.clone() else {
+            self.message = Some(NO_SESSION.into());
+            return;
+        };
+        if self.shells.get(&session).is_some_and(Shell::running) {
+            self.message = Some("a shell is running in this Session; :sh shows it".into());
+            return;
+        }
+        self.open_shell(session, ShellKind::Command(command));
+    }
+
+    pub fn dismiss_shell(&mut self) {
+        if let Some(session) = self.selected.clone() {
+            self.shells.remove(&session);
+            self.leave_terminal();
+        }
+    }
+
+    fn open_shell(&mut self, session: SessionId, kind: ShellKind) {
+        let Some(cwd) = self
+            .sessions
+            .get(&session)
+            .map(|view| view.worktree.clone())
+        else {
+            return;
+        };
+        self.next_pane += 1;
+        let pane = PaneId(self.next_pane);
+        let size = self.pane_size();
+        let mirror = PaneMirror::new(pane, session.clone(), None, size);
+        let command = kind.command().map(String::from);
+        self.shells.insert(session, Shell::new(mirror, kind));
+        self.push(Call::Local(Effect::OpenShell {
+            pane,
+            command,
+            cwd,
+            size,
+        }));
+        self.enter_terminal();
+    }
+
+    pub fn enter_terminal(&mut self) {
+        self.leave_subagent();
+        self.clear_pane_marks();
+        self.focus = Focus::Pane;
+        self.mode = Mode::Insert;
     }
 
     pub fn on_selected(&mut self, request: impl FnOnce(SessionId) -> Request) {

@@ -22,9 +22,10 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::Instant;
 
 use crate::config::TuiConfig;
-use crate::event::{EditorError, Effect, Event};
+use crate::event::{EditorError, Effect, Event, ShellEvent, ShellExit};
 use crate::git::load_review;
 use crate::link::{DaemonLink, Tui};
+use crate::pty::ShellPtys;
 use crate::socket::SocketLink;
 
 const INPUT_POLL: Duration = Duration::from_millis(50);
@@ -53,6 +54,7 @@ async fn event_loop(
     inbox: &mut UnboundedReceiver<Event>,
 ) -> io::Result<()> {
     let mut tui = connect(options, events, false).await?;
+    let mut shells = ShellPtys::default();
     let mut ticked_at = Instant::now();
     loop {
         screen.terminal.draw(|frame| tui.render(frame))?;
@@ -91,6 +93,20 @@ async fn event_loop(
                         let _ = events.send(Event::Notice(format!("external Review: {err}")));
                     }
                 }
+                Effect::OpenShell {
+                    pane,
+                    command,
+                    cwd,
+                    size,
+                } => {
+                    if let Err(err) = shells.open(pane, command.as_deref(), &cwd, size, events) {
+                        let event = ShellEvent::Exited(ShellExit::Failed(err.to_string()));
+                        let _ = events.send(Event::Shell { pane, event });
+                    }
+                }
+                Effect::ShellInput { pane, bytes } => shells.input(pane, &bytes),
+                Effect::ResizeShell { pane, size } => shells.resize(pane, size),
+                Effect::CloseShell { pane } => shells.close(pane),
                 Effect::OpenInEditor { file, line, cwd } => {
                     let result = screen
                         .suspend(input, move || run_editor(&file, line, &cwd))

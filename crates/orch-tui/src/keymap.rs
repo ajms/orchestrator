@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use orch_protocol::PhaseView;
 use orch_term::keys::{encode_key, is_ctrl_backslash};
 
-use crate::app::{App, Call, Focus, Mode, Prefix, Selection};
+use crate::app::{App, Call, Focus, Mode, Prefix, Selection, Shown, TerminalInput};
 use crate::event::{Effect, ReviewPurpose};
 use crate::guard::GuardId;
 use crate::layout::Columns;
@@ -71,8 +71,8 @@ pub(crate) fn paste(app: &mut App, text: String) {
     if app.popup.is_some() {
         return crate::popup::paste(app, &text);
     }
-    if app.mode == Mode::Insert && app.pane.is_some() {
-        app.push(Call::Paste(text));
+    if app.mode == Mode::Insert {
+        app.send(TerminalInput::Paste(text));
     }
 }
 
@@ -100,12 +100,17 @@ fn insert(app: &mut App, key: KeyEvent) {
 }
 
 fn send_key(app: &mut App, key: KeyEvent) {
-    let Some(pane) = &app.pane else {
+    let Some(modes) = app
+        .shown_shell()
+        .map(|shell| &shell.mirror)
+        .or(app.pane.as_ref())
+        .map(|pane| pane.input_modes())
+    else {
         return;
     };
-    let bytes = encode_key(key, pane.input_modes());
+    let bytes = encode_key(key, modes);
     if !bytes.is_empty() {
-        app.push(Call::Input(bytes));
+        app.send(TerminalInput::Keys(bytes));
     }
 }
 
@@ -123,6 +128,9 @@ fn normal(app: &mut App, key: KeyEvent) {
             KeyCode::Char('x') => return drop(app.dismiss_preparing(failed)),
             _ => {}
         }
+    }
+    if app.shown() == Shown::FinishedShell && matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
+        return app.dismiss_shell();
     }
     let in_pane = app.focus == Focus::Pane;
     let half_page = (app.scroll_height() / 2).max(1) as isize;
@@ -160,6 +168,9 @@ fn normal(app: &mut App, key: KeyEvent) {
 }
 
 fn interrupt(app: &mut App, key: KeyEvent) {
+    if app.shown() != Shown::Agent {
+        return send_key(app, key);
+    }
     let live = app
         .selected_view()
         .is_some_and(|view| view.phase.is_live() && !agent_ended(view));
@@ -193,7 +204,7 @@ fn scroll_by(app: &mut App, lines: isize) {
     if app.on_subagent() {
         return app.scroll_transcript_up(lines);
     }
-    if let Some(pane) = &mut app.pane {
+    if let Some(pane) = app.shown_pane_mut() {
         pane.scroll_by(lines);
     }
 }
@@ -202,7 +213,7 @@ fn scroll_to_start(app: &mut App) {
     if app.on_subagent() {
         return app.transcript_to_start();
     }
-    if let Some(pane) = &mut app.pane {
+    if let Some(pane) = app.shown_pane_mut() {
         pane.set_scroll(usize::MAX);
     }
 }
@@ -211,7 +222,7 @@ fn scroll_to_end(app: &mut App) {
     if app.on_subagent() {
         return app.transcript_follow();
     }
-    if let Some(pane) = &mut app.pane {
+    if let Some(pane) = app.shown_pane_mut() {
         pane.set_scroll(0);
     }
 }
@@ -230,7 +241,7 @@ fn start_visual(app: &mut App, linewise: bool) {
     if app.on_subagent() {
         return;
     }
-    let Some(pane) = &app.pane else {
+    let Some(pane) = app.shown_pane() else {
         return;
     };
     let cursor = pane.cursor_line();
@@ -245,7 +256,7 @@ fn start_visual(app: &mut App, linewise: bool) {
 
 fn visual(app: &mut App, mut selection: Selection, key: KeyEvent) {
     let last_col = app.pane_size().cols.saturating_sub(1);
-    let Some(pane) = &mut app.pane else {
+    let Some(pane) = app.shown_pane_mut() else {
         app.mode = Mode::Normal;
         return;
     };
@@ -289,6 +300,14 @@ fn selected_text(
 
 fn enter_insert(app: &mut App) {
     app.leave_subagent();
+    match app.shown() {
+        Shown::Shell(_) => {
+            scroll_to_end(app);
+            return app.enter_terminal();
+        }
+        Shown::FinishedShell => return,
+        Shown::Agent => {}
+    }
     let Some(view) = app.selected_view() else {
         return;
     };

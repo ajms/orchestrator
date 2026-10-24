@@ -17,6 +17,7 @@ mod pane;
 mod passthrough;
 mod popup;
 mod preparing;
+mod pty;
 mod reconcile;
 mod render;
 mod repo_picker;
@@ -24,13 +25,17 @@ mod review;
 mod runtime;
 mod selection;
 mod sessions;
+mod shells;
 mod sidebar;
 mod socket;
 mod text_input;
 mod transcript;
 
 pub use config::TuiConfig;
-pub use event::{EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget};
+pub use event::{
+    EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget, ShellEvent,
+    ShellExit,
+};
 pub use git::load_review;
 pub use link::{DaemonLink, RequestId, Tui};
 pub use review::FileDiff;

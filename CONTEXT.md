@@ -133,6 +133,10 @@ _Avoid_: Jail, container
 The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: fetching from origin, pushing its Branch, managing its pull request, reading its Repo on GitHub and signing its commits, with the user's credentials and the Agent signing key, which never enter the Sandbox.
 _Avoid_: Proxy, relay, credential helper
 
+**Shell**:
+The user's own shell, or one command they run, in a Session's Worktree outside the Sandbox, started from the TUI and shown in the Session pane in place of the Agent. Each Session has at most one, and only the user can start it.
+_Avoid_: Terminal, escape hatch, unsandboxed Agent
+
 **Agent identity**:
 The name and email a sandboxed Agent commits as: the user's name followed by ` (orch)`, and the user's email. It is fixed when the Agent starts.
 _Avoid_: Bot user, agent author
@@ -146,7 +150,7 @@ An Orchestrator rule that stops an Agent from acting outside its Session (its Wo
 _Avoid_: Sandbox, restriction, deny rule
 
 **Insert mode**:
-The input mode in which keystrokes go to the focused Session's Agent.
+The input mode in which keystrokes go to the focused Session's Agent, or to its Shell while that is shown.
 _Avoid_: Terminal mode, passthrough
 
 **Normal mode**:
