@@ -1,4 +1,4 @@
-use orch_git::SessionWorktree;
+use orch_git::{Error, SessionWorktree};
 
 use crate::common::{Fixture, commit, git, name, read, rev};
 
@@ -169,18 +169,49 @@ fn a_new_worktree_starts_from_the_base_just_fetched_from_origin() {
 }
 
 #[test]
-fn a_base_checked_out_with_local_changes_is_not_fast_forwarded() {
+fn a_base_checked_out_with_local_changes_refuses_the_worktree() {
     let fixture = Fixture::with_origin("main");
     let local_tip = rev(&fixture.root, "HEAD");
     fixture.push_upstream("main", "README.md", "upstream\n");
     std::fs::write(fixture.root.join("README.md"), "mine\n").unwrap();
     let repo = fixture.repo();
 
-    let worktree = repo.create_worktree(&name("fix"), "main").unwrap();
+    let error = repo.create_worktree(&name("fix"), "main").unwrap_err();
 
-    assert_eq!(rev(&worktree.path, "HEAD"), local_tip);
+    assert!(
+        matches!(error, Error::BaseNotFastForwarded { .. }),
+        "{error}"
+    );
+    assert!(error.to_string().contains("local changes"), "{error}");
     assert_eq!(rev(&fixture.root, "refs/heads/main"), local_tip);
     assert_eq!(read(&fixture.root, "README.md"), "mine\n");
+    assert_nothing_created(&fixture, "fix");
+}
+
+#[test]
+fn a_behind_base_checked_out_in_another_worktree_refuses_the_worktree() {
+    let fixture = Fixture::with_origin("trunk");
+    let elsewhere = fixture.outside().join("elsewhere");
+    git(
+        &fixture.root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            elsewhere.to_str().unwrap(),
+            "trunk",
+        ],
+    );
+    fixture.push_upstream("trunk", "up.txt", "up\n");
+    let repo = fixture.repo();
+
+    let error = repo.create_worktree(&name("fix"), "trunk").unwrap_err();
+
+    assert!(
+        matches!(error, Error::BaseNotFastForwarded { .. }),
+        "{error}"
+    );
+    assert_nothing_created(&fixture, "fix");
 }
 
 #[test]
@@ -197,26 +228,68 @@ fn a_base_not_checked_out_is_fast_forwarded_without_touching_the_main_checkout()
 }
 
 #[test]
-fn a_base_ahead_of_or_diverged_from_origin_keeps_its_local_commits() {
+fn a_base_ahead_of_origin_refuses_the_worktree() {
+    let fixture = Fixture::with_origin("main");
+    let local_tip = commit(&fixture.root, "mine.txt", "mine\n", "landed");
+    let repo = fixture.repo();
+
+    let error = repo.create_worktree(&name("fix"), "main").unwrap_err();
+
+    assert_eq!(
+        error,
+        Error::BaseAheadOfOrigin {
+            base: "main".into()
+        }
+    );
+    assert_eq!(rev(&fixture.root, "refs/heads/main"), local_tip);
+    assert_nothing_created(&fixture, "fix");
+}
+
+#[test]
+fn a_base_diverged_from_origin_refuses_the_worktree() {
     let fixture = Fixture::with_origin("main");
     fixture.push_upstream("main", "up.txt", "up\n");
     let local_tip = commit(&fixture.root, "mine.txt", "mine\n", "landed");
     let repo = fixture.repo();
 
-    let worktree = repo.create_worktree(&name("fix"), "main").unwrap();
+    let error = repo.create_worktree(&name("fix"), "main").unwrap_err();
 
-    assert_eq!(rev(&worktree.path, "HEAD"), local_tip);
+    assert_eq!(
+        error,
+        Error::BaseDivergedFromOrigin {
+            base: "main".into()
+        }
+    );
     assert_eq!(rev(&fixture.root, "refs/heads/main"), local_tip);
+    assert_nothing_created(&fixture, "fix");
 }
 
 #[test]
-fn an_unreachable_origin_still_creates_the_worktree_from_the_local_base() {
+fn a_base_missing_on_origin_starts_from_the_local_base() {
     let fixture = Fixture::with_origin("main");
-    let local_tip = rev(&fixture.root, "HEAD");
+    git(&fixture.root, &["branch", "orch/lower"]);
+    let lower_tip = rev(&fixture.root, "refs/heads/orch/lower");
+    let repo = fixture.repo();
+
+    let worktree = repo.create_worktree(&name("upper"), "orch/lower").unwrap();
+
+    assert_eq!(rev(&worktree.path, "HEAD"), lower_tip);
+}
+
+#[test]
+fn an_unreachable_origin_refuses_the_worktree() {
+    let fixture = Fixture::with_origin("main");
     std::fs::remove_dir_all(&fixture.origin).unwrap();
     let repo = fixture.repo();
 
-    let worktree = repo.create_worktree(&name("fix"), "main").unwrap();
+    let error = repo.create_worktree(&name("fix"), "main").unwrap_err();
 
-    assert_eq!(rev(&worktree.path, "HEAD"), local_tip);
+    assert!(matches!(error, Error::Git { .. }), "{error}");
+    assert_nothing_created(&fixture, "fix");
+}
+
+fn assert_nothing_created(fixture: &Fixture, slug: &str) {
+    let repo = fixture.repo();
+    assert!(!repo.worktree_path(slug).exists());
+    assert!(!repo.branch_exists(&format!("orch/{slug}")));
 }
