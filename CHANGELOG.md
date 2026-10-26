@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/ajms/orchestrator/compare/v0.6.0...v0.7.0) - 2026-10-26
+
+### Added
+
+- *(git)* refuse a new Session when the Base can't match origin
+
 ## [0.6.0](https://github.com/ajms/orchestrator/compare/v0.5.2...v0.6.0) - 2026-10-24
 
 ### Added
