@@ -74,7 +74,7 @@ impl Repo {
         base: &str,
     ) -> Result<SessionWorktree, Error> {
         self.exclude_orchestrator_dir()?;
-        self.fast_forward_from_origin(base);
+        self.fast_forward_from_origin(base)?;
         let worktree = self.session_worktree(name, base);
         self.git(["worktree", "add", "-q", "--no-track", "-b", &name.branch])
             .arg(&worktree.path)
@@ -83,33 +83,39 @@ impl Repo {
         Ok(worktree)
     }
 
-    fn fast_forward_from_origin(&self, base: &str) {
+    fn fast_forward_from_origin(&self, base: &str) -> Result<(), Error> {
+        if !self.git(["remote", "get-url", "origin"]).succeeds() || !self.remote_has_branch(base)? {
+            return Ok(());
+        }
         let tracking = format!("refs/remotes/origin/{base}");
-        let fetched = self
-            .git(["fetch", "-q", "--no-tags", "origin"])
+        self.git(["fetch", "-q", "--no-tags", "origin"])
             .arg(format!("+{}:{tracking}", head_ref(base)))
-            .succeeds();
-        if !fetched {
-            return;
+            .run()?;
+        let local = self
+            .git(["rev-parse", "--verify", "--quiet", &head_ref(base)])
+            .run()?;
+        let upstream = self
+            .git(["rev-parse", "--verify", "--quiet", &tracking])
+            .run()?;
+        if local == upstream {
+            return Ok(());
         }
-        let tip = |reference: &str| {
-            self.git(["rev-parse", "--verify", "--quiet", reference])
-                .run()
-                .ok()
+        let is_ancestor = |from: &str, to: &str| {
+            self.git(["merge-base", "--is-ancestor", from, to])
+                .succeeds()
         };
-        let (Some(local), Some(upstream)) = (tip(&head_ref(base)), tip(&tracking)) else {
-            return;
-        };
-        let behind = local != upstream
-            && self
-                .git(["merge-base", "--is-ancestor", &local, &upstream])
-                .succeeds();
-        if !behind {
-            return;
+        if is_ancestor(&upstream, &local) {
+            return Err(Error::BaseAheadOfOrigin { base: base.into() });
         }
-        if let Ok(main_checkout) = self.main_checkout_to_update(base, &local, &upstream) {
-            let _ = self.advance_base(base, &local, &upstream, main_checkout);
+        if !is_ancestor(&local, &upstream) {
+            return Err(Error::BaseDivergedFromOrigin { base: base.into() });
         }
+        self.main_checkout_to_update(base, &local, &upstream)
+            .and_then(|main_checkout| self.advance_base(base, &local, &upstream, main_checkout))
+            .map_err(|landing| Error::BaseNotFastForwarded {
+                base: base.into(),
+                reason: landing.to_string(),
+            })
     }
 
     pub fn attach_worktree(&self, name: &SessionName) -> Result<PathBuf, Error> {

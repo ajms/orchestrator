@@ -10,6 +10,9 @@ pub enum Error {
     GitTooOld { found: GitVersion },
     NotAnOrchestratorWorktree { path: PathBuf },
     InvalidSubagentWorktreeName { name: String },
+    BaseAheadOfOrigin { base: String },
+    BaseDivergedFromOrigin { base: String },
+    BaseNotFastForwarded { base: String, reason: String },
 }
 
 impl Error {
@@ -39,6 +42,18 @@ impl fmt::Display for Error {
             Error::InvalidSubagentWorktreeName { name } => {
                 write!(f, "{name:?} is not a valid Subagent worktree name")
             }
+            Error::BaseAheadOfOrigin { base } => write!(
+                f,
+                "{base} has commits origin/{base} doesn't; push them before starting a Session"
+            ),
+            Error::BaseDivergedFromOrigin { base } => write!(
+                f,
+                "{base} has diverged from origin/{base}; reconcile them before starting a Session"
+            ),
+            Error::BaseNotFastForwarded { base, reason } => write!(
+                f,
+                "{base} is behind origin/{base} and can't be fast-forwarded: {reason}"
+            ),
         }
     }
 }

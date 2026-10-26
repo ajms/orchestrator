@@ -194,6 +194,8 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `[presets.<name>]` | `mode`, `allow`, `deny`, `sandbox` (run the Agent in the Sandbox; default `true`) |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
 
+**A new Session starts from origin's Base branch.** Before cutting the Worktree, `orch` fetches the Base branch from origin and fast-forwards your local one to it. It refuses to create the Session if origin can't be reached, if your Base branch is ahead of or diverged from origin's, or if it can't be fast-forwarded because it is checked out with local changes or in another Worktree. A Base branch origin doesn't have, such as a stacked Session's, and a Repo without an origin start from the local branch.
+
 **Setup and Teardown scripts** run with `sh -c` in the Worktree, with stdin closed. Setup output streams into the TUI; a non-zero exit puts the Session in *Setup failed*. Both scripts get these variables:
 
 | Variable | Value |

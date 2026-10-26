@@ -469,10 +469,11 @@ fn on_github() -> Env {
     let env = Env::new();
     env.fake_gh();
     let repo = env.repo("app");
-    git(
-        &repo,
-        &["remote", "add", "origin", "git@github.com:acme/app.git"],
-    );
+    let remote = env.remote(&repo);
+    let github = "git@github.com:acme/app.git";
+    git(&repo, &["remote", "set-url", "origin", github]);
+    let rewrite = format!("url.{}.insteadOf", remote.display());
+    git(&repo, &["config", &rewrite, github]);
     env
 }
 
