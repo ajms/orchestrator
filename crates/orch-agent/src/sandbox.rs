@@ -18,12 +18,23 @@ const HOME_READ_ONLY: [&str; 16] = [
     ".sdkman",
     "go",
 ];
-const UNSET: [&str; 4] = [
-    "SSH_AUTH_SOCK",
-    "DISPLAY",
-    "WAYLAND_DISPLAY",
-    "DBUS_SESSION_BUS_ADDRESS",
+const KEPT_ENV: [&str; 14] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LANGUAGE",
+    "TZ",
+    "COLORTERM",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_RUNTIME_DIR",
 ];
+const KEPT_ENV_PREFIXES: [&str; 1] = ["LC_"];
 const SANDBOX_TMP: &str = "/tmp";
 pub const BWRAP: &str = "bwrap";
 
@@ -33,6 +44,7 @@ pub struct SandboxNeeds {
     pub read_only: Vec<PathBuf>,
     pub carve_outs: Vec<PathBuf>,
     pub env: Vec<(String, String)>,
+    pub env_prefixes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -56,6 +68,7 @@ pub struct SandboxLayout {
     pub hidden: Vec<PathBuf>,
     pub masked: Vec<PathBuf>,
     pub configured: SandboxPaths,
+    pub host_env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,15 +237,23 @@ pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String>
         args.extend(["--ro-bind".into(), "/dev/null".into(), text(masked)]);
     }
 
-    for var in UNSET {
-        args.extend(["--unsetenv".into(), var.into()]);
-    }
-    let env = std::iter::once(("TMPDIR", SANDBOX_TMP)).chain(
-        needs
-            .env
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str())),
-    );
+    args.push("--clearenv".into());
+    let prefixes: Vec<&str> = KEPT_ENV_PREFIXES
+        .into_iter()
+        .chain(needs.env_prefixes.iter().map(String::as_str))
+        .collect();
+    let kept = layout.host_env.iter().filter(|(key, _)| {
+        KEPT_ENV.contains(&key.as_str()) || prefixes.iter().any(|prefix| key.starts_with(prefix))
+    });
+    let env = kept
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .chain(std::iter::once(("TMPDIR", SANDBOX_TMP)))
+        .chain(
+            needs
+                .env
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
     for (key, value) in env {
         args.extend(["--setenv".into(), key.into(), value.into()]);
     }

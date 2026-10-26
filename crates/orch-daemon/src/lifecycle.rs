@@ -605,7 +605,9 @@ impl Daemon {
                 .arg(block.size.to_string());
         }
         let mut broker_env = Vec::new();
+        let mut display = self.lock().display.pairs();
         if let Some(SandboxLaunch { args, warning, env }) = sandbox {
+            display.clear();
             let args = serde_json::to_string(&args).map_err(|err| err.to_string())?;
             command.arg("--sandbox").arg(args);
             if let Some(warning) = warning {
@@ -613,7 +615,6 @@ impl Daemon {
             }
             broker_env = env;
         }
-        let display = self.lock().display.pairs();
         let env = session_env(record)
             .into_iter()
             .chain(display)

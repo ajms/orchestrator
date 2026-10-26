@@ -25,6 +25,18 @@ fn layout() -> SandboxLayout {
         hidden: vec!["/home/other".into(), "/mnt".into()],
         masked: Vec::new(),
         configured: SandboxPaths::default(),
+        host_env: [
+            ("PATH", "/usr/bin"),
+            ("LANG", "C.UTF-8"),
+            ("LC_TIME", "de_DE.UTF-8"),
+            ("GH_TOKEN", "gho_leak"),
+            ("AWS_SECRET_ACCESS_KEY", "aws_leak"),
+            ("SSH_AUTH_SOCK", "/run/agent.sock"),
+            ("DISPLAY", ":0"),
+            ("AGENT_API_KEY", "own"),
+        ]
+        .map(|(key, value)| (key.into(), value.into()))
+        .into(),
     }
 }
 
@@ -34,6 +46,7 @@ fn needs() -> SandboxNeeds {
         read_only: vec!["/home/dev/.local/share/agent".into()],
         carve_outs: vec!["/home/dev/.agent/hooks".into()],
         env: vec![("AGENT_NO_UPDATE".into(), "1".into())],
+        env_prefixes: vec!["AGENT_".into()],
     }
 }
 
@@ -195,17 +208,27 @@ fn without_a_runtime_dir_the_holder_socket_is_still_bound_in() {
 }
 
 #[test]
-fn agent_forwarding_and_desktop_sessions_are_unset_and_the_agents_env_is_set() {
+fn the_environment_is_cleared_and_only_harmless_host_variables_and_the_agents_come_back() {
     let args = bwrap_args();
-    for var in [
+    let cleared = at(&args, &["--clearenv"]);
+    assert!(args[..cleared].iter().all(|arg| arg != "--setenv"));
+    for (key, value) in [
+        ("PATH", "/usr/bin"),
+        ("LANG", "C.UTF-8"),
+        ("LC_TIME", "de_DE.UTF-8"),
+        ("AGENT_API_KEY", "own"),
+        ("AGENT_NO_UPDATE", "1"),
+    ] {
+        assert!(at(&args, &["--setenv", key, value]) > cleared, "{key}");
+    }
+    for leak in [
+        "GH_TOKEN",
+        "AWS_SECRET_ACCESS_KEY",
         "SSH_AUTH_SOCK",
         "DISPLAY",
-        "WAYLAND_DISPLAY",
-        "DBUS_SESSION_BUS_ADDRESS",
     ] {
-        at(&args, &["--unsetenv", var]);
+        assert!(!args.iter().any(|arg| arg == leak), "{leak}");
     }
-    at(&args, &["--setenv", "AGENT_NO_UPDATE", "1"]);
 }
 
 #[test]
@@ -274,6 +297,10 @@ fn effective(args: &[String], path: &str) -> (String, String) {
     let mut found = None;
     let mut rest = args;
     while let [flag, tail @ ..] = rest {
+        if flag == "--clearenv" {
+            rest = tail;
+            continue;
+        }
         let width = match flag.as_str() {
             "--bind" | "--bind-try" | "--ro-bind" | "--ro-bind-try" | "--setenv" => 2,
             "--tmpfs" | "--dev" | "--proc" | "--unsetenv" | "--chdir" => 1,

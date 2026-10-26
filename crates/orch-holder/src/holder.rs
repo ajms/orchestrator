@@ -178,6 +178,14 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
         .sandbox
         .as_ref()
         .map(|_| config.socket.with_extension("status"));
+    let env = [
+        ("TERM", "xterm-256color".into()),
+        (SESSION_ENV, config.session.as_str().into()),
+        (HOLDER_SOCKET_ENV, config.socket.to_string_lossy()),
+    ]
+    .map(|(key, value)| (key.to_string(), value.into_owned()))
+    .into_iter()
+    .chain(config.env.iter().cloned());
     let mut command = match (&config.sandbox, &status) {
         (Some(sandbox), Some(status)) => {
             let mut command = CommandBuilder::new("sh");
@@ -185,20 +193,23 @@ fn spawn_agent(config: &HoldConfig) -> io::Result<Arc<Shared>> {
             command.arg(status);
             command.args(["--json-status-fd", STATUS_FD]);
             command.args(&sandbox.args);
+            for (key, value) in env {
+                command.args(["--setenv", &key, &value]);
+            }
             command.arg("--");
             command.arg(program);
             command
         }
-        _ => CommandBuilder::new(program),
+        _ => {
+            let mut command = CommandBuilder::new(program);
+            for (key, value) in env {
+                command.env(key, value);
+            }
+            command
+        }
     };
     command.args(args);
     command.cwd(&config.cwd);
-    command.env("TERM", "xterm-256color");
-    command.env(SESSION_ENV, config.session.as_str());
-    command.env(HOLDER_SOCKET_ENV, &config.socket);
-    for (key, value) in &config.env {
-        command.env(key, value);
-    }
     let mut child = pty.slave.spawn_command(command).map_err(io::Error::other)?;
     drop(pty.slave);
     let mut reader = pty.master.try_clone_reader().map_err(io::Error::other)?;

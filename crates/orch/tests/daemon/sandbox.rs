@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use orch_core::SessionId;
 use orch_holder::{HolderClient, ToHolder};
-use orch_protocol::{AgentStateView as State, CreateSession, PhaseView, Reply, Request};
+use orch_protocol::{
+    AgentStateView as State, CreateSession, DisplayVars, PhaseView, Reply, Request,
+};
 
 use crate::bwrap::bwrap_runs;
 use crate::common::*;
@@ -152,6 +154,43 @@ async fn secrets_in_home_are_invisible_to_a_sandboxed_agent() {
         run(&mut pane, "exists", &env.path("home/.gitconfig")).await,
         "yes"
     );
+}
+
+#[tokio::test]
+async fn only_harmless_variables_and_the_agents_own_reach_a_sandboxed_agent() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.real_bwrap();
+    let mut command = env.daemon_command(Duration::from_secs(600));
+    command
+        .env("GH_TOKEN", "leaked")
+        .env("SSH_AUTH_SOCK", "/run/agent.sock")
+        .env("LANG", "C.UTF-8")
+        .env("ANTHROPIC_API_KEY", "own");
+    let _daemon = env.spawn_daemon(&mut command).await;
+    let _tui = env
+        .tui(DisplayVars {
+            wayland_display: Some("wayland-tui".into()),
+            x11_display: None,
+        })
+        .await;
+    let mut client = env.client().await;
+    let (id, mut pane) = sandboxed_session(&env, &mut client).await;
+
+    for (name, value) in [
+        ("GH_TOKEN", "<unset>"),
+        ("SSH_AUTH_SOCK", "<unset>"),
+        ("WAYLAND_DISPLAY", "<unset>"),
+        ("LANG", "C.UTF-8"),
+        ("ANTHROPIC_API_KEY", "own"),
+        ("TERM", "xterm-256color"),
+        ("ORCH_SESSION", id.as_str()),
+    ] {
+        pane.type_line(&format!("env {name}")).await;
+        pane.wait_for_text(&format!("{name}={value}")).await;
+    }
 }
 
 #[tokio::test]

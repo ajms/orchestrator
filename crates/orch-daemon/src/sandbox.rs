@@ -207,6 +207,9 @@ fn layout(
         read_only: vec![orch_program],
         masked: Vec::new(),
         configured: prepared_on_disk(configured)?,
+        host_env: std::env::vars_os()
+            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+            .collect(),
     })
 }
 
