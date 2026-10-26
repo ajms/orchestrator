@@ -260,7 +260,12 @@ case " $* " in
   *" --unshare-user "*) [ -f DIR/nested-fails ] && { echo 'bwrap: No permissions to create a new namespace' >&2; exit 1; } ;;
   *" --json-status-fd "*) [ -f DIR/start-fails ] && { echo "bwrap: Can't find source path /gone" >&2; exit 1; } ;;
 esac
-while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
+while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+  case "$1" in
+    --setenv) export "$2=$3"; shift 3 ;;
+    *) shift ;;
+  esac
+done
 shift
 exec "$@"
 "#

@@ -210,6 +210,7 @@ impl AgentAdapter for ClaudeCode {
                 .flat_map(|dir| CONFIG_CARVE_OUTS.map(|name| dir.join(name)))
                 .collect(),
             env: vec![("DISABLE_AUTOUPDATER".into(), "1".into())],
+            env_prefixes: vec!["ANTHROPIC_".into(), "CLAUDE_".into()],
         }
     }
 

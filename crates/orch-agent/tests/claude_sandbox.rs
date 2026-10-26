@@ -52,6 +52,12 @@ fn claude_reads_its_installation_and_never_updates_itself() {
 }
 
 #[test]
+fn claude_keeps_its_own_variables_such_as_its_api_key_and_config_dir() {
+    let needs = needs(&[("HOME", "/home/dev")]);
+    assert_eq!(needs.env_prefixes, ["ANTHROPIC_", "CLAUDE_"]);
+}
+
+#[test]
 fn a_moved_config_dir_is_writable_with_its_settings_carved_out() {
     let needs = needs(&[("HOME", "/home/dev"), ("CLAUDE_CONFIG_DIR", "/srv/claude")]);
     assert_eq!(

@@ -12,6 +12,7 @@ fn display(wayland: Option<&str>, x11: Option<&str>) -> DisplayVars {
 #[tokio::test]
 async fn a_new_agent_gets_the_display_variables_of_the_latest_client() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let _early = env.tui(display(Some("wayland-early"), Some(":7"))).await;
     let _late = env.tui(display(Some("wayland-late"), None)).await;
@@ -28,6 +29,7 @@ async fn a_new_agent_gets_the_display_variables_of_the_latest_client() {
 #[tokio::test]
 async fn a_one_shot_cli_connection_leaves_the_tuis_display_in_place() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let _tui = env.tui(display(Some("wayland-tui"), Some(":3"))).await;
     let mut cli = env.client().await;
@@ -43,6 +45,7 @@ async fn a_one_shot_cli_connection_leaves_the_tuis_display_in_place() {
 #[tokio::test]
 async fn a_tui_without_a_display_leaves_the_earlier_display_in_place() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let _desktop = env.tui(display(Some("wayland-desk"), Some(":5"))).await;
     let _ssh = env.tui(DisplayVars::default()).await;
@@ -59,6 +62,7 @@ async fn a_tui_without_a_display_leaves_the_earlier_display_in_place() {
 #[tokio::test]
 async fn an_agent_gets_no_display_variables_when_no_client_reported_any() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let id = running_session(&env, &mut client, "Headless").await;
@@ -71,6 +75,7 @@ async fn an_agent_gets_no_display_variables_when_no_client_reported_any() {
 #[tokio::test]
 async fn a_resumed_agent_gets_the_display_of_the_latest_client_while_a_running_one_keeps_its_own() {
     let env = Env::new();
+    env.write_config(UNSANDBOXED);
     let _daemon = env.start_daemon().await;
     let _first = env.tui(display(None, Some(":1"))).await;
     let mut client = env.client().await;
