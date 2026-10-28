@@ -108,6 +108,7 @@ async fn handle(
             let daemon = daemon.clone();
             detached(async move { daemon.create_session(create).await }).await
         }
+        Request::LookupBranch(lookup) => Ok(daemon.lookup_branch(lookup).await),
         Request::ApproveTrust { repo, hash } => daemon.approve_trust(repo, hash).await,
         Request::RetrySetup { session } => daemon.retry_setup(&session).await,
         Request::StartAnyway { session } => daemon.start_anyway(&session).await,

@@ -23,6 +23,7 @@ fn tab_goes_from_the_prompt_through_repo_branch_base_and_preset_back_to_the_prom
     tui.keys("Fix");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
+    tui.press(KeyCode::End);
     tui.keys("-x");
     assert!(field(&mut tui, "Branch").contains("orch/fix-x"));
 
@@ -203,6 +204,7 @@ fn clearing_the_branch_hands_it_back_to_the_prompt_derived_name_shown_dimmed() {
     tui.keys("Fix it");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
+    tui.press(KeyCode::End);
     tui.keys("-now");
     assert_ne!(tui.colour_of("orch/fix-it-now"), Color::DarkGray);
 

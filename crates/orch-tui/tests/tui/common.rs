@@ -9,8 +9,9 @@ use crossterm::event::{
 };
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView, CreateSession, FlagsView, FromDaemon, PhaseView, Reply, RepoSettings, Request,
-    RequestError, ScreenSnapshot, SessionView, Size, SubagentView,
+    AgentStateView, BranchLookup, CreateSession, FlagsView, FromDaemon, LookupBranch, LookupDepth,
+    PhaseView, Reply, RepoSettings, Request, RequestError, ScreenSnapshot, SessionView, Size,
+    SubagentView,
 };
 use orch_tui::{DaemonLink, Effect, Event, PaneId, RequestId, Tui, TuiConfig};
 use ratatui::Terminal;
@@ -41,6 +42,10 @@ pub struct FakeDaemon {
     replies: VecDeque<Result<Reply, RequestError>>,
     outbox: VecDeque<Event>,
     pub hold: bool,
+    pub hold_lookups: bool,
+    pub lookups_fail: bool,
+    pub origin_lookups: Vec<(String, BranchLookup)>,
+    pub local_lookups: Vec<(String, BranchLookup)>,
     held: Vec<Event>,
 }
 
@@ -66,6 +71,38 @@ impl FakeDaemon {
                 _ => None,
             })
             .collect()
+    }
+
+    pub fn lookups(&self) -> Vec<(String, LookupDepth)> {
+        self.requests()
+            .into_iter()
+            .filter_map(|request| match request {
+                Request::LookupBranch(lookup) => Some((lookup.branch, lookup.depth)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn lookup(&self, lookup: &LookupBranch) -> Result<Reply, RequestError> {
+        let (answers, otherwise) = match lookup.depth {
+            LookupDepth::Origin if self.lookups_fail => {
+                return Err(RequestError::Internal {
+                    message: "the lookup broke".into(),
+                });
+            }
+            LookupDepth::Origin => (
+                &self.origin_lookups,
+                BranchLookup::New {
+                    base: lookup.base.clone().unwrap_or("main".into()),
+                },
+            ),
+            LookupDepth::Local => (&self.local_lookups, BranchLookup::NotRefusedLocally),
+        };
+        let found = answers
+            .iter()
+            .find(|(name, _)| *name == lookup.branch)
+            .map_or(otherwise, |(_, found)| found.clone());
+        Ok(Reply::BranchLookup(found))
     }
 
     pub fn last_view(&self) -> Option<(Option<String>, bool)> {
@@ -112,9 +149,16 @@ impl DaemonLink for FakeDaemon {
                 .find(|settings| &settings.repo == repo)
                 .cloned()
                 .map_or(Reply::Done, Reply::RepoSettings)),
+            Request::LookupBranch(lookup) => self.lookup(lookup),
             _ => self.replies.pop_front().unwrap_or(Ok(Reply::Done)),
         };
-        let held = self.hold && !matches!(request, Request::Repos | Request::RepoSettings { .. });
+        let held = match &request {
+            Request::Repos | Request::RepoSettings { .. } => false,
+            Request::LookupBranch(lookup) => {
+                lookup.depth == LookupDepth::Origin && self.hold_lookups
+            }
+            _ => self.hold,
+        };
         self.requests.push((id, request));
         let response = Event::Daemon(FromDaemon::Response { id: id.0, result });
         match held {

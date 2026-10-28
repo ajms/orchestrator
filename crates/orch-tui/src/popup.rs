@@ -96,7 +96,7 @@ pub(crate) fn paste(app: &mut App, text: &str) {
     }
 }
 
-fn new_form(app: &mut App, outcome: Outcome) {
+pub(crate) fn new_form(app: &mut App, outcome: Outcome) {
     match outcome {
         Outcome::Stay => {}
         Outcome::Cancel => app.popup = None,
@@ -107,4 +107,5 @@ fn new_form(app: &mut App, outcome: Outcome) {
         Outcome::Edit(text) => app.push(Call::Local(Effect::EditText { text })),
         Outcome::RepoChanged => app.form_repo_changed(),
     }
+    app.check_branch();
 }

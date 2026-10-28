@@ -17,9 +17,24 @@ pub struct ResolvedBranch {
 
 impl Repo {
     pub fn reserved_branches(&self, configured_base: Option<&str>) -> Result<Vec<String>, Error> {
+        self.reserved_with(configured_base, || self.origin_head())
+    }
+
+    pub fn known_reserved_branches(
+        &self,
+        configured_base: Option<&str>,
+    ) -> Result<Vec<String>, Error> {
+        self.reserved_with(configured_base, || self.known_origin_head())
+    }
+
+    fn reserved_with(
+        &self,
+        configured_base: Option<&str>,
+        origin_head: impl FnOnce() -> Option<String>,
+    ) -> Result<Vec<String>, Error> {
         let mut reserved: Vec<String> = configured_base.map(String::from).into_iter().collect();
         if self.has_origin() {
-            reserved.extend(self.origin_head());
+            reserved.extend(origin_head());
         } else if reserved.is_empty() {
             reserved.extend(self.head_branch()?);
         }
@@ -76,7 +91,7 @@ impl Repo {
         Ok(worktree)
     }
 
-    fn refuse_checked_out(&self, branch: &str) -> Result<(), Error> {
+    pub fn refuse_checked_out(&self, branch: &str) -> Result<(), Error> {
         let checkout = self
             .worktree_entries()?
             .into_iter()

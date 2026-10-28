@@ -117,6 +117,7 @@ fn an_edited_branch_base_and_preset_are_sent() {
     tui.keys("Stacked work");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
+    tui.press(KeyCode::End);
     tui.keys("-v2");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Down);

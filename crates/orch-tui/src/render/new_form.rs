@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use orch_protocol::{BranchFound, BranchLookup};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -7,6 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
+use crate::branch_check::BranchStatus;
 use crate::new_form::{Field, NewForm};
 use crate::repo_picker::{PickerRow, RepoPicker};
 use crate::sessions::repo_name;
@@ -68,6 +70,13 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
                 let (value, at) = value(form, field, at, home);
                 cursor = cursor.or(at);
                 lines.push(value);
+                if field == Field::Branch {
+                    let (text, style) = status(form);
+                    let room = usize::from(fields.width.saturating_sub(2)).max(1);
+                    lines.extend(wrap(&text, room).into_iter().map(|(start, end)| {
+                        Line::styled(format!(" {}", &text[start..end]), style)
+                    }));
+                }
                 lines.push(Line::default());
             }
             lines.extend(error(form));
@@ -83,7 +92,7 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
 fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -> Option<Position> {
     let rows = match form.repo.picker() {
         Some(_) => body.height / 2,
-        None => 4 + u16::from(form.error.is_some()) + 1,
+        None => 5 + u16::from(form.error.is_some()) + 1,
     };
     let [fields, head, text] = Layout::vertical([
         Constraint::Length(rows),
@@ -108,6 +117,11 @@ fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
                 let mut line = Line::from(vec![label(form, field, ROW_LABEL), Span::raw(" ")]);
                 line.spans.extend(value.spans);
                 lines.push(line);
+                if field == Field::Branch {
+                    let (text, style) = status(form);
+                    let indent = " ".repeat(ROW_LABEL + 4);
+                    lines.push(Line::styled(format!("{indent}{text}"), style));
+                }
             }
             lines.extend(error(form));
             frame.render_widget(Paragraph::new(lines), fields);
@@ -122,6 +136,9 @@ fn hints(form: &NewForm) -> Line<'static> {
     if form.discarding {
         return Line::from(" Esc again to discard · any other key keeps editing ").yellow();
     }
+    if form.check.waiting() {
+        return Line::from(" ⋯ checking before creating · Esc cancels ").yellow();
+    }
     let keys = match (form.repo.picker(), form.field) {
         (Some(_), _) => {
             "type to filter, / or ~ for a path · ↑/↓ choose · Tab descend · Enter pick · Esc back"
@@ -134,7 +151,46 @@ fn hints(form: &NewForm) -> Line<'static> {
         (None, Field::Base) => "↑/↓ other Branches · Enter next · Ctrl+s create · Esc cancel",
         (None, Field::Preset) => "←/→ choose · Enter next · Ctrl+s create · Esc cancel",
     };
+    let keys = match form.check.refused() {
+        true => keys.replace("Ctrl+s create", "Ctrl+s blocked by the Branch"),
+        false => keys.to_string(),
+    };
     Line::from(format!(" {keys} ")).dark_gray()
+}
+
+fn status(form: &NewForm) -> (String, Style) {
+    let dim = Style::new().fg(Color::DarkGray);
+    let yellow = Style::new().fg(Color::Yellow);
+    let green = Style::new().fg(Color::Green);
+    let looking = ("⋯ looking on origin…".to_string(), yellow);
+    let lookup = match form.check.status() {
+        BranchStatus::Derived => return (format!("+ new Branch from {}", form.base_shown()), dim),
+        BranchStatus::Looking => return looking,
+        BranchStatus::Unknown(reason) => {
+            return (format!("⋯ couldn't look it up: {reason}"), yellow);
+        }
+        BranchStatus::Found(lookup) => lookup,
+    };
+    match lookup {
+        BranchLookup::New { base } => (format!("+ new Branch from {base}"), dim),
+        BranchLookup::Existing {
+            branch,
+            pr: Some(pr),
+            ..
+        } => (
+            format!("↺ {branch} · PR #{} open \"{}\"", pr.number, pr.title),
+            green,
+        ),
+        BranchLookup::Existing { found, .. } => {
+            let place = match found {
+                BranchFound::Local => "local",
+                BranchFound::Origin => "origin",
+            };
+            (format!("↺ Existing Branch · {place} · no PR"), green)
+        }
+        BranchLookup::Refused { reason } => (format!("✗ {reason}"), Style::new().fg(Color::Red)),
+        BranchLookup::NotRefusedLocally => looking,
+    }
 }
 
 fn label(form: &NewForm, field: Field, width: usize) -> Span<'static> {
@@ -159,12 +215,24 @@ fn value(
     home: Option<&Path>,
 ) -> (Line<'static>, Option<Position>) {
     let focused = form.field == field && form.repo.picker().is_none();
+    if let (Field::Base, Some(pr)) = (field, form.locking_pr()) {
+        let cursor = focused.then_some(Position::new(area.x + 1, area.y));
+        let shown = format!(" {} (from PR #{})", pr.base, pr.number);
+        return (Line::from(shown).dark_gray(), cursor);
+    }
     let line = match field {
         Field::Repo => match form.repo.path() {
             Some(repo) if form.repo.moved() => Line::from(format!(" → {}", tilde(repo, home))),
             Some(repo) => Line::from(format!(" {}", repo.display())),
             None => Line::from(" (pick a Repo)").dark_gray(),
         },
+        Field::Branch if form.branch.text().is_empty() => {
+            let cursor = focused.then_some(Position::new(area.x + 1, area.y));
+            return (
+                Line::from(format!(" {}", form.derived_branch())).dark_gray(),
+                cursor,
+            );
+        }
         Field::Branch if form.branch.suggested() => {
             return single_line(&form.branch, focused, area, Style::new().dark_gray());
         }

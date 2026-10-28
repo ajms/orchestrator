@@ -64,9 +64,19 @@ In the TUI, type `:new`, write a prompt (`Ctrl+g` opens `$EDITOR`, `Ctrl+r` pick
 2. runs the Repo's Setup script;
 3. starts Claude in the pane.
 
-Type a Branch name into the form's Branch field to pick it yourself. A name that exists nowhere creates that Branch from the Base branch. A name that already exists, locally or on origin, starts the Session on that **Existing Branch** under its own name, with or without the `orch/` prefix, so the Agent's pushes update its PR. The Worktree's slug is the name without the prefix. A Branch only on origin is fetched, and a local one behind origin is fast-forwarded; one ahead of origin starts as it is. `orch` refuses the Branch if it has diverged from origin, origin can't be reached, it is checked out in the main checkout or any other worktree (Subagent worktrees included), another Session owns it, or it is origin's default branch, the configured `base` (without an origin, the Repo's current branch) or the new Session's own Base branch. Another Session's Base branch is fine.
+Type a Branch name into the form's Branch field to pick it yourself: the first character replaces the name derived from the prompt, and an empty field falls back to the derived name. A name that exists nowhere creates that Branch from the Base branch. A name that already exists, locally or on origin, starts the Session on that **Existing Branch** under its own name, with or without the `orch/` prefix, so the Agent's pushes update its PR. The Worktree's slug is the name without the prefix. A Branch only on origin is fetched, and a local one behind origin is fast-forwarded; one ahead of origin starts as it is. `orch` refuses the Branch if it has diverged from origin, origin can't be reached, it is checked out in the main checkout or any other worktree (Subagent worktrees included), another Session owns it, or it is origin's default branch, the configured `base` (without an origin, the Repo's current branch) or the new Session's own Base branch. Another Session's Base branch is fine.
 
 Type `#<PR>`, such as `#123`, to continue that PR's Branch. `orch` refuses a PR that doesn't exist, is merged, has its Branch in a fork, or whose Branch no longer exists; a closed PR starts the Session without a PR. A typed Branch name with an open PR is treated the same way, and more than one open PR is refused, asking for `#<number>`. When origin is on GitHub, a failed PR lookup (for example, `gh` not logged in) refuses the Session with the reason. Without GitHub or `gh`, the name starts with no PR. With an open PR, the Session's Base branch is the PR's base (a different Base is refused, and a base only on origin is fetched), and the Session goes to PR open right after Setup, counting only comments made from then on.
+
+A status line under the Branch field says what the name is before you create the Session:
+
+- `+ new Branch from <Base>` for a name that exists nowhere, or the name derived from the prompt;
+- `↺ Existing Branch · local · no PR` (or `· origin ·`) for an Existing Branch without an open PR;
+- `↺ <branch> · PR #123 open "<title>"` for `#123`, or a Branch with an open PR;
+- `⋯ looking on origin…` while origin and GitHub are asked;
+- `✗ <reason>` when the Session would be refused.
+
+Local checks (the Base branches, other Sessions' Branches, checked-out Branches) run on every keystroke. origin and the PR are looked up after about half a second without typing, or when you leave the field. With an open PR, the Base field shows the PR's base read-only until the Branch field changes. `Ctrl+s` is blocked while a refusal shows. While a lookup is still running it waits for it (`⋯ checking before creating`, `Esc` stops waiting), then creates the Session or shows the refusal. If the lookup itself fails, the status line says so (`⋯ couldn't look it up: …`) without blocking `Ctrl+s`. The Daemon checks everything again when it creates the Session, and its answer decides.
 
 When Claude runs a Subagent in its own worktree, `orch` creates that worktree at `.orchestrator/subagents/<slug>/<name>` on Branch `worktree-<name>`, starting from the Session's HEAD. Guards treat it as part of the Session, so the Subagent can edit there without a prompt. It is removed with the Session. A Subagent Branch with commits that were never merged into the Session is kept.
 
@@ -125,7 +135,7 @@ In the Review view the wheel scrolls the column under it, a click on a file show
 
 Commands:
 
-- `:n`, `:new`
+- `:n`, `:new` (the Branch field's status line says whether the name is new, an Existing Branch, a PR, or refused)
 - `:l`, `:land` (with an open PR, only pushes to it)
 - `:d`, `:discard` (an Existing Branch is kept: only the Worktree is removed, and the preview warns only about uncommitted changes)
 - `:review`

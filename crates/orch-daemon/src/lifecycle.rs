@@ -254,7 +254,7 @@ impl Daemon {
         let (name, resolved) = match &target {
             Some(target) => {
                 let request = BranchRequest {
-                    repo: repo.id,
+                    repo: root.path(),
                     target,
                     base: &base,
                     configured_base: config.base_branch(),
