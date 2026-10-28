@@ -6,6 +6,7 @@ mod clipboard;
 mod common;
 mod discard;
 mod display;
+mod existing_branch;
 mod guards;
 mod handshake;
 mod idle;

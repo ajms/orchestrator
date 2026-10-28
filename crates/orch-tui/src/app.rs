@@ -488,6 +488,7 @@ impl App {
                 Ok(Reply::DiscardPreview {
                     uncommitted,
                     unlanded,
+                    branch_kept,
                 }),
             ) => {
                 let question = match self.sessions.get(&session) {
@@ -495,7 +496,8 @@ impl App {
                     None => format!("Discard {}?", self.sessions.slug_or_id(&session)),
                 };
                 let target = DiscardTarget::Session(session);
-                let confirm = DiscardConfirm::new(target, question, uncommitted, unlanded);
+                let confirm =
+                    DiscardConfirm::new(target, question, uncommitted, unlanded, branch_kept);
                 self.popup = Some(Popup::Discard(confirm));
             }
             (
@@ -503,11 +505,13 @@ impl App {
                 Ok(Reply::DiscardPreview {
                     uncommitted,
                     unlanded,
+                    branch_kept,
                 }),
             ) => {
                 let question = format!("Remove the Leftover {}?", leftover.label());
                 let target = DiscardTarget::Leftover { repo, leftover };
-                let confirm = DiscardConfirm::new(target, question, uncommitted, unlanded);
+                let confirm =
+                    DiscardConfirm::new(target, question, uncommitted, unlanded, branch_kept);
                 self.popup = Some(Popup::Discard(confirm));
             }
             (Pending::Usage, Ok(Reply::Usage(report))) => self.popup = Some(Popup::Usage(report)),

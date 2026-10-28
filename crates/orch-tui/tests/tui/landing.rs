@@ -230,6 +230,7 @@ fn discard_previews_what_would_be_lost_before_a_one_key_confirmation() {
             id: "1a2b3c4d5e6f".into(),
             subject: "Read timeout from config".into(),
         }],
+        branch_kept: false,
     }));
     tui.command("discard");
     assert_eq!(
@@ -260,12 +261,33 @@ fn discard_previews_what_would_be_lost_before_a_one_key_confirmation() {
 }
 
 #[test]
+fn discarding_a_session_on_an_existing_branch_says_the_branch_is_kept() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![session("webshop", "feature-x")]);
+    tui.daemon().script_reply(Ok(Reply::DiscardPreview {
+        uncommitted: vec!["src/wip.rs".into()],
+        unlanded: vec![],
+        branch_kept: true,
+    }));
+
+    tui.command("discard");
+
+    let screen = tui.screen();
+    assert!(screen.contains("src/wip.rs (uncommitted)"), "{screen}");
+    assert!(
+        screen.contains("The Existing Branch is kept; only the Worktree is removed"),
+        "{screen}"
+    );
+}
+
+#[test]
 fn any_other_key_cancels_the_discard() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "doomed")]);
     tui.daemon().script_reply(Ok(Reply::DiscardPreview {
         uncommitted: vec![],
         unlanded: vec![],
+        branch_kept: false,
     }));
     tui.command("discard");
     assert!(tui.screen().contains("nothing uncommitted"));

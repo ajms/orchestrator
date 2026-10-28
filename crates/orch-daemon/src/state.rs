@@ -411,6 +411,7 @@ pub(crate) fn session_worktree(record: &SessionRecord) -> SessionWorktree {
             branch: record.branch.clone(),
         },
         base: record.base.clone(),
+        existing_branch: record.existing_branch,
     }
 }
 

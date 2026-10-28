@@ -82,6 +82,16 @@ impl Repo {
     }
 
     fn origin_default_branch(&self) -> Option<String> {
+        let branch = self.origin_head()?;
+        let local_ready = self.branch_exists(&branch)
+            || self
+                .git(["branch", "--no-track", &branch])
+                .arg(format!("refs/remotes/origin/{branch}"))
+                .succeeds();
+        local_ready.then_some(branch)
+    }
+
+    pub(crate) fn origin_head(&self) -> Option<String> {
         let _ = self
             .git(["remote", "set-head", "origin", "--auto"])
             .succeeds();
@@ -89,13 +99,7 @@ impl Repo {
             .git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
             .run()
             .ok()?;
-        let branch = remote_head.strip_prefix("origin/")?.to_string();
-        let local_ready = self.branch_exists(&branch)
-            || self
-                .git(["branch", "--no-track", &branch])
-                .arg(format!("refs/remotes/origin/{branch}"))
-                .succeeds();
-        local_ready.then_some(branch)
+        Some(remote_head.strip_prefix("origin/")?.to_string())
     }
 
     pub(crate) fn git<I, S>(&self, args: I) -> Git<'_>

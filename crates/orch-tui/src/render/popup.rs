@@ -79,7 +79,13 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
         Line::default(),
     ];
     if preview.uncommitted.is_empty() && preview.unlanded.is_empty() {
-        lines.push(Line::from(" nothing uncommitted and no unlanded commits").dark_gray());
+        lines.push(
+            Line::from(match preview.branch_kept {
+                true => " nothing uncommitted",
+                false => " nothing uncommitted and no unlanded commits",
+            })
+            .dark_gray(),
+        );
     } else {
         lines.push(Line::from(" You will lose:").red());
         lines.extend(
@@ -93,6 +99,12 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
                 .unlanded
                 .iter()
                 .map(|commit| Line::from(format!("   {commit}"))),
+        );
+    }
+    if preview.branch_kept {
+        lines.push(Line::default());
+        lines.push(
+            Line::from(" The Existing Branch is kept; only the Worktree is removed.").dark_gray(),
         );
     }
     lines.push(Line::default());

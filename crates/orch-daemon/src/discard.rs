@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use orch_core::{PhaseEvent, SessionId};
+use orch_git::DiscardPreview;
 use orch_protocol::{CommitView, Reply, RequestError};
 
 use crate::lifecycle::{Busy, refused, with_git};
@@ -13,17 +14,7 @@ impl Daemon {
         let preview = with_git(repo, move |git| git.discard_preview(&worktree))
             .await?
             .map_err(refused)?;
-        Ok(Reply::DiscardPreview {
-            uncommitted: preview.uncommitted,
-            unlanded: preview
-                .unlanded
-                .into_iter()
-                .map(|commit| CommitView {
-                    id: commit.id,
-                    subject: commit.subject,
-                })
-                .collect(),
-        })
+        Ok(preview_reply(preview))
     }
 
     pub(crate) async fn discard(
@@ -44,5 +35,20 @@ impl Daemon {
         }
         self.end_session(id, PhaseEvent::Discarded).await?;
         Ok(Reply::Done)
+    }
+}
+
+pub(crate) fn preview_reply(preview: DiscardPreview) -> Reply {
+    Reply::DiscardPreview {
+        uncommitted: preview.uncommitted,
+        unlanded: preview
+            .unlanded
+            .into_iter()
+            .map(|commit| CommitView {
+                id: commit.id,
+                subject: commit.subject,
+            })
+            .collect(),
+        branch_kept: preview.branch_kept,
     }
 }

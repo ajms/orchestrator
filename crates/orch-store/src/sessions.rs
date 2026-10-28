@@ -20,6 +20,7 @@ pub struct NewSession {
     pub worktree: PathBuf,
     pub phase: Phase,
     pub preset: String,
+    pub existing_branch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +30,7 @@ pub struct SessionRecord {
     pub slug: String,
     pub title: Option<String>,
     pub branch: String,
+    pub existing_branch: bool,
     pub base: String,
     pub worktree: PathBuf,
     pub phase: Phase,
@@ -60,7 +62,7 @@ const COLUMNS: &str = "id, repo_id, slug, branch, base, worktree, phase, preset,
     unseen, stalled, needs_rebase, recovered, worktree_missing, base_missing, muted,
     pr_number, pr_checks, pr_review, pr_new_comments, pr_state,
     port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title,
-    holder_seq";
+    holder_seq, existing_branch";
 
 fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
     let pr = match row.get::<_, Option<i64>>("pr_number")? {
@@ -79,6 +81,7 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         slug: row.get("slug")?,
         title: row.get("title")?,
         branch: row.get("branch")?,
+        existing_branch: row.get("existing_branch")?,
         base: row.get("base")?,
         worktree: PathBuf::from(row.get::<_, String>("worktree")?),
         phase: row.get::<_, Stored<_>>("phase")?.0,
@@ -115,8 +118,9 @@ impl Store {
         let now = now_millis();
         self.conn.execute(
             "INSERT INTO sessions
-                (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at,
+                 existing_branch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
             params![
                 new.id.as_str(),
                 new.repo.0,
@@ -127,6 +131,7 @@ impl Store {
                 Stored(new.phase),
                 new.preset,
                 now,
+                new.existing_branch,
             ],
         )?;
         self.existing_session(&new.id)

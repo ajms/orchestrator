@@ -57,6 +57,13 @@ impl Repo {
             self.git(["worktree", "prune"]).run()?;
         }
         let kept_worktree = present && !worktree_ours;
+        if worktree.existing_branch {
+            return Ok(Cleaned {
+                kept_worktree,
+                kept_branch: false,
+                teardown: outcome,
+            });
+        }
         let branch_held = kept_worktree && checked_out.as_ref() == Some(branch);
         let branch_ours = !in_use.branch
             && !branch_held

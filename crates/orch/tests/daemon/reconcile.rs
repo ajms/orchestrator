@@ -422,11 +422,13 @@ async fn leftovers_are_listed_kept_across_reconciles_previewed_and_adopted_or_re
         Ok(Reply::DiscardPreview {
             uncommitted: vec!["deep/notes.txt".into()],
             unlanded: Vec::new(),
+            branch_kept: false,
         })
     );
     let Ok(Reply::DiscardPreview {
         uncommitted,
         unlanded,
+        branch_kept: false,
     }) = client.request(preview(&expected[3])).await
     else {
         panic!("no preview of the gone Branch");

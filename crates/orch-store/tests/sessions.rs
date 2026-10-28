@@ -5,7 +5,7 @@ use orch_core::{
     ChecksState, ConversationId, Flags, PermissionMode, Phase, PrState, PrStatus, ReviewDecision,
     SessionId,
 };
-use orch_store::StoreError;
+use orch_store::{NewSession, StoreError};
 
 #[test]
 fn a_new_session_starts_without_flags_conversations_or_port_block() {
@@ -97,6 +97,48 @@ fn a_queued_prompt_for_the_agent_persists_until_cleared() {
             .unwrap()
             .queued_prompt,
         None
+    );
+}
+
+#[test]
+fn a_session_on_an_existing_branch_is_remembered_across_reopening() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let created = fx
+        .store
+        .create_session(NewSession {
+            existing_branch: true,
+            ..new_session(&repo, "feature-x")
+        })
+        .unwrap();
+    let plain = fx.session(&repo, "plain");
+
+    fx.reopen();
+
+    let loaded = |id| fx.store.session(id).unwrap().unwrap().existing_branch;
+    assert!(loaded(&created.id));
+    assert!(!loaded(&plain.id));
+}
+
+#[test]
+fn a_session_stored_before_existing_branches_loads_as_on_a_branch_orch_created() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let session = fx.session(&repo, "older");
+    let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;",
+    )
+    .unwrap();
+
+    fx.reopen();
+
+    assert!(
+        !fx.store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .existing_branch
     );
 }
 

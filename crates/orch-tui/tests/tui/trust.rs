@@ -16,6 +16,7 @@ fn discard_answered_untrusted() -> Harness {
     tui.daemon().script_reply(Ok(Reply::DiscardPreview {
         uncommitted: Vec::new(),
         unlanded: Vec::new(),
+        branch_kept: false,
     }));
     tui.daemon().script_reply(untrusted());
     tui.command("discard");

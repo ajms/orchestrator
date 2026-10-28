@@ -172,6 +172,7 @@ fn removing_a_leftover_previews_what_is_lost_and_needs_confirmation() {
             id: "abcdef123456".into(),
             subject: "Stray work".into(),
         }],
+        branch_kept: false,
     }));
     tui.press(KeyCode::Enter);
     let leftover = LeftoverView::Branch {

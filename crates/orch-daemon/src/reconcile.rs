@@ -7,12 +7,12 @@ use orch_core::{Phase, PhaseEvent, SessionId};
 use orch_git::{InUse, Leftover, Script, SessionName, slugify};
 use orch_holder::{Hello, HolderClient, ToHolder, holders_dir};
 use orch_protocol::{
-    CommitView, Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, Reply, RepoReport,
-    RequestError,
+    Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, Reply, RepoReport, RequestError,
 };
 use orch_store::{NewSession, PortBlock, RepoRoot, SessionRecord};
 
 use crate::cleanup::{CleanupMarker, remove_session_dir};
+use crate::discard::preview_reply;
 use crate::lifecycle::{
     Busy, HOLDER_EXIT_WAIT, new_session_id, refused, select_preset, session_env, with_git,
 };
@@ -250,6 +250,7 @@ impl Daemon {
                     worktree: new.worktree,
                     phase: new.phase,
                     preset: new.preset,
+                    existing_branch: false,
                 })?;
                 match new.port_block {
                     Some(block) => drop(store.hold_port_block(&created.id, block)?),
@@ -903,17 +904,7 @@ impl Daemon {
         let preview = with_git(repo, move |git| git.leftover_preview(&leftover, &base))
             .await?
             .map_err(refused)?;
-        Ok(Reply::DiscardPreview {
-            uncommitted: preview.uncommitted,
-            unlanded: preview
-                .unlanded
-                .into_iter()
-                .map(|commit| CommitView {
-                    id: commit.id,
-                    subject: commit.subject,
-                })
-                .collect(),
-        })
+        Ok(preview_reply(preview))
     }
 
     async fn adopt_leftover(

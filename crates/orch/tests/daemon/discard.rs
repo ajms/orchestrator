@@ -66,6 +66,7 @@ async fn discarding_shows_what_would_be_lost_then_throws_the_session_away() {
                 id: commit_id,
                 subject: "add kept.txt".into(),
             }],
+            branch_kept: false,
         })
     );
 

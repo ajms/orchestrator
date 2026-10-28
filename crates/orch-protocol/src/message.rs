@@ -310,6 +310,8 @@ pub enum Reply {
     DiscardPreview {
         uncommitted: Vec<String>,
         unlanded: Vec<CommitView>,
+        #[serde(default)]
+        branch_kept: bool,
     },
     Reconciled {
         report: Box<ReconcileReport>,
