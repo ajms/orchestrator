@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0](https://github.com/ajms/orchestrator/compare/v0.8.0...v0.9.0) - 2026-10-28
+
+### Added
+
+- *(tui)* show what the :new Branch field names before creating
+- *(daemon)* start a Session from a PR and follow PR retargets
+- *(daemon)* start a Session on an Existing Branch
+
 ## [0.8.0](https://github.com/ajms/orchestrator/compare/v0.7.0...v0.8.0) - 2026-10-26
 
 ### Added
