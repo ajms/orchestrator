@@ -51,11 +51,20 @@ impl Repo {
     }
 
     pub fn default_base(&self, configured: Option<&str>) -> Result<String, Error> {
-        if let Some(base) = configured {
-            return Ok(base.to_string());
-        }
-        if let Some(branch) = self.origin_default_branch() {
-            return Ok(branch);
+        self.base_with(configured, || self.origin_default_branch())
+    }
+
+    pub fn known_default_base(&self, configured: Option<&str>) -> Result<String, Error> {
+        self.base_with(configured, || self.known_origin_head())
+    }
+
+    fn base_with(
+        &self,
+        configured: Option<&str>,
+        origin_base: impl FnOnce() -> Option<String>,
+    ) -> Result<String, Error> {
+        if let Some(base) = configured.map(String::from).or_else(origin_base) {
+            return Ok(base);
         }
         self.git(["symbolic-ref", "--short", "HEAD"]).run()
     }
@@ -82,20 +91,28 @@ impl Repo {
     }
 
     fn origin_default_branch(&self) -> Option<String> {
-        let _ = self
-            .git(["remote", "set-head", "origin", "--auto"])
-            .succeeds();
-        let remote_head = self
-            .git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-            .run()
-            .ok()?;
-        let branch = remote_head.strip_prefix("origin/")?.to_string();
+        let branch = self.origin_head()?;
         let local_ready = self.branch_exists(&branch)
             || self
                 .git(["branch", "--no-track", &branch])
                 .arg(format!("refs/remotes/origin/{branch}"))
                 .succeeds();
         local_ready.then_some(branch)
+    }
+
+    pub(crate) fn origin_head(&self) -> Option<String> {
+        let _ = self
+            .git(["remote", "set-head", "origin", "--auto"])
+            .succeeds();
+        self.known_origin_head()
+    }
+
+    pub(crate) fn known_origin_head(&self) -> Option<String> {
+        let remote_head = self
+            .git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+            .run()
+            .ok()?;
+        Some(remote_head.strip_prefix("origin/")?.to_string())
     }
 
     pub(crate) fn git<I, S>(&self, args: I) -> Git<'_>

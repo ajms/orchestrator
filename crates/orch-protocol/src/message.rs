@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -84,6 +84,7 @@ pub struct OpenPane {
 #[serde(tag = "request", rename_all = "snake_case")]
 pub enum Request {
     CreateSession(CreateSession),
+    LookupBranch(LookupBranch),
     ApproveTrust {
         repo: PathBuf,
         hash: String,
@@ -207,6 +208,52 @@ impl CreateSession {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LookupBranch {
+    pub repo: PathBuf,
+    pub branch: String,
+    pub base: Option<String>,
+    pub depth: LookupDepth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LookupDepth {
+    Local,
+    Origin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum BranchLookup {
+    New {
+        base: String,
+    },
+    Existing {
+        branch: String,
+        found: BranchFound,
+        pr: Option<OpenPr>,
+    },
+    Refused {
+        reason: String,
+    },
+    NotRefusedLocally,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BranchFound {
+    Local,
+    Origin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenPr {
+    pub number: u64,
+    pub title: String,
+    pub base: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GuardChoice {
@@ -292,6 +339,7 @@ pub enum Reply {
     Created {
         session: SessionId,
     },
+    BranchLookup(BranchLookup),
     Done,
     Drafted {
         title: String,
@@ -307,9 +355,15 @@ pub enum Reply {
         #[serde(default)]
         committed_changes: bool,
     },
+    Pushed {
+        number: u64,
+        committed_changes: bool,
+    },
     DiscardPreview {
         uncommitted: Vec<String>,
         unlanded: Vec<CommitView>,
+        #[serde(default)]
+        branch_kept: bool,
     },
     Reconciled {
         report: Box<ReconcileReport>,

@@ -352,6 +352,61 @@ async fn landing_the_base_of_a_stacked_pr_retargets_that_pr_on_github() {
 }
 
 #[tokio::test]
+async fn polling_retries_a_failed_stacked_retarget_instead_of_moving_back() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    env.remote(&repo);
+    env.fake_gh();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (lower, _lower_pane) = idle_session(&env, &mut client, "Lower").await;
+    let lower_branch = client.sessions[&lower].branch.clone();
+    commit(&client.sessions[&lower].worktree, "lower.txt", "lower\n");
+    let (upper, _pane) = stacked_on(&env, &mut client, &lower, "Upper").await;
+    commit(&client.sessions[&upper].worktree, "upper.txt", "upper\n");
+    land_pr(&mut client, &upper, "Upper").await.unwrap();
+    env.gh_reports(&format!(
+        r#"{{"state":"OPEN","statusCheckRollup":[],"reviewDecision":"","comments":[],"reviews":[],"baseRefName":"{lower_branch}"}}"#
+    ));
+    env.gh_switch("fail-edit", true);
+    let landed = client
+        .request(Request::Land {
+            session: lower.clone(),
+            landing: Landing::Squash {
+                message: "Lower".into(),
+            },
+            skip_teardown: false,
+        })
+        .await;
+    assert!(matches!(landed, Ok(Reply::Landed { .. })), "{landed:?}");
+    client
+        .until(&upper, "retargeted", |view| view.base == "main")
+        .await;
+
+    refresh(&mut client, &upper).await.unwrap();
+    settled(&mut client).await;
+    let after_failure = client.sessions[&upper].base.clone();
+    env.gh_switch("fail-edit", false);
+    let edits_before = env
+        .gh_calls()
+        .matches("pr\nedit\n42\n--base\nmain\n")
+        .count();
+    refresh(&mut client, &upper).await.unwrap();
+
+    assert_eq!(after_failure, "main");
+    assert_eq!(git(&repo, &["branch", "--list", &lower_branch]), "");
+    assert_eq!(
+        env.gh_calls()
+            .matches("pr\nedit\n42\n--base\nmain\n")
+            .count(),
+        edits_before + 1,
+        "{}",
+        env.gh_calls()
+    );
+    assert_eq!(client.sessions[&upper].base, "main");
+}
+
+#[tokio::test]
 async fn a_closed_pr_can_be_reopened_on_github_or_abandoned_for_a_squash() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;
@@ -540,10 +595,12 @@ async fn a_pr_landing_adopts_the_branchs_open_pr_instead_of_failing() {
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let repo = env.repo("app");
-    env.remote(&repo);
+    env.github_remote(&repo);
     env.fake_gh();
     env.gh_switch("fail-create", true);
-    env.gh_lists(r#"[{"number":7}]"#);
+    env.gh_lists(
+        r#"[{"number":7,"title":"Add caching","state":"OPEN","baseRefName":"main","headRefName":"orch/add-caching"}]"#,
+    );
     let (id, _pane) = idle_session(&env, &mut client, "Add caching").await;
 
     let opened = client
@@ -559,7 +616,7 @@ async fn a_pr_landing_adopts_the_branchs_open_pr_instead_of_failing() {
 
     assert_eq!(
         opened,
-        Ok(Reply::PrOpened {
+        Ok(Reply::Pushed {
             number: 7,
             committed_changes: false,
         })

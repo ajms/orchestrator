@@ -1,3 +1,4 @@
+mod branch;
 mod cleanup;
 mod discard;
 mod error;
@@ -12,6 +13,7 @@ mod stacking;
 mod subagent;
 mod worktree;
 
+pub use branch::{BranchSource, ResolvedBranch};
 pub use cleanup::{Cleaned, CleanupCheckpoint, InUse};
 pub use discard::{Commit, DiscardPreview};
 pub use error::Error;

@@ -287,6 +287,24 @@ impl Live {
         self.status.update_pr(pr)
     }
 
+    pub(crate) fn move_base(&mut self, base: &str) {
+        self.record.base = base.into();
+        self.status.flag_needs_rebase();
+    }
+
+    pub(crate) fn follow_base(&mut self, base: &str, problem: Option<String>) {
+        if self.record.base == base {
+            return;
+        }
+        self.move_base(base);
+        match problem {
+            None => self.status.set_base_missing(false),
+            Some(problem) => {
+                self.last_error = Some(format!("following the PR's base {base}: {problem}"));
+            }
+        }
+    }
+
     fn set_watched(&mut self, watched: bool) {
         self.status.set_watched(watched);
         if watched
@@ -411,6 +429,7 @@ pub(crate) fn session_worktree(record: &SessionRecord) -> SessionWorktree {
             branch: record.branch.clone(),
         },
         base: record.base.clone(),
+        existing_branch: record.existing_branch,
     }
 }
 

@@ -55,6 +55,7 @@ fn worktree_is_created_inside_the_repo_on_a_new_branch_from_the_base() {
             path: fixture.root.join(".orchestrator/worktrees/fix-bug"),
             name: name("fix-bug"),
             base: "main".into(),
+            existing_branch: false,
         }
     );
     assert_eq!(repo.session_worktree(&name("fix-bug"), "main"), worktree);
@@ -284,7 +285,7 @@ fn an_unreachable_origin_refuses_the_worktree() {
 
     let error = repo.create_worktree(&name("fix"), "main").unwrap_err();
 
-    assert!(matches!(error, Error::Git { .. }), "{error}");
+    assert_eq!(error, Error::OriginUnreachable);
     assert_nothing_created(&fixture, "fix");
 }
 

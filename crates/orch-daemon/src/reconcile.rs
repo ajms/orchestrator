@@ -7,16 +7,16 @@ use orch_core::{Phase, PhaseEvent, SessionId};
 use orch_git::{InUse, Leftover, Script, SessionName, slugify};
 use orch_holder::{Hello, HolderClient, ToHolder, holders_dir};
 use orch_protocol::{
-    CommitView, Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, Reply, RepoReport,
-    RequestError,
+    Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, Reply, RepoReport, RequestError,
 };
 use orch_store::{NewSession, PortBlock, RepoRoot, SessionRecord};
 
 use crate::cleanup::{CleanupMarker, remove_session_dir};
+use crate::discard::preview_reply;
 use crate::lifecycle::{
     Busy, HOLDER_EXIT_WAIT, new_session_id, refused, select_preset, session_env, with_git,
 };
-use crate::pr::{open_pr_of, retarget_pr};
+use crate::pr::{open_prs, retarget_pr};
 use crate::state::{Daemon, Live, session_worktree};
 
 const HELLO_WAIT: Duration = Duration::from_secs(2);
@@ -250,6 +250,7 @@ impl Daemon {
                     worktree: new.worktree,
                     phase: new.phase,
                     preset: new.preset,
+                    existing_branch: false,
                 })?;
                 match new.port_block {
                     Some(block) => drop(store.hold_port_block(&created.id, block)?),
@@ -352,8 +353,12 @@ impl Daemon {
             Ok(())
         });
         self.adopt_or_suspend(id).await;
-        if let Some(number) = open_pr_of(&repo, &branch).await {
-            let _ = self.record_pr(id, number);
+        if let Some(pr) = open_prs(&repo, &branch)
+            .await
+            .ok()
+            .and_then(|prs| prs.into_iter().next())
+        {
+            let _ = self.record_pr(id, pr.number);
         }
         Some(())
     }
@@ -811,14 +816,14 @@ impl Daemon {
         }
         let mut pr = None;
         self.update(id, |live| {
-            live.record.base.clone_from(&base);
+            live.move_base(&base);
             live.status.set_base_missing(false);
-            live.status.flag_needs_rebase();
             pr = live.status.flags().pr.as_ref().map(|pr| pr.number);
             Ok(())
         })?;
         if let Some(number) = pr {
             retarget_pr(&repo, number, &base).await.map_err(refused)?;
+            self.pr_retargeted(id, &base);
         }
         Ok(Reply::Done)
     }
@@ -903,17 +908,7 @@ impl Daemon {
         let preview = with_git(repo, move |git| git.leftover_preview(&leftover, &base))
             .await?
             .map_err(refused)?;
-        Ok(Reply::DiscardPreview {
-            uncommitted: preview.uncommitted,
-            unlanded: preview
-                .unlanded
-                .into_iter()
-                .map(|commit| CommitView {
-                    id: commit.id,
-                    subject: commit.subject,
-                })
-                .collect(),
-        })
+        Ok(preview_reply(preview))
     }
 
     async fn adopt_leftover(

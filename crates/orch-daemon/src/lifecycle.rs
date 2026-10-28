@@ -8,12 +8,13 @@ use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
 };
-use orch_git::{SessionName, slugify};
+use orch_git::{BranchSource, SessionWorktree, slugify};
 use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
 use crate::agents::{Adapter, adapter_for, default_adapter, default_program};
+use crate::branch::{BranchRequest, BranchTarget};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
 
@@ -192,8 +193,12 @@ impl Daemon {
             .map_err(refused)?
             .map_err(refused)?;
         let _guard = self.repo_guard(root.path()).await;
+        let target = match create.branch.as_deref() {
+            Some(field) => Some(self.branch_target(root.path(), field).await?),
+            None => None,
+        };
         let daemon = self.clone();
-        let live = tokio::task::spawn_blocking(move || daemon.prepare(create))
+        let live = tokio::task::spawn_blocking(move || daemon.prepare(create, target))
             .await
             .map_err(refused)??;
         let session = live.record.id.clone();
@@ -202,7 +207,11 @@ impl Daemon {
         Ok(Reply::Created { session })
     }
 
-    fn prepare(&self, create: CreateSession) -> Result<Live, RequestError> {
+    fn prepare(
+        &self,
+        create: CreateSession,
+        target: Option<BranchTarget>,
+    ) -> Result<Live, RequestError> {
         let root = RepoRoot::resolve(&create.repo).map_err(refused)?;
         let registered = root.clone();
         let repo = self
@@ -234,27 +243,45 @@ impl Daemon {
         }
         let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
-        let base = match create.base {
+        let requested = match &target {
+            Some(target) => target.base(create.base)?,
+            None => create.base,
+        };
+        let base = match requested {
             Some(base) => base,
             None => git.default_base(config.base_branch()).map_err(refused)?,
         };
-        let name = match create.branch {
-            Some(branch) => {
-                if git.branch_exists(&branch) {
-                    return Err(refused(format!("branch {branch} already exists")));
-                }
-                let wanted = branch
-                    .strip_prefix(&global.branch_prefix)
-                    .unwrap_or(&branch);
-                let slug = git
-                    .unique_name(&global.branch_prefix, &slugify(wanted))
-                    .slug;
-                SessionName { slug, branch }
+        let (name, resolved) = match &target {
+            Some(target) => {
+                let request = BranchRequest {
+                    repo: root.path(),
+                    target,
+                    base: &base,
+                    configured_base: config.base_branch(),
+                };
+                let resolved = self.resolve_branch(&git, request)?;
+                let name = git.name_for_branch(&global.branch_prefix, &target.branch);
+                (
+                    name,
+                    Some(resolved).filter(|r| r.source != BranchSource::New),
+                )
             }
-            None => git.unique_name(&global.branch_prefix, &slugify(&create.prompt)),
+            None => (
+                git.unique_name(&global.branch_prefix, &slugify(&create.prompt)),
+                None,
+            ),
         };
+        let existing_branch = resolved.is_some();
         let id = new_session_id()?;
-        let worktree = git.create_worktree(&name, &base).map_err(refused)?;
+        let worktree = match &resolved {
+            Some(resolved) => git.attach_existing_branch(&name, &base, resolved),
+            None => git.create_worktree(&name, &base),
+        }
+        .map_err(refused)?;
+        let rollback = SessionWorktree {
+            existing_branch: resolved.is_some_and(|r| r.source == BranchSource::Local),
+            ..worktree.clone()
+        };
         let new = NewSession {
             id: id.clone(),
             repo: repo.id,
@@ -264,6 +291,7 @@ impl Daemon {
             worktree: worktree.path.clone(),
             phase: Phase::SettingUp,
             preset: preset.name,
+            existing_branch,
         };
         let ports = global.ports;
         let stored = self.store.call_blocking(move |store| {
@@ -281,11 +309,11 @@ impl Daemon {
         let record = match stored {
             Ok(Ok(record)) => record,
             Ok(Err(err)) => {
-                let _ = git.remove_session_worktree(&worktree, None);
+                let _ = git.remove_session_worktree(&rollback, None);
                 return Err(refused(err));
             }
             Err(err) => {
-                let _ = git.remove_session_worktree(&worktree, None);
+                let _ = git.remove_session_worktree(&rollback, None);
                 return Err(err);
             }
         };
@@ -297,6 +325,11 @@ impl Daemon {
         }
         let mut live = Live::new(record, repo.path, adapter);
         live.preset_sandboxed = preset_sandboxed;
+        if let Some(pr) = target.as_ref().and_then(BranchTarget::open_pr) {
+            live.record.pr_base = Some(pr.base.clone());
+            live.transition(PhaseEvent::PrOpened { number: pr.number })
+                .map_err(refused)?;
+        }
         Ok(live)
     }
 

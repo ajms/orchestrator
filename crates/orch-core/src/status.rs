@@ -250,6 +250,20 @@ impl SessionStatus {
         self.agent_settled()
     }
 
+    pub fn open_pr(&self) -> Option<u64> {
+        self.flags
+            .pr
+            .as_ref()
+            .filter(|pr| {
+                matches!(self.phase, Phase::PrOpen | Phase::Suspended) && pr.state == PrState::Open
+            })
+            .map(|pr| pr.number)
+    }
+
+    pub fn check_pushing(&self) -> Result<(), GateRefusal> {
+        self.agent_settled()
+    }
+
     pub fn check_preset_change(&self) -> Result<(), GateRefusal> {
         match self.phase {
             Phase::Active | Phase::PrOpen | Phase::Suspended => self.agent_settled(),

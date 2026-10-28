@@ -1,5 +1,6 @@
 mod common;
 mod discard;
+mod existing_branch;
 mod landing;
 mod leftovers;
 mod removal;

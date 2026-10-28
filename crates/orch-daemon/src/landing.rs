@@ -6,9 +6,10 @@ use orch_git::{LandingError, Script};
 use orch_protocol::{Landing, Reply, RequestError};
 use orch_store::SessionRecord;
 
+use crate::branch::single_open_pr;
 use crate::cleanup::clean_up_ended;
 use crate::lifecycle::{Busy, HOLDER_EXIT_WAIT, refused, session_env, with_git};
-use crate::pr::retarget_pr;
+use crate::pr::{PrToPush, retarget_pr};
 use crate::state::{Daemon, Live, gate_message, session_worktree};
 
 pub(crate) struct Exclusive {
@@ -48,6 +49,10 @@ fn stacked_prompt(base: &str, landed: &str) -> String {
     )
 }
 
+fn no_squash(number: u64) -> String {
+    format!("PR #{number} is open; Landing pushes to it instead of squashing")
+}
+
 fn skipped_teardown(reason: impl std::fmt::Display) -> String {
     format!("the Teardown script was skipped: {reason}")
 }
@@ -84,6 +89,7 @@ impl Daemon {
         skip_teardown: bool,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
+        let mut recorded = None;
         let (_claim, record, repo) = self.claim(id, |live| {
             if live.status.flags().base_missing {
                 return Err(format!(
@@ -91,18 +97,35 @@ impl Daemon {
                     live.record.base
                 ));
             }
-            live.status
-                .check_landing()
-                .map_err(|refusal| gate_message("Landing", refusal))
+            recorded = live.status.open_pr();
+            let gate = match (recorded, &landing) {
+                (Some(number), Landing::Squash { .. }) => return Err(no_squash(number)),
+                (Some(_), Landing::Pr { .. }) => live.status.check_pushing(),
+                (None, _) => live.status.check_landing(),
+            };
+            gate.map_err(|refusal| gate_message("Landing", refusal))
         })?;
-        match landing {
-            Landing::Squash { message } => {
+        let pr = match recorded {
+            Some(number) => Some(PrToPush::Recorded(number)),
+            None => single_open_pr(&repo, &record.branch)
+                .await
+                .map_err(|refusal| refused(refusal.describe(&record.branch)))?
+                .map(PrToPush::Found),
+        };
+        match (landing, pr) {
+            (Landing::Squash { .. }, Some(pr)) => Err(refused(no_squash(pr.number()))),
+            (Landing::Squash { message }, None) => {
                 if !skip_teardown {
                     self.check_teardown(&repo).await?;
                 }
                 self.land_squash(id, record, repo, message).await
             }
-            Landing::Pr { title, body } => self.open_pr(id, record, repo, title, body).await,
+            (Landing::Pr { title, .. }, Some(pr)) => {
+                self.push_to_pr(id, record, repo, title, pr).await
+            }
+            (Landing::Pr { title, body }, None) => {
+                self.open_pr(id, record, repo, title, body).await
+            }
         }
     }
 
@@ -228,8 +251,7 @@ impl Daemon {
             let Some(live) = state.sessions.get_mut(&session) else {
                 continue;
             };
-            live.record.base.clone_from(&base);
-            live.status.flag_needs_rebase();
+            live.move_base(&base);
             live.hand_back(stacked_prompt(&base, &landed.branch));
             if let Some(pr) = &live.status.flags().pr
                 && pr.state == PrState::Open
@@ -252,13 +274,16 @@ impl Daemon {
             base,
         } in stacked
         {
-            if let Err(err) = retarget_pr(repo, number, &base).await {
-                let _ = self.update(&session, |live| {
-                    live.last_error = Some(format!(
-                        "retargeting PR #{number} onto {base} failed: {err}"
-                    ));
-                    Ok(())
-                });
+            match retarget_pr(repo, number, &base).await {
+                Ok(()) => self.pr_retargeted(&session, &base),
+                Err(err) => {
+                    let _ = self.update(&session, |live| {
+                        live.last_error = Some(format!(
+                            "retargeting PR #{number} onto {base} failed: {err}"
+                        ));
+                        Ok(())
+                    });
+                }
             }
         }
     }

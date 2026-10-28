@@ -5,11 +5,12 @@ use std::time::Instant;
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
 use orch_protocol::{
-    AgentStateView, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt, LandingMode,
-    LeftoverView, PhaseView, ReconcileReport, Reply, Request, RequestError, SessionView, Size,
-    SubagentView, UsageReport,
+    AgentStateView, BranchLookup, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt,
+    LandingMode, LeftoverView, LookupDepth, PhaseView, ReconcileReport, Reply, Request,
+    RequestError, SessionView, Size, SubagentView, UsageReport,
 };
 
+use crate::branch_check::LookupKey;
 use crate::clipboard::copy_effects;
 pub use crate::config::TuiConfig;
 use crate::discard::{DiscardConfirm, DiscardTarget};
@@ -22,7 +23,7 @@ use crate::land::LandForm;
 use crate::layout::Areas;
 use crate::link::RequestId;
 use crate::mouse::Region;
-use crate::new_form::NewForm;
+use crate::new_form::{Field, NewForm};
 use crate::pane::PaneMirror;
 use crate::preparing::{Preparing, PreparingId, PreparingState};
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
@@ -126,6 +127,7 @@ pub(crate) enum Pending {
     ReportFailure,
     Repos,
     FormSettings(PathBuf),
+    BranchLookup(LookupKey, LookupDepth),
     ReviewSettings(SessionId),
     Resume(SessionId),
     Create(PreparingId),
@@ -312,7 +314,10 @@ impl App {
             } => self.review_loaded(session, purpose, result),
             Event::VersionMismatch { message } => self.mismatch = Some(message),
             Event::Notice(text) => self.message = Some(text.into()),
-            Event::Tick => crate::mouse::tick(self),
+            Event::Tick => {
+                crate::mouse::tick(self);
+                self.check_branch();
+            }
             Event::Disconnected { reason } => {
                 self.message = Some(format!("lost the Daemon: {reason}").into());
             }
@@ -388,7 +393,10 @@ impl App {
     ) {
         let retriable = !matches!(
             pending,
-            Pending::Trust(_) | Pending::Draft(..) | Pending::FormSettings(_)
+            Pending::Trust(_)
+                | Pending::Draft(..)
+                | Pending::FormSettings(_)
+                | Pending::BranchLookup(..)
         );
         let result = match result {
             Err(RequestError::Untrusted { repo, hash, items }) if retriable => {
@@ -418,6 +426,14 @@ impl App {
                 }
             }
             (Pending::FormSettings(_), _) => {}
+            (Pending::BranchLookup(asked, depth), result) => {
+                let lookup = match result {
+                    Ok(Reply::BranchLookup(lookup)) => Ok(lookup),
+                    Ok(_) => return,
+                    Err(err) => Err(err.to_string()),
+                };
+                self.branch_looked_up(&asked, depth, lookup);
+            }
             (Pending::ReviewSettings(session), result) => {
                 let command = match result {
                     Ok(Reply::RepoSettings(settings)) => settings.review_command,
@@ -478,6 +494,20 @@ impl App {
                     false => format!("opened PR #{number}"),
                 }.into());
             }
+            (
+                Pending::Land,
+                Ok(Reply::Pushed {
+                    number,
+                    committed_changes,
+                }),
+            ) => {
+                self.message = Some(match committed_changes {
+                    true => format!(
+                        "pushed to PR #{number}; uncommitted changes were committed with the PR title as the message"
+                    ),
+                    false => format!("pushed to PR #{number}"),
+                }.into());
+            }
             (Pending::Land, Err(RequestError::Conflict { paths })) => {
                 let conflict = RequestError::Conflict { paths };
                 self.message =
@@ -488,6 +518,7 @@ impl App {
                 Ok(Reply::DiscardPreview {
                     uncommitted,
                     unlanded,
+                    branch_kept,
                 }),
             ) => {
                 let question = match self.sessions.get(&session) {
@@ -495,7 +526,8 @@ impl App {
                     None => format!("Discard {}?", self.sessions.slug_or_id(&session)),
                 };
                 let target = DiscardTarget::Session(session);
-                let confirm = DiscardConfirm::new(target, question, uncommitted, unlanded);
+                let confirm =
+                    DiscardConfirm::new(target, question, uncommitted, unlanded, branch_kept);
                 self.popup = Some(Popup::Discard(confirm));
             }
             (
@@ -503,11 +535,13 @@ impl App {
                 Ok(Reply::DiscardPreview {
                     uncommitted,
                     unlanded,
+                    branch_kept,
                 }),
             ) => {
                 let question = format!("Remove the Leftover {}?", leftover.label());
                 let target = DiscardTarget::Leftover { repo, leftover };
-                let confirm = DiscardConfirm::new(target, question, uncommitted, unlanded);
+                let confirm =
+                    DiscardConfirm::new(target, question, uncommitted, unlanded, branch_kept);
                 self.popup = Some(Popup::Discard(confirm));
             }
             (Pending::Usage, Ok(Reply::Usage(report))) => self.popup = Some(Popup::Usage(report)),
@@ -1431,6 +1465,7 @@ impl App {
     fn show_new_form(&mut self, form: NewForm) {
         self.popup = Some(Popup::New(Box::new(form)));
         self.form_repo_changed();
+        self.check_branch();
     }
 
     fn new_form(&self) -> NewForm {
@@ -1475,6 +1510,40 @@ impl App {
         }
     }
 
+    pub fn check_branch(&mut self) {
+        let now = (self.clock)();
+        let Some(Popup::New(form)) = &mut self.popup else {
+            return;
+        };
+        let left_field = form.field != Field::Branch;
+        let asks = form.check.follow(form.lookup_key(), left_field, now);
+        for (asked, depth) in asks {
+            let request = asked.request(depth);
+            self.request(request, Pending::BranchLookup(asked, depth));
+        }
+    }
+
+    pub fn branch_origin_due(&self) -> bool {
+        matches!(&self.popup, Some(Popup::New(form)) if form.check.origin_due())
+    }
+
+    fn branch_looked_up(
+        &mut self,
+        asked: &LookupKey,
+        depth: LookupDepth,
+        lookup: Result<BranchLookup, String>,
+    ) {
+        let Some(Popup::New(form)) = &mut self.popup else {
+            return;
+        };
+        form.check.receive(asked, depth, lookup);
+        if !form.check.wait_over() {
+            return;
+        }
+        let outcome = form.submit();
+        crate::popup::new_form(self, outcome);
+    }
+
     pub fn refresh_base_candidates(&mut self) {
         let Some(Popup::New(form)) = &mut self.popup else {
             return;
@@ -1500,8 +1569,10 @@ impl App {
             return;
         }
         let session = view.id.clone();
-        self.popup = Some(Popup::Land(LandForm::new(session.clone())));
-        self.request_draft(session, LandingMode::Squash);
+        let form = LandForm::new(session.clone(), view.open_pr());
+        let mode = form.mode;
+        self.popup = Some(Popup::Land(form));
+        self.request_draft(session, mode);
     }
 
     pub fn request_draft(&mut self, session: SessionId, mode: LandingMode) {

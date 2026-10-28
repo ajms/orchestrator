@@ -15,16 +15,21 @@ pub(crate) struct LandForm {
     pub mode: LandingMode,
     pub message: String,
     pub drafting: bool,
+    pub pushing_to: Option<u64>,
     edited: bool,
 }
 
 impl LandForm {
-    pub fn new(session: SessionId) -> Self {
+    pub fn new(session: SessionId, pushing_to: Option<u64>) -> Self {
         Self {
             session,
-            mode: LandingMode::Squash,
+            mode: match pushing_to {
+                Some(_) => LandingMode::Pr,
+                None => LandingMode::Squash,
+            },
             message: String::new(),
             drafting: true,
+            pushing_to,
             edited: false,
         }
     }
@@ -35,7 +40,7 @@ impl LandForm {
             KeyCode::Esc => return LandAction::Cancel,
             KeyCode::Enter => return LandAction::Land(self.landing()),
             KeyCode::Char('g') if ctrl => return LandAction::Edit(self.message.clone()),
-            KeyCode::Tab | KeyCode::BackTab => {
+            KeyCode::Tab | KeyCode::BackTab if self.pushing_to.is_none() => {
                 self.mode = match self.mode {
                     LandingMode::Squash => LandingMode::Pr,
                     LandingMode::Pr => LandingMode::Squash,

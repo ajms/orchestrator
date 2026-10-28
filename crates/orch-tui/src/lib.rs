@@ -1,4 +1,5 @@
 mod app;
+mod branch_check;
 mod clipboard;
 mod commands;
 mod config;

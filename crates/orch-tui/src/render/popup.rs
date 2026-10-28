@@ -52,17 +52,24 @@ fn land(frame: &mut Frame, view: &SessionView, form: &LandForm) {
         ))
         .bold(),
         Line::default(),
-        Line::from(vec![
-            Span::raw(" Tab: "),
-            choice(format!("squash onto {}", view.base), squash),
-            Span::raw("  "),
-            choice("push + PR".into(), !squash),
-        ]),
+        match form.pushing_to {
+            Some(number) => Line::from(vec![
+                Span::raw(" "),
+                choice(format!("push to PR #{number}"), true),
+            ]),
+            None => Line::from(vec![
+                Span::raw(" Tab: "),
+                choice(format!("squash onto {}", view.base), squash),
+                Span::raw("  "),
+                choice("push + PR".into(), !squash),
+            ]),
+        },
         Line::default(),
-        Line::from(match (form.drafting, squash) {
-            (true, _) => " The Agent is drafting…",
-            (false, true) => " Commit message:",
-            (false, false) => " PR title, then body:",
+        Line::from(match (form.drafting, squash, form.pushing_to) {
+            (true, _, _) => " The Agent is drafting…",
+            (false, _, Some(_)) => " Commit message for uncommitted changes:",
+            (false, true, None) => " Commit message:",
+            (false, false, None) => " PR title, then body:",
         })
         .dark_gray(),
     ];
@@ -79,7 +86,13 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
         Line::default(),
     ];
     if preview.uncommitted.is_empty() && preview.unlanded.is_empty() {
-        lines.push(Line::from(" nothing uncommitted and no unlanded commits").dark_gray());
+        lines.push(
+            Line::from(match preview.branch_kept {
+                true => " nothing uncommitted",
+                false => " nothing uncommitted and no unlanded commits",
+            })
+            .dark_gray(),
+        );
     } else {
         lines.push(Line::from(" You will lose:").red());
         lines.extend(
@@ -93,6 +106,12 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
                 .unlanded
                 .iter()
                 .map(|commit| Line::from(format!("   {commit}"))),
+        );
+    }
+    if preview.branch_kept {
+        lines.push(Line::default());
+        lines.push(
+            Line::from(" The Existing Branch is kept; only the Worktree is removed.").dark_gray(),
         );
     }
     lines.push(Line::default());

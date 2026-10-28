@@ -13,6 +13,11 @@ pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     command
 }
 
+pub(crate) fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
+}
+
 pub(crate) async fn run(
     command: Command,
     input: Option<Vec<u8>>,

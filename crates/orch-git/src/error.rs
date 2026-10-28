@@ -13,6 +13,10 @@ pub enum Error {
     BaseAheadOfOrigin { base: String },
     BaseDivergedFromOrigin { base: String },
     BaseNotFastForwarded { base: String, reason: String },
+    BranchDivergedFromOrigin { branch: String },
+    BranchCheckedOut { branch: String, worktree: PathBuf },
+    BranchInMainCheckout { branch: String },
+    OriginUnreachable,
 }
 
 impl Error {
@@ -53,6 +57,18 @@ impl fmt::Display for Error {
             Error::BaseNotFastForwarded { base, reason } => write!(
                 f,
                 "{base} is behind origin/{base} and can't be fast-forwarded: {reason}"
+            ),
+            Error::BranchDivergedFromOrigin { branch } => write!(
+                f,
+                "{branch} has diverged from origin/{branch}; pull, rebase or push first"
+            ),
+            Error::BranchCheckedOut { branch, worktree } => {
+                write!(f, "{branch} is checked out in {}", worktree.display())
+            }
+            Error::OriginUnreachable => write!(f, "origin can't be reached"),
+            Error::BranchInMainCheckout { branch } => write!(
+                f,
+                "{branch} is checked out in the main checkout; switch it to another branch first"
             ),
         }
     }

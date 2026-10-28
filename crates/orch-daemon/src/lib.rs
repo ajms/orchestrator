@@ -1,4 +1,5 @@
 mod agents;
+mod branch;
 mod broker;
 mod broker_gh;
 mod broker_sign;

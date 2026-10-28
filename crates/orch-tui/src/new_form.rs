@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use orch_git::slugify;
-use orch_protocol::{CreateSession, RepoSettings};
+use orch_protocol::{CreateSession, OpenPr, RepoSettings};
 
+use crate::branch_check::{BranchCheck, LookupKey};
 use crate::repo_picker::{KnownRepo, RepoChoice};
 use crate::text_input::{Suggested, TextInput};
 
@@ -50,6 +51,7 @@ pub struct NewForm {
     wanted_preset: Option<String>,
     pub error: Option<String>,
     pub discarding: bool,
+    pub(crate) check: BranchCheck,
 }
 
 impl NewForm {
@@ -76,6 +78,7 @@ impl NewForm {
             wanted_preset: None,
             error: None,
             discarding: false,
+            check: BranchCheck::default(),
         };
         form.prefill_branch();
         form
@@ -129,6 +132,9 @@ impl NewForm {
             self.field = Field::Prompt;
             return Outcome::RepoChanged;
         }
+        if key.code == KeyCode::Esc && self.check.stop_waiting() {
+            return Outcome::Stay;
+        }
         let discarding = std::mem::take(&mut self.discarding);
         match key.code {
             KeyCode::Esc if discarding || self.prompt.text().is_empty() => Outcome::Cancel,
@@ -173,20 +179,15 @@ impl NewForm {
     }
 
     fn branch_key(&mut self, key: KeyEvent) -> Outcome {
-        if key.code == KeyCode::Enter {
-            return self.move_field(1);
-        }
-        if self.branch.key(key) {
-            self.branch_changed();
+        match key.code {
+            KeyCode::Enter => return self.move_field(1),
+            KeyCode::Char(c) if plain(key) => self.branch.replace(c.encode_utf8(&mut [0; 4])),
+            _ => {
+                self.branch.accept();
+                self.branch.key(key);
+            }
         }
         Outcome::Stay
-    }
-
-    fn branch_changed(&mut self) {
-        if self.branch.text().is_empty() {
-            self.branch.suggest(String::new());
-        }
-        self.prefill_branch();
     }
 
     pub fn paste(&mut self, text: &str, home: Option<&Path>) -> Outcome {
@@ -203,12 +204,9 @@ impl NewForm {
                 self.prefill_branch();
             }
             Field::Repo => return self.open_picker(line.to_string(), home),
-            Field::Branch => {
-                self.branch.replace(line);
-                self.branch_changed();
-            }
-            Field::Base => self.base.replace(line),
-            Field::Preset => {}
+            Field::Branch => self.branch.replace(line),
+            Field::Base if self.locking_pr().is_none() => self.base.replace(line),
+            Field::Base | Field::Preset => {}
         }
         Outcome::Stay
     }
@@ -216,6 +214,7 @@ impl NewForm {
     fn base_key(&mut self, key: KeyEvent) -> Outcome {
         match key.code {
             KeyCode::Enter => return self.move_field(1),
+            _ if self.locking_pr().is_some() => {}
             KeyCode::Up => self.cycle_base(false),
             KeyCode::Down => self.cycle_base(true),
             KeyCode::Char(c) if plain(key) => self.base.replace(c.encode_utf8(&mut [0; 4])),
@@ -266,16 +265,52 @@ impl NewForm {
         });
     }
 
+    pub(crate) fn derived_branch(&self) -> String {
+        format!("{}{}", self.branch_prefix, slugify(self.prompt.text()))
+    }
+
+    pub(crate) fn locking_pr(&self) -> Option<&OpenPr> {
+        self.check.open_pr()
+    }
+
+    fn effective_base(&self) -> &str {
+        match self.locking_pr() {
+            Some(pr) => &pr.base,
+            None => self.base.text().trim(),
+        }
+    }
+
     fn prefill_branch(&mut self) {
         if self.branch.suggested() {
-            let derived = format!("{}{}", self.branch_prefix, slugify(self.prompt.text()));
+            let derived = self.derived_branch();
             if derived != self.branch.text() {
                 self.branch.suggest(derived);
             }
         }
     }
 
-    fn submit(&mut self) -> Outcome {
+    pub(crate) fn lookup_key(&self) -> Option<LookupKey> {
+        let branch = self.branch.text().trim();
+        if self.branch.suggested() || branch.is_empty() {
+            return None;
+        }
+        let base = self.base.text().trim();
+        Some(LookupKey {
+            repo: self.repo.path()?.to_path_buf(),
+            branch: branch.to_string(),
+            base: (!base.is_empty()).then(|| base.to_string()),
+        })
+    }
+
+    pub(crate) fn base_shown(&self) -> String {
+        match (self.base.text().trim(), &self.default_base) {
+            ("", Some(default)) => default.clone(),
+            ("", None) => "the Repo default".into(),
+            (base, _) => base.to_string(),
+        }
+    }
+
+    pub(crate) fn submit(&mut self) -> Outcome {
         let Some(repo) = self.repo.path().map(Path::to_path_buf) else {
             self.error = Some("enter the Repo's path".into());
             return Outcome::Stay;
@@ -284,7 +319,14 @@ impl NewForm {
             self.error = Some("the prompt is empty".into());
             return Outcome::Stay;
         }
-        let base = self.base.text().trim();
+        if self.check.refused() {
+            return Outcome::Stay;
+        }
+        if self.check.looking() {
+            self.check.wait();
+            return Outcome::Stay;
+        }
+        let base = self.effective_base();
         let branch = self.branch.text().trim();
         Outcome::Submit(CreateSession {
             repo,

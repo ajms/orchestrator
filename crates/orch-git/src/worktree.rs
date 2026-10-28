@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use crate::git::head_ref;
-use crate::{Error, Repo, Script, ScriptOutcome};
+use crate::{Error, Repo, Script, ScriptOutcome, slugify};
 
 pub const DEFAULT_BRANCH_PREFIX: &str = "orch/";
 const EXCLUDE_ENTRY: &str = "/.orchestrator/";
@@ -20,6 +20,20 @@ pub struct SessionWorktree {
     pub path: PathBuf,
     pub name: SessionName,
     pub base: String,
+    pub existing_branch: bool,
+}
+
+pub(crate) enum Upstream {
+    Absent,
+    LocalMissing,
+    Same,
+    Ahead,
+    Behind { local: String, upstream: String },
+    Diverged,
+}
+
+pub(crate) fn tracking_ref(branch: &str) -> String {
+    format!("refs/remotes/origin/{branch}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,10 +56,23 @@ impl Repo {
             path: self.worktree_path(&name.slug),
             name: name.clone(),
             base: base.to_string(),
+            existing_branch: false,
         }
     }
 
     pub fn unique_name(&self, prefix: &str, slug: &str) -> SessionName {
+        self.free_name(prefix, slug, None)
+    }
+
+    pub fn name_for_branch(&self, prefix: &str, branch: &str) -> SessionName {
+        let wanted = branch.strip_prefix(prefix).unwrap_or(branch);
+        SessionName {
+            slug: self.free_name(prefix, &slugify(wanted), Some(branch)).slug,
+            branch: branch.to_string(),
+        }
+    }
+
+    fn free_name(&self, prefix: &str, slug: &str, own_branch: Option<&str>) -> SessionName {
         let registered: Vec<PathBuf> = self
             .worktree_entries()
             .unwrap_or_default()
@@ -63,7 +90,9 @@ impl Repo {
             })
             .find(|name| {
                 let path = self.worktree_path(&name.slug);
-                !self.branch_exists(&name.branch) && !path.exists() && !registered.contains(&path)
+                let branch_free =
+                    own_branch == Some(name.branch.as_str()) || !self.branch_exists(&name.branch);
+                branch_free && !path.exists() && !registered.contains(&path)
             })
             .expect("some suffix is free")
     }
@@ -83,39 +112,73 @@ impl Repo {
         Ok(worktree)
     }
 
-    fn fast_forward_from_origin(&self, base: &str) -> Result<(), Error> {
-        if !self.git(["remote", "get-url", "origin"]).succeeds() || !self.remote_has_branch(base)? {
-            return Ok(());
+    pub fn fast_forward_from_origin(&self, base: &str) -> Result<(), Error> {
+        match self.compare_with_origin(base)? {
+            Upstream::Absent | Upstream::Same => Ok(()),
+            Upstream::LocalMissing => self
+                .git(["branch", "-q", base, &tracking_ref(base)])
+                .run()
+                .map(drop),
+            Upstream::Ahead => Err(Error::BaseAheadOfOrigin { base: base.into() }),
+            Upstream::Diverged => Err(Error::BaseDivergedFromOrigin { base: base.into() }),
+            Upstream::Behind { local, upstream } => self
+                .main_checkout_to_update(base, &local, &upstream)
+                .and_then(|main_checkout| self.advance_base(base, &local, &upstream, main_checkout))
+                .map_err(|landing| Error::BaseNotFastForwarded {
+                    base: base.into(),
+                    reason: landing.to_string(),
+                }),
         }
-        let tracking = format!("refs/remotes/origin/{base}");
+    }
+
+    pub fn origin_is_ahead(&self, branch: &str) -> Result<bool, Error> {
+        Ok(matches!(
+            self.compare_with_origin(branch)?,
+            Upstream::Behind { .. } | Upstream::Diverged
+        ))
+    }
+
+    pub(crate) fn has_origin(&self) -> bool {
+        self.git(["remote", "get-url", "origin"]).succeeds()
+    }
+
+    pub(crate) fn compare_with_origin(&self, branch: &str) -> Result<Upstream, Error> {
+        if !self.has_origin() {
+            return Ok(Upstream::Absent);
+        }
+        let on_origin = self
+            .remote_has_branch(branch)
+            .map_err(|_| Error::OriginUnreachable)?;
+        if !on_origin {
+            return Ok(Upstream::Absent);
+        }
+        let tracking = tracking_ref(branch);
         self.git(["fetch", "-q", "--no-tags", "origin"])
-            .arg(format!("+{}:{tracking}", head_ref(base)))
+            .arg(format!("+{}:{tracking}", head_ref(branch)))
             .run()?;
+        if !self.branch_exists(branch) {
+            return Ok(Upstream::LocalMissing);
+        }
         let local = self
-            .git(["rev-parse", "--verify", "--quiet", &head_ref(base)])
+            .git(["rev-parse", "--verify", "--quiet", &head_ref(branch)])
             .run()?;
         let upstream = self
             .git(["rev-parse", "--verify", "--quiet", &tracking])
             .run()?;
         if local == upstream {
-            return Ok(());
+            return Ok(Upstream::Same);
         }
         let is_ancestor = |from: &str, to: &str| {
             self.git(["merge-base", "--is-ancestor", from, to])
                 .succeeds()
         };
-        if is_ancestor(&upstream, &local) {
-            return Err(Error::BaseAheadOfOrigin { base: base.into() });
-        }
-        if !is_ancestor(&local, &upstream) {
-            return Err(Error::BaseDivergedFromOrigin { base: base.into() });
-        }
-        self.main_checkout_to_update(base, &local, &upstream)
-            .and_then(|main_checkout| self.advance_base(base, &local, &upstream, main_checkout))
-            .map_err(|landing| Error::BaseNotFastForwarded {
-                base: base.into(),
-                reason: landing.to_string(),
-            })
+        Ok(if is_ancestor(&upstream, &local) {
+            Upstream::Ahead
+        } else if is_ancestor(&local, &upstream) {
+            Upstream::Behind { local, upstream }
+        } else {
+            Upstream::Diverged
+        })
     }
 
     pub fn attach_worktree(&self, name: &SessionName) -> Result<PathBuf, Error> {
@@ -165,7 +228,9 @@ impl Repo {
         teardown: Option<&Script>,
     ) -> Result<Option<ScriptOutcome>, Error> {
         let outcome = self.remove_worktree_dir(&worktree.path, teardown)?;
-        self.delete_branch(&worktree.name.branch)?;
+        if !worktree.existing_branch {
+            self.delete_branch(&worktree.name.branch)?;
+        }
         Ok(outcome)
     }
 
@@ -231,7 +296,7 @@ impl Repo {
         Ok(entries)
     }
 
-    fn exclude_orchestrator_dir(&self) -> Result<(), Error> {
+    pub(crate) fn exclude_orchestrator_dir(&self) -> Result<(), Error> {
         let exclude = PathBuf::from(
             self.git([
                 "rev-parse",

@@ -12,6 +12,7 @@ pub fn load_review(target: &ReviewTarget) -> Result<ReviewData, orch_git::Error>
             branch: target.branch.clone(),
         },
         base: target.base.clone(),
+        existing_branch: false,
     };
     let snapshot = repo.review_snapshot(&worktree)?;
     let diff = repo.diff(&snapshot.merge_base, &snapshot.tree)?;

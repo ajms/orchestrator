@@ -158,6 +158,12 @@ DROP TABLE usage_daily_with_agents;
     "
 ALTER TABLE sessions ADD COLUMN holder_seq INTEGER NOT NULL DEFAULT 0;
 ",
+    "
+ALTER TABLE sessions ADD COLUMN existing_branch INTEGER NOT NULL DEFAULT 0;
+",
+    "
+ALTER TABLE sessions ADD COLUMN pr_base TEXT;
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {

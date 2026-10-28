@@ -19,6 +19,7 @@ pub(crate) struct DiscardConfirm {
     pub question: String,
     pub uncommitted: Vec<String>,
     pub unlanded: Vec<String>,
+    pub branch_kept: bool,
 }
 
 impl DiscardConfirm {
@@ -27,6 +28,7 @@ impl DiscardConfirm {
         question: String,
         uncommitted: Vec<String>,
         unlanded: Vec<CommitView>,
+        branch_kept: bool,
     ) -> Self {
         let unlanded = unlanded
             .into_iter()
@@ -40,6 +42,7 @@ impl DiscardConfirm {
             question,
             uncommitted,
             unlanded,
+            branch_kept,
         }
     }
 

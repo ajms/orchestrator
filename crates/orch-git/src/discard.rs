@@ -14,6 +14,7 @@ pub struct Commit {
 pub struct DiscardPreview {
     pub uncommitted: Vec<String>,
     pub unlanded: Vec<Commit>,
+    pub branch_kept: bool,
 }
 
 impl Repo {
@@ -23,9 +24,14 @@ impl Repo {
         } else {
             Vec::new()
         };
+        let unlanded = match worktree.existing_branch {
+            true => Vec::new(),
+            false => self.unlanded_commits(&worktree.name.branch, &worktree.base)?,
+        };
         Ok(DiscardPreview {
             uncommitted,
-            unlanded: self.unlanded_commits(&worktree.name.branch, &worktree.base)?,
+            unlanded,
+            branch_kept: worktree.existing_branch,
         })
     }
 
@@ -43,15 +49,18 @@ impl Repo {
                         branch,
                     },
                     base: base.into(),
+                    existing_branch: false,
                 }),
                 None => Ok(DiscardPreview {
                     uncommitted: files_under(path),
                     unlanded: Vec::new(),
+                    branch_kept: false,
                 }),
             },
             Leftover::Branch(branch) => Ok(DiscardPreview {
                 uncommitted: Vec::new(),
                 unlanded: self.unlanded_commits(branch, base)?,
+                branch_kept: false,
             }),
         }
     }

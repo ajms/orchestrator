@@ -20,6 +20,7 @@ pub struct NewSession {
     pub worktree: PathBuf,
     pub phase: Phase,
     pub preset: String,
+    pub existing_branch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +30,9 @@ pub struct SessionRecord {
     pub slug: String,
     pub title: Option<String>,
     pub branch: String,
+    pub existing_branch: bool,
     pub base: String,
+    pub pr_base: Option<String>,
     pub worktree: PathBuf,
     pub phase: Phase,
     pub flags: Flags,
@@ -60,7 +63,7 @@ const COLUMNS: &str = "id, repo_id, slug, branch, base, worktree, phase, preset,
     unseen, stalled, needs_rebase, recovered, worktree_missing, base_missing, muted,
     pr_number, pr_checks, pr_review, pr_new_comments, pr_state,
     port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title,
-    holder_seq";
+    holder_seq, existing_branch, pr_base";
 
 fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
     let pr = match row.get::<_, Option<i64>>("pr_number")? {
@@ -79,7 +82,9 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         slug: row.get("slug")?,
         title: row.get("title")?,
         branch: row.get("branch")?,
+        existing_branch: row.get("existing_branch")?,
         base: row.get("base")?,
+        pr_base: row.get("pr_base")?,
         worktree: PathBuf::from(row.get::<_, String>("worktree")?),
         phase: row.get::<_, Stored<_>>("phase")?.0,
         flags: Flags {
@@ -115,8 +120,9 @@ impl Store {
         let now = now_millis();
         self.conn.execute(
             "INSERT INTO sessions
-                (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at,
+                 existing_branch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
             params![
                 new.id.as_str(),
                 new.repo.0,
@@ -127,6 +133,7 @@ impl Store {
                 Stored(new.phase),
                 new.preset,
                 now,
+                new.existing_branch,
             ],
         )?;
         self.existing_session(&new.id)
@@ -142,7 +149,7 @@ impl Store {
                 worktree_missing = ?13, base_missing = ?14, muted = ?15, pr_number = ?16,
                 pr_checks = ?17, pr_review = ?18, pr_new_comments = ?19, pr_state = ?20,
                 updated_at = ?21, agent_state = ?22, guards_enabled = ?23, queued_prompt = ?24,
-                title = ?25, holder_seq = ?26
+                title = ?25, holder_seq = ?26, pr_base = ?27
              WHERE id = ?1",
             params![
                 session.id.as_str(),
@@ -171,6 +178,7 @@ impl Store {
                 session.queued_prompt,
                 session.title,
                 session.holder_seq as i64,
+                session.pr_base,
             ],
         )?;
         if changed == 0 {

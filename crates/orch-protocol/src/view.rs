@@ -38,6 +38,12 @@ impl SessionView {
     pub fn title_or_slug(&self) -> &str {
         self.title.as_deref().unwrap_or(&self.slug)
     }
+
+    pub fn open_pr(&self) -> Option<u64> {
+        let waiting = matches!(self.phase, PhaseView::PrOpen | PhaseView::Suspended);
+        let open = self.flags.pr.as_ref().is_some_and(|pr| !pr.closed);
+        self.flags.pr_number.filter(|_| waiting && open)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -13,6 +13,7 @@ pub struct RequestId(pub u64);
 
 const AUTO_SCROLL_TICK: Duration = Duration::from_millis(50);
 const PREPARING_TICK: Duration = Duration::from_secs(1);
+const BRANCH_LOOKUP_TICK: Duration = Duration::from_millis(100);
 
 pub trait DaemonLink {
     fn request(&mut self, id: RequestId, request: Request);
@@ -45,6 +46,9 @@ impl<L: DaemonLink> Tui<L> {
     pub fn tick_every(&self) -> Option<Duration> {
         if crate::mouse::auto_scrolling(&self.app) {
             return Some(AUTO_SCROLL_TICK);
+        }
+        if self.app.branch_origin_due() {
+            return Some(BRANCH_LOOKUP_TICK);
         }
         self.app
             .preparing

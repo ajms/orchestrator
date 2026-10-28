@@ -180,6 +180,20 @@ fn the_landing_outcome_is_reported() {
             "uncommitted changes were committed with the PR title",
         ),
         (
+            Ok(Reply::Pushed {
+                number: 63,
+                committed_changes: false,
+            }),
+            "pushed to PR #63",
+        ),
+        (
+            Ok(Reply::Pushed {
+                number: 64,
+                committed_changes: true,
+            }),
+            "pushed to PR #64; uncommitted changes were committed",
+        ),
+        (
             Err(RequestError::Conflict {
                 paths: vec!["src/a.rs".into()],
             }),
@@ -230,6 +244,7 @@ fn discard_previews_what_would_be_lost_before_a_one_key_confirmation() {
             id: "1a2b3c4d5e6f".into(),
             subject: "Read timeout from config".into(),
         }],
+        branch_kept: false,
     }));
     tui.command("discard");
     assert_eq!(
@@ -260,12 +275,33 @@ fn discard_previews_what_would_be_lost_before_a_one_key_confirmation() {
 }
 
 #[test]
+fn discarding_a_session_on_an_existing_branch_says_the_branch_is_kept() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![session("webshop", "feature-x")]);
+    tui.daemon().script_reply(Ok(Reply::DiscardPreview {
+        uncommitted: vec!["src/wip.rs".into()],
+        unlanded: vec![],
+        branch_kept: true,
+    }));
+
+    tui.command("discard");
+
+    let screen = tui.screen();
+    assert!(screen.contains("src/wip.rs (uncommitted)"), "{screen}");
+    assert!(
+        screen.contains("The Existing Branch is kept; only the Worktree is removed"),
+        "{screen}"
+    );
+}
+
+#[test]
 fn any_other_key_cancels_the_discard() {
     let mut tui = Harness::new();
     tui.sessions(vec![session("webshop", "doomed")]);
     tui.daemon().script_reply(Ok(Reply::DiscardPreview {
         uncommitted: vec![],
         unlanded: vec![],
+        branch_kept: false,
     }));
     tui.command("discard");
     assert!(tui.screen().contains("nothing uncommitted"));
@@ -317,4 +353,50 @@ fn input_dropped_during_a_landing_is_explained() {
         },
     );
     assert!(statusline(&mut tui).contains("a Landing is in progress"));
+}
+
+#[test]
+fn landing_a_session_with_an_open_pr_only_offers_pushing_to_it() {
+    for phase in [
+        orch_protocol::PhaseView::PrOpen,
+        orch_protocol::PhaseView::Suspended,
+    ] {
+        offers_only_pushing(phase);
+    }
+}
+
+fn offers_only_pushing(phase: orch_protocol::PhaseView) {
+    let mut view = in_phase(session("webshop", "review-fixes"), phase);
+    view.agent = Some(AgentStateView::Idle);
+    view.flags.pr_number = Some(7);
+    view.flags.pr = Some(orch_protocol::PrView {
+        checks: orch_protocol::PrChecksView::None,
+        review: orch_protocol::PrReviewView::None,
+        new_comments: 0,
+        closed: false,
+    });
+    let mut tui = Harness::new();
+    tui.sessions(vec![view]);
+    tui.daemon().script_reply(drafted("Address the review", ""));
+    tui.command("land");
+
+    assert_eq!(
+        last_request(&mut tui),
+        Request::Draft {
+            session: id("review-fixes"),
+            mode: LandingMode::Pr
+        }
+    );
+    tui.press(KeyCode::Tab);
+    let screen = tui.screen();
+    assert!(screen.contains("push to PR #7"), "{screen}");
+    assert!(!screen.contains("squash"), "{screen}");
+    tui.press(KeyCode::Enter);
+    assert_eq!(
+        landing(&mut tui),
+        vec![Landing::Pr {
+            title: "Address the review".into(),
+            body: String::new()
+        }]
+    );
 }
