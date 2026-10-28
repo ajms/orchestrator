@@ -52,17 +52,24 @@ fn land(frame: &mut Frame, view: &SessionView, form: &LandForm) {
         ))
         .bold(),
         Line::default(),
-        Line::from(vec![
-            Span::raw(" Tab: "),
-            choice(format!("squash onto {}", view.base), squash),
-            Span::raw("  "),
-            choice("push + PR".into(), !squash),
-        ]),
+        match form.pushing_to {
+            Some(number) => Line::from(vec![
+                Span::raw(" "),
+                choice(format!("push to PR #{number}"), true),
+            ]),
+            None => Line::from(vec![
+                Span::raw(" Tab: "),
+                choice(format!("squash onto {}", view.base), squash),
+                Span::raw("  "),
+                choice("push + PR".into(), !squash),
+            ]),
+        },
         Line::default(),
-        Line::from(match (form.drafting, squash) {
-            (true, _) => " The Agent is drafting…",
-            (false, true) => " Commit message:",
-            (false, false) => " PR title, then body:",
+        Line::from(match (form.drafting, squash, form.pushing_to) {
+            (true, _, _) => " The Agent is drafting…",
+            (false, _, Some(_)) => " Commit message for uncommitted changes:",
+            (false, true, None) => " Commit message:",
+            (false, false, None) => " PR title, then body:",
         })
         .dark_gray(),
     ];

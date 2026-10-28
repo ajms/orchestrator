@@ -478,6 +478,20 @@ impl App {
                     false => format!("opened PR #{number}"),
                 }.into());
             }
+            (
+                Pending::Land,
+                Ok(Reply::Pushed {
+                    number,
+                    committed_changes,
+                }),
+            ) => {
+                self.message = Some(match committed_changes {
+                    true => format!(
+                        "pushed to PR #{number}; uncommitted changes were committed with the PR title as the message"
+                    ),
+                    false => format!("pushed to PR #{number}"),
+                }.into());
+            }
             (Pending::Land, Err(RequestError::Conflict { paths })) => {
                 let conflict = RequestError::Conflict { paths };
                 self.message =
@@ -1504,8 +1518,10 @@ impl App {
             return;
         }
         let session = view.id.clone();
-        self.popup = Some(Popup::Land(LandForm::new(session.clone())));
-        self.request_draft(session, LandingMode::Squash);
+        let form = LandForm::new(session.clone(), view.open_pr());
+        let mode = form.mode;
+        self.popup = Some(Popup::Land(form));
+        self.request_draft(session, mode);
     }
 
     pub fn request_draft(&mut self, session: SessionId, mode: LandingMode) {

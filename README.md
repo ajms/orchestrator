@@ -66,9 +66,13 @@ In the TUI, type `:new`, write a prompt (`Ctrl+g` opens `$EDITOR`, `Ctrl+r` pick
 
 Type a Branch name into the form's Branch field to pick it yourself. A name that exists nowhere creates that Branch from the Base branch. A name that already exists, locally or on origin, starts the Session on that **Existing Branch** under its own name, with or without the `orch/` prefix, so the Agent's pushes update its PR. The Worktree's slug is the name without the prefix. A Branch only on origin is fetched, and a local one behind origin is fast-forwarded; one ahead of origin starts as it is. `orch` refuses the Branch if it has diverged from origin, origin can't be reached, it is checked out in the main checkout or any other worktree (Subagent worktrees included), another Session owns it, or it is origin's default branch, the configured `base` (without an origin, the Repo's current branch) or the new Session's own Base branch. Another Session's Base branch is fine.
 
+Type `#<PR>`, such as `#123`, to continue that PR's Branch. `orch` refuses a PR that doesn't exist, is merged, has its Branch in a fork, or whose Branch no longer exists; a closed PR starts the Session without a PR. A typed Branch name with an open PR is treated the same way, and more than one open PR is refused, asking for `#<number>`. When origin is on GitHub, a failed PR lookup (for example, `gh` not logged in) refuses the Session with the reason. Without GitHub or `gh`, the name starts with no PR. With an open PR, the Session's Base branch is the PR's base (a different Base is refused, and a base only on origin is fetched), and the Session goes to PR open right after Setup, counting only comments made from then on.
+
 When Claude runs a Subagent in its own worktree, `orch` creates that worktree at `.orchestrator/subagents/<slug>/<name>` on Branch `worktree-<name>`, starting from the Session's HEAD. Guards treat it as part of the Session, so the Subagent can edit there without a prompt. It is removed with the Session. A Subagent Branch with commits that were never merged into the Session is kept.
 
-When the Agent is done, press `d` to review, then run `:land` to squash onto the Base branch or open a PR. If the Branch already has an open PR, `:land` follows that one instead. Landing, a merged PR and Discarding delete the Branch along with the Worktree, except an Existing Branch, which `orch` always keeps.
+When the Agent is done, press `d` to review, then run `:land` to squash onto the Base branch or open a PR. If the Branch already has an open PR, `:land` follows that one instead. With an open PR, whether the Session is PR open or Suspended or `:land` finds one on GitHub, `:land` only commits any uncommitted changes and pushes the Branch to that PR; it refuses a squash. `:land` never force-pushes: if origin has commits the Branch lacks, it refuses until you pull or rebase. Landing, a merged PR and Discarding delete the Branch along with the Worktree, except an Existing Branch, which `orch` always keeps.
+
+When a PR is retargeted on GitHub, `orch` follows it: polling reads the PR's base, the Session's Base branch becomes that base (fetched from origin if it isn't local), and the Session is marked as needing a rebase in its status line. A Base that `orch` moved itself, for example after Landing the Branch a stacked Session sat on, stays put: if retargeting the PR on GitHub failed, polling retries it instead of moving back. The same happens when `:land` follows an existing PR whose base differs from the Session's.
 
 ## Commands
 
@@ -122,7 +126,7 @@ In the Review view the wheel scrolls the column under it, a click on a file show
 Commands:
 
 - `:n`, `:new`
-- `:l`, `:land`
+- `:l`, `:land` (with an open PR, only pushes to it)
 - `:d`, `:discard` (an Existing Branch is kept: only the Worktree is removed, and the preview warns only about uncommitted changes)
 - `:review`
 - `:resume`

@@ -469,11 +469,7 @@ fn on_github() -> Env {
     let env = Env::new();
     env.fake_gh();
     let repo = env.repo("app");
-    let remote = env.remote(&repo);
-    let github = "git@github.com:acme/app.git";
-    git(&repo, &["remote", "set-url", "origin", github]);
-    let rewrite = format!("url.{}.insteadOf", remote.display());
-    git(&repo, &["config", &rewrite, github]);
+    env.github_remote(&repo);
     env
 }
 
@@ -533,7 +529,9 @@ async fn a_sandboxed_agent_creates_and_edits_its_own_pr_with_the_base_fixed() {
         std::fs::read_to_string(&out).unwrap(),
         "https://github.com/acme/app/pull/42\n"
     );
-    env.gh_lists(r#"[{"number":42}]"#);
+    env.gh_lists(&format!(
+        r#"[{{"number":42,"title":"Title","state":"OPEN","baseRefName":"main","headRefName":"{branch}"}}]"#
+    ));
     assert_eq!(
         shell(&mut pane, "gh pr edit 42 --title=New").await,
         "exit 0"

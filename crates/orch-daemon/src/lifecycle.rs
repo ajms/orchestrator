@@ -14,7 +14,7 @@ use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
 use crate::agents::{Adapter, adapter_for, default_adapter, default_program};
-use crate::branch::BranchRequest;
+use crate::branch::{BranchRequest, BranchTarget};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
 
@@ -193,8 +193,12 @@ impl Daemon {
             .map_err(refused)?
             .map_err(refused)?;
         let _guard = self.repo_guard(root.path()).await;
+        let target = match create.branch.as_deref() {
+            Some(field) => Some(self.branch_target(root.path(), field).await?),
+            None => None,
+        };
         let daemon = self.clone();
-        let live = tokio::task::spawn_blocking(move || daemon.prepare(create))
+        let live = tokio::task::spawn_blocking(move || daemon.prepare(create, target))
             .await
             .map_err(refused)??;
         let session = live.record.id.clone();
@@ -203,7 +207,11 @@ impl Daemon {
         Ok(Reply::Created { session })
     }
 
-    fn prepare(&self, create: CreateSession) -> Result<Live, RequestError> {
+    fn prepare(
+        &self,
+        create: CreateSession,
+        target: Option<BranchTarget>,
+    ) -> Result<Live, RequestError> {
         let root = RepoRoot::resolve(&create.repo).map_err(refused)?;
         let registered = root.clone();
         let repo = self
@@ -235,20 +243,24 @@ impl Daemon {
         }
         let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
-        let base = match create.base {
+        let requested = match &target {
+            Some(target) => target.base(create.base)?,
+            None => create.base,
+        };
+        let base = match requested {
             Some(base) => base,
             None => git.default_base(config.base_branch()).map_err(refused)?,
         };
-        let (name, resolved) = match create.branch.as_deref() {
-            Some(branch) => {
+        let (name, resolved) = match &target {
+            Some(target) => {
                 let request = BranchRequest {
                     repo: repo.id,
-                    branch,
+                    target,
                     base: &base,
                     configured_base: config.base_branch(),
                 };
                 let resolved = self.resolve_branch(&git, request)?;
-                let name = git.name_for_branch(&global.branch_prefix, branch);
+                let name = git.name_for_branch(&global.branch_prefix, &target.branch);
                 (
                     name,
                     Some(resolved).filter(|r| r.source != BranchSource::New),
@@ -313,6 +325,11 @@ impl Daemon {
         }
         let mut live = Live::new(record, repo.path, adapter);
         live.preset_sandboxed = preset_sandboxed;
+        if let Some(pr) = target.as_ref().and_then(BranchTarget::open_pr) {
+            live.record.pr_base = Some(pr.base.clone());
+            live.transition(PhaseEvent::PrOpened { number: pr.number })
+                .map_err(refused)?;
+        }
         Ok(live)
     }
 

@@ -628,7 +628,7 @@ async fn a_holder_reports_its_sessions_worktree_base_and_port_block() {
 
 async fn open_pr(env: &Env, client: &mut TestClient) -> SessionId {
     let repo = env.repo("app");
-    env.remote(&repo);
+    env.github_remote(&repo);
     env.fake_gh();
     let (id, _pane) = idle_session(env, client, "Add caching").await;
     let view = client.sessions[&id].clone();
@@ -659,7 +659,10 @@ async fn an_adopted_holder_whose_branch_has_an_open_pr_is_pr_open_again() {
 
     daemon.kill();
     env.lose_state_db();
-    env.gh_lists(r#"[{"number":42}]"#);
+    env.gh_lists(&format!(
+        r#"[{{"number":42,"title":"Add caching","state":"OPEN","baseRefName":"main","headRefName":"{}"}}]"#,
+        view.branch
+    ));
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let adopted = client

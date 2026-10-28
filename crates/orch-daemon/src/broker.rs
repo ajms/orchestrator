@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use crate::broker_gh::{Change, GitHubRepo, Limits, gh_call, not_this_sessions_pr};
 use crate::broker_sign::{IDENTITY_FILE, Identity, Origin, sign};
 use crate::lifecycle::{select_preset, with_git};
-use crate::pr::{gh_brokered, open_pr_of, pr_number};
+use crate::pr::{gh_brokered, open_prs, pr_number};
 use crate::state::{Daemon, PendingGuard};
 
 pub(crate) type EnvVars = Vec<(String, String)>;
@@ -200,7 +200,7 @@ fn notice(reply: &BrokerReply) -> Option<(String, bool)> {
     }
 }
 
-async fn origin_url(repo: &Path) -> Option<String> {
+pub(crate) async fn origin_url(repo: &Path) -> Option<String> {
     let mut command = crate::subprocess::command("git");
     command
         .arg("-C")
@@ -347,7 +347,9 @@ impl Daemon {
                 let call = gh_call(&args, &limits)?;
                 if let Some(change) = &call.change {
                     if let Change::PrEdit { pr: Some(number) } = change
-                        && open_pr_of(&repo, &record.branch).await != Some(*number)
+                        && !open_prs(&repo, &record.branch)
+                            .await
+                            .is_ok_and(|prs| prs.iter().any(|pr| pr.number == *number))
                     {
                         return Err(not_this_sessions_pr(&record.branch));
                     }

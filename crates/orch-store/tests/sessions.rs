@@ -43,6 +43,7 @@ fn saved_changes_persist_across_reopening() {
 
     session.phase = Phase::PrOpen;
     session.base = "orch/other".into();
+    session.pr_base = Some("orch/parent".into());
     session.preset = "edits".into();
     session.last_mode = Some(PermissionMode::AcceptEdits);
     session.flags = Flags {
@@ -70,6 +71,7 @@ fn saved_changes_persist_across_reopening() {
     assert_eq!(loaded, saved);
     assert_eq!(loaded.pr_number(), Some(42));
     assert_eq!(loaded.flags, session.flags);
+    assert_eq!(loaded.pr_base.as_deref(), Some("orch/parent"));
 }
 
 #[test]
@@ -127,7 +129,7 @@ fn a_session_stored_before_existing_branches_loads_as_on_a_branch_orch_created()
     let session = fx.session(&repo, "older");
     let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
     conn.execute_batch(
-        "ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;",
+        "ALTER TABLE sessions DROP COLUMN pr_base; ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;",
     )
     .unwrap();
 

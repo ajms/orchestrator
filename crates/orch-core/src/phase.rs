@@ -43,9 +43,12 @@ impl Phase {
         use Phase as P;
         use PhaseEvent as E;
         let next = match (self, event) {
+            (P::SettingUp, E::PrOpened { .. }) if !has_pr => P::SettingUp,
+            (P::SettingUp, E::SetupSucceeded) if has_pr => P::PrOpen,
             (P::SettingUp, E::SetupSucceeded) => P::Active,
             (P::SettingUp, E::SetupFailed) => P::SetupFailed,
             (P::SetupFailed, E::SetupRetried) => P::SettingUp,
+            (P::SetupFailed, E::SetupSkipped) if has_pr => P::PrOpen,
             (P::SetupFailed, E::SetupSkipped) => P::Active,
             (P::Active, E::PrOpened { .. }) => P::PrOpen,
             (P::Suspended, E::PrOpened { .. }) if !has_pr => P::Suspended,

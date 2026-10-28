@@ -7,6 +7,7 @@ mod common;
 mod discard;
 mod display;
 mod existing_branch;
+mod existing_pr;
 mod guards;
 mod handshake;
 mod idle;

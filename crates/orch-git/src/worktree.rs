@@ -112,9 +112,13 @@ impl Repo {
         Ok(worktree)
     }
 
-    pub(crate) fn fast_forward_from_origin(&self, base: &str) -> Result<(), Error> {
+    pub fn fast_forward_from_origin(&self, base: &str) -> Result<(), Error> {
         match self.compare_with_origin(base)? {
-            Upstream::Absent | Upstream::LocalMissing | Upstream::Same => Ok(()),
+            Upstream::Absent | Upstream::Same => Ok(()),
+            Upstream::LocalMissing => self
+                .git(["branch", "-q", base, &tracking_ref(base)])
+                .run()
+                .map(drop),
             Upstream::Ahead => Err(Error::BaseAheadOfOrigin { base: base.into() }),
             Upstream::Diverged => Err(Error::BaseDivergedFromOrigin { base: base.into() }),
             Upstream::Behind { local, upstream } => self
@@ -125,6 +129,13 @@ impl Repo {
                     reason: landing.to_string(),
                 }),
         }
+    }
+
+    pub fn origin_is_ahead(&self, branch: &str) -> Result<bool, Error> {
+        Ok(matches!(
+            self.compare_with_origin(branch)?,
+            Upstream::Behind { .. } | Upstream::Diverged
+        ))
     }
 
     pub(crate) fn has_origin(&self) -> bool {

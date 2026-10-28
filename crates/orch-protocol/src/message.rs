@@ -307,6 +307,10 @@ pub enum Reply {
         #[serde(default)]
         committed_changes: bool,
     },
+    Pushed {
+        number: u64,
+        committed_changes: bool,
+    },
     DiscardPreview {
         uncommitted: Vec<String>,
         unlanded: Vec<CommitView>,

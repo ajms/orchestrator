@@ -221,6 +221,15 @@ impl Env {
         remote
     }
 
+    pub fn github_remote(&self, repo: &Path) -> PathBuf {
+        let remote = self.remote(repo);
+        let github = "git@github.com:acme/app.git";
+        git(repo, &["remote", "set-url", "origin", github]);
+        let rewrite = format!("url.{}.insteadOf", remote.display());
+        git(repo, &["config", &rewrite, github]);
+        remote
+    }
+
     pub fn fake_gh(&self) {
         let dir = self.path("gh");
         std::fs::create_dir_all(&dir).unwrap();
@@ -231,13 +240,19 @@ case "$1 $2" in
     [ -f DIR/slow ] && sleep 1
     [ -f DIR/fail-create ] && { echo 'gh: permission denied' >&2; exit 1; }
     echo https://github.com/acme/app/pull/42 ;;
-  'pr view') cat DIR/view.json ;;
-  'pr edit'|'pr ready') ;;
+  'pr view')
+    [ -f DIR/fail-view ] && { echo 'GraphQL: Could not resolve to a PullRequest' >&2; exit 1; }
+    cat DIR/view.json ;;
+  'pr edit')
+    if [ -f DIR/fail-edit ]; then echo 'gh: edit failed' >&2; exit 1; fi ;;
+  'pr ready') ;;
   'issue create') echo https://github.com/acme/app/issues/8 ;;
   'issue comment'|'issue edit'|'issue close'|'issue reopen') ;;
   'issue view') echo "issue $3" ;;
   'api '*) echo '{"name":"app"}' ;;
-  'pr list') cat DIR/list.json 2>/dev/null || echo '[]' ;;
+  'pr list')
+    [ -f DIR/fail-list ] && { echo 'HTTP 401: Bad credentials' >&2; exit 1; }
+    cat DIR/list.json 2>/dev/null || echo '[]' ;;
   *) exit 1 ;;
 esac
 "#
@@ -837,4 +852,49 @@ pub async fn settled(client: &mut TestClient) {
         focused: false,
     };
     client.request(barrier).await.unwrap();
+}
+
+pub fn on_branch(repo: &Path, branch: &str) -> CreateSession {
+    let mut create = CreateSession::new(repo, "Continue the feature");
+    create.branch = Some(branch.into());
+    create
+}
+
+pub fn feature_branch(repo: &Path) -> String {
+    git(repo, &["checkout", "-q", "-b", "feature-x"]);
+    commit(repo, "feature.txt", "feature\n");
+    git(repo, &["checkout", "-q", "main"]);
+    git(repo, &["rev-parse", "feature-x"])
+}
+
+pub async fn running_on(client: &mut TestClient, create: CreateSession) -> SessionId {
+    let id = client.create(create).await;
+    client
+        .until(&id, "running", |view| view.agent.is_some())
+        .await;
+    id
+}
+
+pub async fn idle_on(env: &Env, client: &mut TestClient, create: CreateSession) -> SessionId {
+    let id = running_on(client, create).await;
+    let mut pane = env.pane(&id, PANE).await;
+    pane.hook(&hook("SessionStart", r#""source":"startup""#))
+        .await;
+    client
+        .until(&id, "Idle", |view| {
+            view.agent == Some(orch_protocol::AgentStateView::Idle)
+        })
+        .await;
+    id
+}
+
+pub async fn refusal(client: &mut TestClient, create: CreateSession) -> String {
+    match client.request(Request::CreateSession(create)).await {
+        Err(RequestError::Refused { message }) => message,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+pub fn branch_tip(repo: &Path, branch: &str) -> String {
+    git(repo, &["rev-parse", &format!("refs/heads/{branch}")])
 }

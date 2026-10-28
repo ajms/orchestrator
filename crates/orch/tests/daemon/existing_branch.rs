@@ -1,55 +1,8 @@
-use std::path::Path;
 use std::time::Duration;
 
-use orch_core::SessionId;
-use orch_protocol::{CreateSession, Landing, PhaseView, Reply, Request, RequestError};
+use orch_protocol::{CreateSession, Landing, PhaseView, Reply, Request};
 
 use crate::common::*;
-
-fn on_branch(repo: &Path, branch: &str) -> CreateSession {
-    let mut create = CreateSession::new(repo, "Continue the feature");
-    create.branch = Some(branch.into());
-    create
-}
-
-fn feature_branch(repo: &Path) -> String {
-    git(repo, &["checkout", "-q", "-b", "feature-x"]);
-    commit(repo, "feature.txt", "feature\n");
-    git(repo, &["checkout", "-q", "main"]);
-    git(repo, &["rev-parse", "feature-x"])
-}
-
-async fn running_on(client: &mut TestClient, create: CreateSession) -> SessionId {
-    let id = client.create(create).await;
-    client
-        .until(&id, "running", |view| view.agent.is_some())
-        .await;
-    id
-}
-
-async fn idle_on(env: &Env, client: &mut TestClient, create: CreateSession) -> SessionId {
-    let id = running_on(client, create).await;
-    let mut pane = env.pane(&id, PANE).await;
-    pane.hook(&hook("SessionStart", r#""source":"startup""#))
-        .await;
-    client
-        .until(&id, "Idle", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::Idle)
-        })
-        .await;
-    id
-}
-
-async fn refusal(client: &mut TestClient, create: CreateSession) -> String {
-    match client.request(Request::CreateSession(create)).await {
-        Err(RequestError::Refused { message }) => message,
-        other => panic!("expected a refusal, got {other:?}"),
-    }
-}
-
-fn branch_tip(repo: &Path, branch: &str) -> String {
-    git(repo, &["rev-parse", &format!("refs/heads/{branch}")])
-}
 
 #[tokio::test]
 async fn a_session_continues_an_existing_branch_and_discarding_it_keeps_the_branch() {
@@ -176,6 +129,7 @@ async fn a_session_cannot_start_on_a_base_branch() {
     let env = Env::new();
     let repo = env.repo("app");
     let remote = env.remote(&repo);
+    env.fake_gh();
     git(&remote, &["symbolic-ref", "HEAD", "refs/heads/main"]);
     git(&repo, &["checkout", "-q", "-b", "work"]);
     git(&repo, &["branch", "develop"]);
@@ -243,6 +197,7 @@ async fn a_branch_only_on_origin_is_fetched_and_the_session_starts_on_it() {
     let env = Env::new();
     let repo = env.repo("app");
     env.remote(&repo);
+    env.fake_gh();
     let tip = feature_branch(&repo);
     git(&repo, &["push", "-q", "origin", "feature-x"]);
     git(&repo, &["branch", "-D", "feature-x"]);
@@ -261,6 +216,7 @@ async fn a_failed_creation_deletes_a_branch_it_fetched_but_keeps_one_that_was_lo
     let env = Env::new();
     let repo = env.repo("app");
     env.remote(&repo);
+    env.fake_gh();
     let tip = feature_branch(&repo);
     git(&repo, &["push", "-q", "origin", "feature-x"]);
     git(&repo, &["branch", "-D", "feature-x"]);
