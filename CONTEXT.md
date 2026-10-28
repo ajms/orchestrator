@@ -105,12 +105,20 @@ _Avoid_: Subagent log, Subagent conversation, Subagent output
 The git worktree dedicated to a single Session, checked out on that Session's Branch.
 _Avoid_: Checkout, sandbox
 
+**Branch**:
+The git branch a Session works on, checked out in its Worktree. The Orchestrator creates it from the Base branch, unless the Session starts on an Existing Branch.
+_Avoid_: Session branch, feature branch
+
+**Existing Branch**:
+A Branch that existed, locally or on origin, before its Session started on it, rather than one the Orchestrator created for the Session. It may already have a pull request.
+_Avoid_: Adopted branch (adopting is a Reconciliation fix for Leftovers), foreign branch, borrowed branch
+
 **Base branch**:
-The branch a Session's Branch was created from and is Landed back into.
+The branch a Session's work is reviewed against and Landed into. A Branch the Orchestrator creates starts from it.
 _Avoid_: Parent, target, trunk
 
 **Landing**:
-Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch or pushing the Branch and opening a pull request.
+Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch, or pushing the Branch to its pull request, opening one if there is none.
 _Avoid_: Shipping, completing, finishing
 
 **Setup script**:
@@ -186,5 +194,5 @@ Inspecting a Session's changes against its Base branch, usually right before Lan
 _Avoid_: Diff view, inspection
 
 **Discarding**:
-Ending a Session by throwing its Worktree and Branch away without Landing.
+Ending a Session without Landing by throwing its Worktree away, and its Branch too unless it is an Existing Branch.
 _Avoid_: Cancelling, deleting, aborting
