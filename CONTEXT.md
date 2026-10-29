@@ -70,7 +70,7 @@ One Agent working on one Worktree on one Branch of a Repo, from creation until i
 _Avoid_: Task, job, instance, run
 
 **Session title**:
-A name the user gave the Session through its Agent (e.g. Claude Code's `/rename`). It is shown in place of the slug and outlives the Conversation it was given in.
+A name given to the Session through its Agent, by the user (e.g. Claude Code's `/rename`) or by the Agent itself. It is shown in place of the slug and outlives the Conversation it was given in.
 _Avoid_: Session name, label, alias
 
 **Agent**:
