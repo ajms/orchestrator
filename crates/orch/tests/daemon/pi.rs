@@ -1,4 +1,6 @@
-use orch_protocol::{AgentStateView as State, CreateSession, PhaseView, Reply, Request};
+use orch_protocol::{
+    AgentStateView as State, CreateSession, PhaseView, Reply, Request, UsageTotalsView,
+};
 
 use crate::bwrap::bwrap_runs;
 use crate::common::*;
@@ -355,6 +357,86 @@ async fn a_pi_session_name_is_the_title_until_it_is_cleared() {
         .until(&id, "the slug", |view| view.title.is_none())
         .await;
     assert_eq!(cleared.slug, "fix-it");
+}
+
+fn pi_tap(conversation: &str, (input, output, cache): (u64, u64, u64), cost: f64) -> String {
+    format!(
+        r#"tap --agent pi {{"sessionId":"{conversation}","model":{{"id":"claude-opus-5-5","name":"Opus 5.5"}},"context":{{"tokens":25000,"contextWindow":200000,"percent":12.5}},"usage":{{"input":{input},"output":{output},"cacheRead":{cache},"cacheWrite":0,"cost":{cost}}}}}"#
+    )
+}
+
+async fn until_cost(client: &mut TestClient, id: &orch_core::SessionId, cost: f64) {
+    client
+        .until(id, &format!("cost {cost}"), |view| {
+            view.cost_usd == Some(cost)
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn pi_taps_add_to_the_repos_usage_and_leave_the_rate_limits_alone() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (pi, mut pi_pane) = started_pi_session(&env, &mut client).await;
+
+    let orch = env!("CARGO_BIN_EXE_orch");
+    env.write_config(&format!(
+        "[defaults.agents.pi]\nbinary = {orch:?}\nargs = [\"fake-agent\", \"--\"]\n"
+    ));
+    let (_claude, mut claude_pane) = idle_session(&env, &mut client, "Claude work").await;
+    claude_pane
+        .type_line(
+            r#"tap {"session_id":"claude-conv","context_window":{"total_input_tokens":100,"total_output_tokens":10},"cost":{"total_cost_usd":1.0},"rate_limits":{"five_hour":{"used_percentage":83},"seven_day":{"used_percentage":40}}}"#,
+        )
+        .await;
+    client
+        .until_received("rate limits", |client| !client.rate_limits.is_empty())
+        .await;
+
+    pi_pane
+        .type_line(&pi_tap("conv-a", (100, 20, 300), 0.5))
+        .await;
+    let tapped = client
+        .until(&pi, "pi's usage", |view| view.cost_usd == Some(0.5))
+        .await;
+    assert_eq!(tapped.context_used_percent, Some(12.5));
+    pi_pane
+        .type_line(&pi_tap("conv-a", (200, 40, 600), 0.75))
+        .await;
+    until_cost(&mut client, &pi, 0.75).await;
+    pi_pane
+        .type_line(&pi_hook(
+            r#"{"event":"session_start","reason":"new","sessionId":"conv-b"}"#,
+        ))
+        .await;
+    pi_pane
+        .type_line(&pi_tap("conv-b", (10, 1, 0), 0.125))
+        .await;
+    until_cost(&mut client, &pi, 0.125).await;
+
+    let report = match client.request(Request::Usage).await {
+        Ok(Reply::Usage(report)) => report,
+        other => panic!("usage failed: {other:?}"),
+    };
+    let [app] = report.per_repo.as_slice() else {
+        panic!("one Repo expected: {report:?}");
+    };
+    let UsageTotalsView {
+        input_tokens,
+        output_tokens,
+        cost_usd,
+    } = app.totals;
+    assert_eq!((input_tokens, output_tokens), (100 + 800 + 10, 10 + 40 + 1));
+    assert!((cost_usd - 1.875).abs() < 1e-9, "{cost_usd}");
+    settled(&mut client).await;
+    assert_eq!(
+        client.rate_limits,
+        [RateLimits {
+            five_hour: Some(83.0),
+            seven_day: Some(40.0)
+        }]
+    );
 }
 
 fn real_pi() -> Option<std::path::PathBuf> {
