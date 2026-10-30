@@ -13,3 +13,5 @@ node crates/orch-agent/tests/fixtures/pi/record.mjs
 - `/orch-dialog`, a dialog opened while idle, and `/orch-unname`, which clears the session name.
 
 It drives startup, a prompt, a tool call, a question, an idle dialog, an abort, five provider errors with auto-retry off, a rename, a cleared name, `/new` and a resume of the named Conversation. The error texts are scripted to look like Anthropic's.
+
+Starting has no payload: the Daemon shows it from the launch until the first `session_start`.

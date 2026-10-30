@@ -1,5 +1,4 @@
 {
   "event": "ui_prompt_end",
-  "kind": "select",
   "idle": false
 }

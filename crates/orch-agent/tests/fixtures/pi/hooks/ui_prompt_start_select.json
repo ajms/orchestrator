@@ -1,4 +1,3 @@
 {
-  "event": "ui_prompt_start",
-  "kind": "select"
+  "event": "ui_prompt_start"
 }

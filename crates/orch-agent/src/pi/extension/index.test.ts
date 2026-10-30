@@ -133,7 +133,7 @@ test("a prompt's coarse events are shaped to the fields orch needs", async () =>
 		{ event: "input" },
 		{ event: "agent_start" },
 		{ event: "tool_call", toolName: "bash" },
-		{ event: "tool_execution_end", toolName: "bash", isError: false },
+		{ event: "tool_execution_end", toolName: "bash" },
 		{ event: "agent_settled", aborted: false, stopReason: "stop" },
 	]);
 });
@@ -161,9 +161,9 @@ test("dialogs report whether pi was idle when they closed", async () => {
 	pi.idle = true;
 	pi.emit("ui_prompt_end", { reason: "ui_prompt", kind: "confirm" });
 	assert.deepEqual((await pi.payloads()).slice(1), [
-		{ event: "ui_prompt_start", kind: "select" },
-		{ event: "ui_prompt_end", kind: "select", idle: false },
-		{ event: "ui_prompt_end", kind: "confirm", idle: true },
+		{ event: "ui_prompt_start" },
+		{ event: "ui_prompt_end", idle: false },
+		{ event: "ui_prompt_end", idle: true },
 	]);
 });
 

@@ -1,5 +1,4 @@
 {
   "event": "tool_execution_end",
-  "toolName": "bash",
-  "isError": false
+  "toolName": "bash"
 }

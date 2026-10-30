@@ -42,13 +42,13 @@ export default function orch(pi: ExtensionAPI, spawn: Spawn = spawnHook): void {
 		send({ event: "tool_call", toolName: event.toolName });
 	});
 	pi.on("tool_execution_end", (event) => {
-		send({ event: "tool_execution_end", toolName: event.toolName, isError: event.isError });
+		send({ event: "tool_execution_end", toolName: event.toolName });
 	});
-	pi.on("ui_prompt_start", (event) => {
-		send({ event: "ui_prompt_start", kind: event.kind });
+	pi.on("ui_prompt_start", () => {
+		send({ event: "ui_prompt_start" });
 	});
-	pi.on("ui_prompt_end", (event, ctx) => {
-		send({ event: "ui_prompt_end", kind: event.kind, idle: ctx.isIdle() });
+	pi.on("ui_prompt_end", (_event, ctx) => {
+		send({ event: "ui_prompt_end", idle: ctx.isIdle() });
 	});
 	pi.on("message_end", (event) => {
 		if (event.message.role !== "assistant") return;

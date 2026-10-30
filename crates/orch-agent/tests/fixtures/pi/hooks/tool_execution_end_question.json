@@ -1,5 +1,4 @@
 {
   "event": "tool_execution_end",
-  "toolName": "question",
-  "isError": false
+  "toolName": "question"
 }

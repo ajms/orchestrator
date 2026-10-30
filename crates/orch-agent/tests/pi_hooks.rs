@@ -36,7 +36,7 @@ fn startup_reports_the_conversation_and_an_idle_agent() {
     assert_eq!(
         events("session_start_startup"),
         vec![
-            conversation("c9c972bf-6f53-421e-b092-e06253c29c54"),
+            conversation("64c41acb-5d92-4ea2-be28-64cfd0453e2e"),
             AgentEvent::SessionStarted,
         ]
     );
@@ -47,7 +47,7 @@ fn new_moves_the_session_to_the_new_conversation() {
     assert_eq!(
         events("session_start_new"),
         vec![
-            conversation("01a18bd4-a411-7276-8f13-c5dda4e1645d"),
+            conversation("01a18bde-1d3e-718a-bc4b-2e3eccdb0d01"),
             AgentEvent::SessionStarted,
         ]
     );
@@ -58,7 +58,7 @@ fn a_resumed_named_conversation_brings_its_name_as_the_title() {
     assert_eq!(
         events("session_start_resumed_named"),
         vec![
-            conversation("c9c972bf-6f53-421e-b092-e06253c29c54"),
+            conversation("64c41acb-5d92-4ea2-be28-64cfd0453e2e"),
             AgentEvent::SessionStarted,
             title("fix login"),
         ]
