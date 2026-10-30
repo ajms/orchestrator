@@ -624,6 +624,9 @@ impl Daemon {
             preset,
         )
         .with_worktree(&record.worktree);
+        if let Some(profile) = adapter.agent_profile(&xdg::process_env)? {
+            spec = spec.with_agent_profile(profile);
+        }
         if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
             spec = spec.with_prompt(prompt);
         }

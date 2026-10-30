@@ -1,7 +1,10 @@
 use orch_agent::{Capabilities, LaunchSpec, PI, Preset, adapter_named};
+use std::path::PathBuf;
+
 use orch_core::{ConversationId, PermissionMode, SessionId};
 
 const SESSION: &str = "5f0c6a52-6a3e-4d3b-9d7e-0b1f8c1e2a90";
+const PROFILE: &str = "/state/orchestrator/agent-profiles/pi";
 
 fn pi() -> orch_agent::Adapter {
     adapter_named(PI, None).expect("pi is registered")
@@ -14,6 +17,7 @@ fn spec() -> LaunchSpec {
         Preset::inherit(),
     )
     .with_worktree("/repos/app/.orchestrator/worktrees/fix")
+    .with_agent_profile(PROFILE)
 }
 
 fn strings(args: &[&str]) -> Vec<String> {
@@ -25,11 +29,9 @@ fn orch_extension(args: &[String]) -> Vec<String> {
         .iter()
         .position(|arg| arg == "-e")
         .expect("orch's extension is loaded");
-    let path = &args[at + 1];
-    assert!(path.starts_with('/'), "{path}");
-    assert!(
-        path.ends_with("/orchestrator/agent-profiles/pi/extensions/orch/extension/index.ts"),
-        "{path}"
+    assert_eq!(
+        args[at + 1],
+        format!("{PROFILE}/extensions/orch/extension/index.ts")
     );
     args[..at].iter().chain(&args[at + 2..]).cloned().collect()
 }
@@ -110,4 +112,34 @@ fn resume_reopens_the_latest_conversation_without_the_prompt() {
 fn a_configured_binary_replaces_pi() {
     let pi = adapter_named(PI, Some("/home/dev/.local/bin/pi")).unwrap();
     assert_eq!(pi.launch(&spec()).program, "/home/dev/.local/bin/pi");
+}
+
+fn lookup(vars: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+    move |key| {
+        vars.iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| value.to_string())
+    }
+}
+
+#[test]
+fn the_agent_profile_lives_in_orchs_state_dir() {
+    assert_eq!(
+        pi().agent_profile(&lookup(&[("HOME", "/home/dev")])),
+        Ok(Some(PathBuf::from(
+            "/home/dev/.local/state/orchestrator/agent-profiles/pi"
+        )))
+    );
+    assert_eq!(
+        pi().agent_profile(&lookup(&[
+            ("HOME", "/home/dev"),
+            ("XDG_STATE_HOME", "/state")
+        ])),
+        Ok(Some(PathBuf::from(PROFILE)))
+    );
+}
+
+#[test]
+fn without_home_there_is_no_agent_profile_to_launch_from() {
+    assert!(pi().agent_profile(&lookup(&[])).is_err());
 }

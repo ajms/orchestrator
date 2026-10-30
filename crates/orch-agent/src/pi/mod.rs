@@ -1,6 +1,8 @@
 mod hooks;
 mod profile;
 
+use std::path::PathBuf;
+
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
 use profile::{CREDENTIALS, Dirs, RESOURCES, extension, path_text};
 
@@ -20,6 +22,8 @@ const USER_READ_ONLY: [&str; 12] = [
     "settings.json",
     "sandbox.json",
 ];
+
+const NO_HOME: &str = "pi's Agent profile needs HOME to be set";
 
 pub const PI: &str = "pi";
 
@@ -41,10 +45,10 @@ impl Pi {
         let mut args: Vec<String> = ["-na", "--session-id", conversation]
             .map(String::from)
             .into();
-        if let Some(Dirs { profile, .. }) = Dirs::resolve(&|key| std::env::var(key).ok()) {
+        if let Some(profile) = &spec.agent_profile {
             args.extend([
                 "-e".into(),
-                path_text(&extension(&profile)),
+                path_text(&extension(profile)),
                 "--orch-bin".into(),
                 spec.orch_program.clone(),
                 "--orch-session".into(),
@@ -93,9 +97,19 @@ impl AgentAdapter for Pi {
         hooks::map_hook(payload)
     }
 
+    fn agent_profile(
+        &self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<PathBuf>, String> {
+        match Dirs::resolve(lookup) {
+            Some(Dirs { profile, .. }) => Ok(Some(profile)),
+            None => Err(NO_HOME.into()),
+        }
+    }
+
     fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
         let Some(Dirs { user, profile, .. }) = Dirs::resolve(lookup) else {
-            return Err("pi's Agent profile needs HOME to be set".into());
+            return Err(NO_HOME.into());
         };
         profile::build(&user, &profile)
             .map_err(|err| format!("building pi's Agent profile {}: {err}", profile.display()))

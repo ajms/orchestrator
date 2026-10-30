@@ -54,6 +54,7 @@ pub struct LaunchSpec {
     pub preset: Preset,
     pub prompt: Option<String>,
     pub worktree: Option<PathBuf>,
+    pub agent_profile: Option<PathBuf>,
 }
 
 impl LaunchSpec {
@@ -64,6 +65,7 @@ impl LaunchSpec {
             preset,
             prompt: None,
             worktree: None,
+            agent_profile: None,
         }
     }
 
@@ -77,6 +79,13 @@ impl LaunchSpec {
     pub fn with_worktree(self, worktree: impl Into<PathBuf>) -> Self {
         Self {
             worktree: Some(worktree.into()),
+            ..self
+        }
+    }
+
+    pub fn with_agent_profile(self, profile: impl Into<PathBuf>) -> Self {
+        Self {
+            agent_profile: Some(profile.into()),
             ..self
         }
     }
@@ -184,6 +193,13 @@ pub trait AgentAdapter {
 
     fn agent_dirs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
         Vec::new()
+    }
+
+    fn agent_profile(
+        &self,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<PathBuf>, String> {
+        Ok(None)
     }
 
     fn prepare(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
