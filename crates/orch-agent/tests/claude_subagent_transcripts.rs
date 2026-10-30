@@ -22,7 +22,9 @@ fn hook(name: &str) -> Value {
 }
 
 fn claude_transcripts() -> Box<dyn SubagentTranscripts> {
-    ClaudeCode::default().subagent_transcripts().unwrap()
+    ClaudeCode::default()
+        .subagent_transcripts(&|_| None)
+        .unwrap()
 }
 
 fn follow(transcripts: &mut Box<dyn SubagentTranscripts>, payload: &Value) {

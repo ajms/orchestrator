@@ -17,7 +17,7 @@ pub trait AgentAdapter {
     fn map_hook(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError>;
     fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError>;
     fn title_watch(&self) -> Option<Box<dyn TitleWatch>>;
-    fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>>;
+    fn subagent_transcripts(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Option<Box<dyn SubagentTranscripts>>;
     fn is_guard_payload(&self, payload: &str) -> bool;
     fn guard_answer(&self, answer: &GuardAnswer) -> Option<String>;
     fn worktree_request(&self, payload: &str) -> Option<WorktreeRequest>;

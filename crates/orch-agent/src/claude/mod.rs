@@ -154,7 +154,10 @@ impl AgentAdapter for ClaudeCode {
         Some(Box::new(TranscriptTitles::default()))
     }
 
-    fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>> {
+    fn subagent_transcripts(
+        &self,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<Box<dyn SubagentTranscripts>> {
         Some(Box::new(ClaudeSubagentTranscripts::default()))
     }
 

@@ -203,7 +203,7 @@ impl Live {
         let transcripts = adapter
             .as_ref()
             .filter(|_| capabilities.transcripts)
-            .and_then(|adapter| adapter.subagent_transcripts());
+            .and_then(|adapter| adapter.subagent_transcripts(&orch_config::xdg::process_env));
         Self {
             record,
             repo,
