@@ -37,13 +37,15 @@ fn orch_extension(args: &[String]) -> Vec<String> {
 }
 
 #[test]
-fn pi_reports_hooks_titles_and_usage_and_resumes() {
+fn pi_reports_hooks_titles_usage_and_subagents_and_resumes() {
     assert_eq!(
         pi().capabilities(),
         Capabilities {
             hooks: true,
             resume: true,
+            subagents: true,
             titles: true,
+            transcripts: true,
             usage: true,
             ..Capabilities::default()
         }

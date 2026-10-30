@@ -1,6 +1,7 @@
 mod agent;
 mod claude;
 mod guard;
+mod key_argument;
 mod pi;
 mod preset;
 mod registry;

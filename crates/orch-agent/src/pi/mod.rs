@@ -1,13 +1,17 @@
 mod hooks;
 mod profile;
+mod subagents;
 mod usage;
 
 use std::path::PathBuf;
 
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
 use profile::{CREDENTIALS, Dirs, RESOURCES, extension, path_text};
+use subagents::PiSubagentTranscripts;
 
-use crate::{AgentAdapter, Argv, Capabilities, LaunchSpec, PayloadError, SandboxNeeds};
+use crate::{
+    AgentAdapter, Argv, Capabilities, LaunchSpec, PayloadError, SandboxNeeds, SubagentTranscripts,
+};
 
 const USER_READ_ONLY: [&str; 12] = [
     "install",
@@ -68,7 +72,9 @@ impl AgentAdapter for Pi {
         Capabilities {
             hooks: true,
             resume: true,
+            subagents: true,
             titles: true,
+            transcripts: true,
             usage: true,
             ..Capabilities::default()
         }
@@ -101,6 +107,14 @@ impl AgentAdapter for Pi {
 
     fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         usage::map_tap(payload)
+    }
+
+    fn subagent_transcripts(
+        &self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<Box<dyn SubagentTranscripts>> {
+        let Dirs { profile, .. } = Dirs::resolve(lookup)?;
+        Some(Box::new(PiSubagentTranscripts::new(profile)))
     }
 
     fn agent_profile(

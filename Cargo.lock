@@ -1212,6 +1212,7 @@ dependencies = [
 name = "orch-agent"
 version = "0.9.0"
 dependencies = [
+ "nix 0.30.1",
  "orch-core",
  "serde",
  "serde_json",
