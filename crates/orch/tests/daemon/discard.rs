@@ -73,7 +73,7 @@ async fn discarding_shows_what_would_be_lost_then_throws_the_session_away() {
     pane.hook(&hook("UserPromptSubmit", "")).await;
     client
         .until(&id, "Working", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::Working)
+            view.agent_state == Some(orch_protocol::AgentStateView::Working)
         })
         .await;
     discard(&mut client, &id).await;
@@ -134,7 +134,7 @@ async fn discarding_while_setting_up_stops_the_setup_script_and_never_starts_the
     settled(&mut client).await;
     let view = &client.sessions[&id];
     assert_eq!(view.phase, PhaseView::Discarded);
-    assert_eq!(view.agent, None);
+    assert_eq!(view.agent_state, None);
 }
 
 #[tokio::test]

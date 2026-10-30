@@ -76,7 +76,7 @@ fn an_untrusted_resume_asks_for_trust_and_resumes_after_approval() {
     let mut tui = Harness::new();
     let mut suspended = session("webshop", "paused");
     suspended.phase = orch_protocol::PhaseView::Suspended;
-    suspended.agent = None;
+    suspended.agent_state = None;
     tui.sessions(vec![suspended]);
     tui.daemon().script_reply(untrusted());
     tui.command("resume");

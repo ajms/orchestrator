@@ -15,14 +15,16 @@ async fn landing_a_stacked_base_retargets_the_session_and_hands_it_the_rebase_on
     create.base = Some(lower_view.branch.clone());
     let upper = client.create(create).await;
     client
-        .until(&upper, "running", |view| view.agent.is_some())
+        .until(&upper, "running", |view| view.agent_state.is_some())
         .await;
     let upper_view = client.sessions[&upper].clone();
     commit(&upper_view.worktree, "upper.txt", "upper\n");
     let mut pane = env.pane(&upper, PANE).await;
     pane.hook(&hook("UserPromptSubmit", "")).await;
     client
-        .until(&upper, "Working", |view| view.agent == Some(State::Working))
+        .until(&upper, "Working", |view| {
+            view.agent_state == Some(State::Working)
+        })
         .await;
 
     let landed = client
@@ -67,7 +69,7 @@ async fn a_retargeted_base_is_remembered_across_a_daemon_restart() {
     create.base = Some(lower_view.branch.clone());
     let upper = client.create(create).await;
     client
-        .until(&upper, "running", |view| view.agent.is_some())
+        .until(&upper, "running", |view| view.agent_state.is_some())
         .await;
     client
         .request(Request::Land {
@@ -105,12 +107,14 @@ async fn a_queued_rebase_prompt_survives_a_daemon_restart() {
     create.base = Some(lower_view.branch.clone());
     let upper = client.create(create).await;
     client
-        .until(&upper, "running", |view| view.agent.is_some())
+        .until(&upper, "running", |view| view.agent_state.is_some())
         .await;
     let mut pane = env.pane(&upper, PANE).await;
     pane.hook(&hook("UserPromptSubmit", "")).await;
     client
-        .until(&upper, "Working", |view| view.agent == Some(State::Working))
+        .until(&upper, "Working", |view| {
+            view.agent_state == Some(State::Working)
+        })
         .await;
     client
         .request(Request::Land {

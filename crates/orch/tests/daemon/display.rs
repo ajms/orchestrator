@@ -88,7 +88,9 @@ async fn a_resumed_agent_gets_the_display_of_the_latest_client_while_a_running_o
     pane.wait_for_text("DISPLAY=:1").await;
     pane.type_line("exit 0").await;
     client
-        .until(&id, "Exited", |view| view.agent == Some(State::Exited))
+        .until(&id, "Exited", |view| {
+            view.agent_state == Some(State::Exited)
+        })
         .await;
 
     client
@@ -99,7 +101,7 @@ async fn a_resumed_agent_gets_the_display_of_the_latest_client_while_a_running_o
         .unwrap();
     client
         .until(&id, "running again", |view| {
-            matches!(view.agent, Some(State::Starting | State::Working))
+            matches!(view.agent_state, Some(State::Starting | State::Working))
         })
         .await;
     let mut resumed = env.pane(&id, PANE).await;

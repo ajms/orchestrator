@@ -297,7 +297,9 @@ async fn a_deleted_base_branch_is_flagged_blocks_landing_and_can_be_retargeted()
     let mut pane = env.pane(&id, PANE).await;
     pane.hook(&hook("SessionStart", "")).await;
     let view = client
-        .until(&id, "Idle", |view| view.agent == Some(AgentStateView::Idle))
+        .until(&id, "Idle", |view| {
+            view.agent_state == Some(AgentStateView::Idle)
+        })
         .await;
     commit(&view.worktree, "feature.rs", "feature\n");
     git(&repo, &["branch", "-D", "develop"]);

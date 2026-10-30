@@ -235,14 +235,14 @@ async fn stacked_on(
     create.base = Some(client.sessions[lower].branch.clone());
     let upper = client.create(create).await;
     client
-        .until(&upper, "running", |view| view.agent.is_some())
+        .until(&upper, "running", |view| view.agent_state.is_some())
         .await;
     let mut pane = env.pane(&upper, PANE).await;
     pane.hook(&hook("SessionStart", r#""source":"startup""#))
         .await;
     client
         .until(&upper, "Idle", |view| {
-            view.agent == Some(AgentStateView::Idle)
+            view.agent_state == Some(AgentStateView::Idle)
         })
         .await;
     (upper, pane)
@@ -294,12 +294,14 @@ async fn a_pr_onto_a_base_missing_on_origin_is_refused_clearly() {
     create.base = Some("feature".into());
     let id = client.create(create).await;
     client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     let mut pane = env.pane(&id, PANE).await;
     pane.hook(&hook("SessionStart", "")).await;
     client
-        .until(&id, "Idle", |view| view.agent == Some(AgentStateView::Idle))
+        .until(&id, "Idle", |view| {
+            view.agent_state == Some(AgentStateView::Idle)
+        })
         .await;
     commit(&client.sessions[&id].worktree, "f.txt", "f\n");
 

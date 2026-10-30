@@ -15,7 +15,7 @@ async fn sandboxed_session(env: &Env, client: &mut TestClient) -> (SessionId, Pa
     let create = CreateSession::new(&repo, "Boxed");
     let id = client.create(create).await;
     client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     let pane = env.pane(&id, PANE).await;
     (id, pane)
@@ -115,7 +115,7 @@ async fn a_sandboxed_agent_cannot_plant_a_missing_skills_dir_or_git_hooks_dir() 
     let mut client = env.client().await;
     let id = client.create(CreateSession::new(&repo, "Boxed")).await;
     client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     let mut pane = env.pane(&id, PANE).await;
 
@@ -250,7 +250,7 @@ async fn a_sandboxed_agent_reports_through_its_holder_and_is_not_asked_about_out
     pane.hook(&hook("SessionStart", r#""source":"startup""#))
         .await;
     client
-        .until(&id, "Idle", |view| view.agent == Some(State::Idle))
+        .until(&id, "Idle", |view| view.agent_state == Some(State::Idle))
         .await;
     client.history.clear();
     pane.hook(&hook(
@@ -422,7 +422,9 @@ async fn a_session_from_before_the_upgrade_resumes_sandboxed() {
     let mut pane = env.pane(&id, PANE).await;
     pane.type_line("exit 0").await;
     client
-        .until(&id, "Exited", |view| view.agent == Some(State::Exited))
+        .until(&id, "Exited", |view| {
+            view.agent_state == Some(State::Exited)
+        })
         .await;
     daemon.kill();
 
@@ -486,10 +488,15 @@ async fn real_claude_runs_sandboxed_writes_its_worktree_and_stops_cleanly() {
     stopper.send(&ToHolder::Kill).await.unwrap();
     let stopped = client
         .until(&id, "Claude to stop", |view| {
-            matches!(view.agent, Some(State::Exited | State::Errored))
+            matches!(view.agent_state, Some(State::Exited | State::Errored))
         })
         .await;
-    assert_eq!(stopped.agent, Some(State::Exited), "{:?}", stopped.error);
+    assert_eq!(
+        stopped.agent_state,
+        Some(State::Exited),
+        "{:?}",
+        stopped.error
+    );
 }
 
 #[tokio::test]

@@ -117,7 +117,7 @@ async fn landing_is_refused_while_the_agent_is_working_or_needs_input() {
     pane.hook(&hook("UserPromptSubmit", "")).await;
     client
         .until(&id, "Working", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::Working)
+            view.agent_state == Some(orch_protocol::AgentStateView::Working)
         })
         .await;
     assert!(refusal(land(&mut client, &id, "Busy").await).contains("Working"));
@@ -126,7 +126,7 @@ async fn landing_is_refused_while_the_agent_is_working_or_needs_input() {
         .await;
     client
         .until(&id, "Needs input", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::NeedsInput)
+            view.agent_state == Some(orch_protocol::AgentStateView::NeedsInput)
         })
         .await;
     assert!(refusal(land(&mut client, &id, "Busy").await).contains("Needs input"));
@@ -224,7 +224,7 @@ async fn the_agent_drafts_messages_in_a_forked_side_conversation() {
         client
             .history
             .iter()
-            .all(|view| view.agent == Some(orch_protocol::AgentStateView::Idle))
+            .all(|view| view.agent_state == Some(orch_protocol::AgentStateView::Idle))
     );
     assert!(!pane.text().contains("Drafted"));
 }

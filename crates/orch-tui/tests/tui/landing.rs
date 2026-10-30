@@ -321,7 +321,7 @@ fn a_closed_pr_can_be_abandoned_back_to_active() {
         session("webshop", "rejected"),
         orch_protocol::PhaseView::PrOpen,
     );
-    view.agent = Some(AgentStateView::Idle);
+    view.agent_state = Some(AgentStateView::Idle);
     view.flags.pr_number = Some(9);
     view.flags.pr = Some(orch_protocol::PrView {
         checks: orch_protocol::PrChecksView::None,
@@ -367,7 +367,7 @@ fn landing_a_session_with_an_open_pr_only_offers_pushing_to_it() {
 
 fn offers_only_pushing(phase: orch_protocol::PhaseView) {
     let mut view = in_phase(session("webshop", "review-fixes"), phase);
-    view.agent = Some(AgentStateView::Idle);
+    view.agent_state = Some(AgentStateView::Idle);
     view.flags.pr_number = Some(7);
     view.flags.pr = Some(orch_protocol::PrView {
         checks: orch_protocol::PrChecksView::None,

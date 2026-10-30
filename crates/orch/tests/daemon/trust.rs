@@ -150,7 +150,7 @@ async fn a_changed_agent_config_refuses_preset_changes_and_resume_until_approved
     pane.type_line("exit 0").await;
     client
         .until(&id, "Exited", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::Exited)
+            view.agent_state == Some(orch_protocol::AgentStateView::Exited)
         })
         .await;
     let resume = Request::Resume {

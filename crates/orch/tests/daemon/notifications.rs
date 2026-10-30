@@ -61,7 +61,7 @@ async fn nothing_is_sent_for_a_session_a_focused_client_is_looking_at() {
         .await;
     client
         .until(&id, "Needs input", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::NeedsInput)
+            view.agent_state == Some(orch_protocol::AgentStateView::NeedsInput)
         })
         .await;
     client.view(Some(&id), false).await;
@@ -100,7 +100,7 @@ async fn needs_input(client: &mut TestClient, id: &SessionId, pane: &mut PaneVie
         .await;
     client
         .until(id, "Needs input", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::NeedsInput)
+            view.agent_state == Some(orch_protocol::AgentStateView::NeedsInput)
         })
         .await;
 }
@@ -173,7 +173,7 @@ async fn a_muted_session_neither_notifies_nor_rings_and_muting_dismisses_its_not
     muted_pane.hook(&hook("Stop", "")).await;
     client
         .until(&muted, "Idle", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::Idle)
+            view.agent_state == Some(orch_protocol::AgentStateView::Idle)
         })
         .await;
     needs_input(&mut client, &loud, &mut loud_pane).await;
@@ -323,7 +323,7 @@ async fn a_restarted_daemon_and_reconciliation_do_not_replay_old_attention() {
     let mut client = env.client().await;
     client
         .until(&id, "adopted", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::NeedsInput)
+            view.agent_state == Some(orch_protocol::AgentStateView::NeedsInput)
         })
         .await;
     client.reconcile().await;

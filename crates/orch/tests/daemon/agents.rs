@@ -3,7 +3,7 @@ use orch_protocol::{AgentStateView as State, CreateSession, Reply, Request, Sess
 use crate::common::*;
 
 fn agent_is(state: State) -> impl Fn(&SessionView) -> bool {
-    move |view| view.agent == Some(state)
+    move |view| view.agent_state == Some(state)
 }
 
 #[tokio::test]
@@ -14,7 +14,7 @@ async fn a_new_session_stores_the_repos_default_agent() {
 
     let id = running_session(&env, &mut client, "Default agent").await;
 
-    assert_eq!(client.sessions[&id].agent_name, "claude");
+    assert_eq!(client.sessions[&id].agent, "claude");
 }
 
 #[tokio::test]
@@ -35,10 +35,10 @@ async fn a_session_keeps_its_agent_after_the_repos_default_changes() {
 
     let view = client
         .until(&id, "running again", |view| {
-            matches!(view.agent, Some(State::Starting | State::Working))
+            matches!(view.agent_state, Some(State::Starting | State::Working))
         })
         .await;
-    assert_eq!(view.agent_name, "claude");
+    assert_eq!(view.agent, "claude");
     assert_eq!(view.error, None);
 }
 
@@ -53,7 +53,7 @@ async fn a_session_of_an_unknown_agent_is_errored_and_never_runs_as_claude() {
     let id = client.create(CreateSession::new(&repo, "Unknown")).await;
 
     let view = client.until(&id, "Errored", agent_is(State::Errored)).await;
-    assert_eq!(view.agent_name, "nope");
+    assert_eq!(view.agent, "nope");
     let error = view.error.unwrap_or_default();
     assert!(error.contains("unknown Agent \"nope\""), "{error}");
     assert_eq!(view.holder_pid, None);
@@ -78,7 +78,7 @@ async fn hooks_and_taps_from_another_agent_are_dropped() {
         .until(&id, "the Claude sample", |view| view.cost_usd.is_some())
         .await;
     assert_eq!(view.cost_usd, Some(1.0));
-    assert_eq!(view.agent, Some(State::Starting));
+    assert_eq!(view.agent_state, Some(State::Starting));
 
     pane.type_line(&format!("hook --agent claude {}", hook("SessionStart", "")))
         .await;

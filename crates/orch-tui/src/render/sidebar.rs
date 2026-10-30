@@ -113,7 +113,7 @@ fn first_line(view: &SessionView, width: usize) -> Line<'static> {
             Style::new().fg(style::context(percent)),
         ));
     }
-    tail.push(Span::raw(format!(" {}", view.agent_name)).dark_gray());
+    tail.push(Span::raw(format!(" {}", view.agent)).dark_gray());
     let used: usize = tail.iter().map(|span| span.content.chars().count()).sum();
     let room = width.saturating_sub(marker.content.chars().count() + 1 + used);
     let label_width = LABEL_WIDTH.min(room).max(1);

@@ -48,7 +48,7 @@ async fn an_agent_copy_is_dropped_when_no_client_shows_its_session() {
     pane.hook(&hook("SessionStart", "")).await;
     client
         .until(&id, "Idle", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::Idle)
+            view.agent_state == Some(orch_protocol::AgentStateView::Idle)
         })
         .await;
 
