@@ -1,0 +1,5 @@
+{
+  "event": "ui_prompt_end",
+  "kind": "confirm",
+  "idle": true
+}
