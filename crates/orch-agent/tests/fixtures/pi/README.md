@@ -3,10 +3,11 @@ Recorded with pi 1.1.0.
 `hooks/` holds what orch's pi extension (`crates/orch-agent/src/pi/extension/`) sends to `orch hook --agent pi`, and `taps/` what it sends to `orch tap --agent pi`, as real pi emitted it. Re-record after a pi update, or after changing the extension's payloads:
 
 ```sh
+(cd crates/orch-agent/src/pi/extension && npm ci)
 node crates/orch-agent/tests/fixtures/pi/record.mjs
 ```
 
-`record.mjs` runs `pi --mode rpc` (`PI="node /path/to/cli.js"` picks another pi) in a throwaway `HOME` and Agent profile, so it never reads or writes `~/.pi`. It loads the shipped extension with `--orch-bin` pointed at `capture.sh`, and `scripted.ts`, which adds:
+`record.mjs` runs `pi --mode rpc` from the extension's pinned dev dependency (`PI="node /path/to/cli.js"` picks another pi). Its `package.json` overrides pi's `@earendil-works/*` siblings to the same version, because pi's `^` ranges otherwise pull newer ones its CLI can't load. It runs in a throwaway `HOME` and Agent profile, so it never reads or writes `~/.pi`. It loads the shipped extension with `--orch-bin` pointed at `capture.sh`, and `scripted.ts`, which adds:
 
 - the `orch-scripted` model (named `Scripted`, priced like a mid-size Anthropic model), pi's own faux provider answering by prompt (`reply`, `tool`, `question`, `slow`, `fail <errorMessage>`), so no credentials or network are needed;
 - a `question` tool that asks through `ctx.ui.select`, like the user's own;

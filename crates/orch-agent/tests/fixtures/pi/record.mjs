@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Records what orch's pi extension sends to `orch hook` and `orch tap`: node record.mjs (PI="node /path/to/cli.js" for an unreleased pi).
+// Records what orch's pi extension sends to `orch hook` and `orch tap`: node record.mjs after `npm ci` in the extension (PI="node /path/to/cli.js" for another pi).
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -12,7 +12,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const extension = join(here, "../../../src/pi/extension/index.ts");
 const hooks = join(here, "hooks");
 const taps = join(here, "taps");
-const [program, ...programArgs] = (process.env.PI ?? "pi").split(" ");
+const pinned = `node ${join(here, "../../../src/pi/extension/node_modules/@earendil-works/pi-coding-agent/dist/cli.js")}`;
+const [program, ...programArgs] = (process.env.PI ?? pinned).split(" ");
 const work = mkdtempSync(join(tmpdir(), "orch-pi-record-"));
 const capture = join(work, "capture.jsonl");
 const env = {
