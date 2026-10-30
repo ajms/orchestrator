@@ -129,7 +129,7 @@ fn the_wheel_scrolls_a_long_sidebar_without_changing_the_selection() {
     assert!(in_sidebar(&mut tui, "task-00"));
     assert!(!in_sidebar(&mut tui, "task-39"));
 
-    for _ in 0..20 {
+    for _ in 0..10 {
         tui.wheel(MouseEventKind::ScrollDown, 5, 10);
     }
 
@@ -137,7 +137,7 @@ fn the_wheel_scrolls_a_long_sidebar_without_changing_the_selection() {
     assert!(in_sidebar(&mut tui, "task-39"));
     assert_eq!(tui.daemon().open_panes(), vec!["task-00"]);
 
-    for _ in 0..20 {
+    for _ in 0..10 {
         tui.wheel(MouseEventKind::ScrollUp, 5, 10);
     }
     assert!(in_sidebar(&mut tui, "task-00"));
@@ -146,7 +146,7 @@ fn the_wheel_scrolls_a_long_sidebar_without_changing_the_selection() {
 #[test]
 fn a_click_on_a_scrolled_sidebar_shows_the_row_under_the_pointer() {
     let mut tui = many_sessions(40);
-    for _ in 0..20 {
+    for _ in 0..10 {
         tui.wheel(MouseEventKind::ScrollDown, 5, 10);
     }
 
