@@ -12,9 +12,10 @@ const LINKED: [&str; 4] = ["SYSTEM.md", "AGENTS.md", "keybindings.json", "agents
 const SETTINGS: &str = "settings.json";
 const EXTENSION_DIR: &str = "orch/extension";
 const EXTENSION_ENTRY: &str = "index.ts";
-const EXTENSION_FILES: [(&str, &str); 2] = [
+const EXTENSION_FILES: [(&str, &str); 3] = [
     (EXTENSION_ENTRY, include_str!("extension/index.ts")),
     ("forward.ts", include_str!("extension/forward.ts")),
+    ("transcripts.ts", include_str!("extension/transcripts.ts")),
 ];
 const STAGED: &str = ".orch-new";
 const RETIRED: &str = ".orch-old";

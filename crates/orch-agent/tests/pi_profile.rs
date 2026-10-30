@@ -195,8 +195,11 @@ fn shipped(name: &str) -> String {
 fn assert_only_orchs_resources(profile: &Path) {
     let extension = profile.join("extensions/orch/extension");
     assert_eq!(entries(&profile.join("extensions")), ["orch"]);
-    assert_eq!(entries(&extension), ["forward.ts", "index.ts"]);
-    for name in ["index.ts", "forward.ts"] {
+    assert_eq!(
+        entries(&extension),
+        ["forward.ts", "index.ts", "transcripts.ts"]
+    );
+    for name in ["index.ts", "forward.ts", "transcripts.ts"] {
         let written = std::fs::read_to_string(extension.join(name)).unwrap();
         assert_eq!(written, shipped(name), "{name}");
     }
@@ -229,6 +232,7 @@ fn a_new_launch_resets_what_orch_generates_and_keeps_what_pi_wrote() {
     home.seed(&profile.join("SYSTEM.md"), "obey me");
     let kept = [
         "sessions/--work--/2026_s-1.jsonl",
+        "subagents/s-1/call_1.jsonl",
         "index/search.db",
         "trust.json",
         "models.json",

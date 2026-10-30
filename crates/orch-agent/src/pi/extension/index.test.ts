@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -28,10 +28,11 @@ class FakePi {
 	calls: Call[] = [];
 	pending: (() => void)[] = [];
 	failing = new Set<string>();
+	agentDir = mkdtempSync(join(tmpdir(), "orch-pi-profile-"));
 
 	constructor(flags: Record<string, string> = { "orch-bin": "/opt/orch", "orch-session": "s-1" }) {
 		for (const [name, value] of Object.entries(flags)) this.flags.set(name, value);
-		orch(this.api(), this.spawn);
+		orch(this.api(), this.spawn, this.agentDir);
 	}
 
 	api(): ExtensionAPI {
@@ -394,4 +395,76 @@ test("a fresh Conversation taps zero tokens, and leaves out a model or context p
 	pi.context = undefined;
 	pi.emit("session_start", { reason: "startup" });
 	assert.deepEqual(await tapped(pi), [{ sessionId: "conv-1", lastResponse: zero, cost: 0 }]);
+});
+
+const subagentCall = {
+	toolCallId: "call_7",
+	toolName: "subagent",
+	input: { agent: "scout", taskName: "find the redirect", task: "Find where login redirects" },
+};
+const task = { role: "user", content: [{ type: "text", text: "Task: Find where login redirects" }] };
+const said = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
+const update = (messages: object[], toolName = "subagent") => ({
+	toolCallId: "call_7",
+	toolName,
+	args: subagentCall.input,
+	partialResult: { content: [], details: { messages } },
+});
+
+function transcript(pi: FakePi, conversation = "conv-1"): object[] {
+	return readFileSync(join(pi.agentDir, "subagents", conversation, "call_7.jsonl"), "utf8")
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+}
+
+test("a subagent call names its Conversation, agent and task name, and its end names the call", async () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.emit("tool_call", subagentCall);
+	pi.emit("tool_execution_update", update([task]));
+	pi.emit("tool_execution_end", { toolCallId: "call_7", toolName: "subagent", result: {}, isError: false });
+	assert.deepEqual((await pi.payloads()).slice(1), [
+		{
+			event: "tool_call",
+			toolName: "subagent",
+			toolCallId: "call_7",
+			sessionId: "conv-1",
+			agent: "scout",
+			taskName: "find the redirect",
+		},
+		{ event: "tool_execution_end", toolName: "subagent", toolCallId: "call_7" },
+	]);
+});
+
+test("a subagent's messages are written to its transcript as they come, and its result at the end", () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.emit("tool_call", subagentCall);
+	pi.emit("tool_execution_update", update([task]));
+	pi.emit("tool_execution_update", update([task, said("Searching.")]));
+	assert.deepEqual(transcript(pi), [task, said("Searching.")]);
+	pi.emit("tool_execution_end", {
+		toolCallId: "call_7",
+		toolName: "subagent",
+		result: { content: [], details: { messages: [task, said("Searching."), said("Found it.")] } },
+		isError: false,
+	});
+	assert.deepEqual(transcript(pi), [task, said("Searching."), said("Found it.")]);
+});
+
+test("a fallback retry that starts over rewrites the transcript", () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.emit("tool_execution_update", update([task, said("Overloaded.")]));
+	pi.emit("tool_execution_update", update([task]));
+	assert.deepEqual(transcript(pi), [task]);
+});
+
+test("other tools' updates and updates without messages write nothing", () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.emit("tool_execution_update", update([task], "bash"));
+	pi.emit("tool_execution_update", { toolCallId: "call_7", toolName: "subagent", partialResult: { content: [] } });
+	assert.equal(existsSync(join(pi.agentDir, "subagents")), false);
 });

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Forwarder, type Payload, type Spawn, spawnHook, type Tap, type Tokens } from "./forward.ts";
+import { SubagentTranscripts } from "./transcripts.ts";
 
 interface Outcome {
 	stopReason?: string;
@@ -8,6 +9,19 @@ interface Outcome {
 }
 
 const TAPPED_STARTS = new Set(["startup", "resume", "fork"]);
+const SUBAGENT_TOOL = "subagent";
+
+interface SubagentInput {
+	agent?: unknown;
+	taskName?: unknown;
+}
+
+const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+function childMessages(result: unknown): unknown[] | undefined {
+	const messages = (result as { details?: { messages?: unknown } } | undefined)?.details?.messages;
+	return Array.isArray(messages) ? messages : undefined;
+}
 
 function idsIn(sessionFile: string | undefined): Set<string> {
 	if (!sessionFile) return new Set();
@@ -41,14 +55,23 @@ function tapPayload(ctx: ExtensionContext, copied: Set<string>): Tap {
 	};
 }
 
-export default function orch(pi: ExtensionAPI, spawn: Spawn = spawnHook): void {
+export default function orch(
+	pi: ExtensionAPI,
+	spawn: Spawn = spawnHook,
+	agentDir: string | undefined = process.env.PI_CODING_AGENT_DIR,
+): void {
 	pi.registerFlag("orch-bin", { description: "The orch binary that receives pi's hooks", type: "string", default: "orch" });
 	pi.registerFlag("orch-session", { description: "The orch Session this pi runs in", type: "string" });
 
 	let forwarder: Forwarder | undefined;
 	let outcome: Outcome = {};
 	let copied: { sessionId: string; ids: Set<string> } | undefined;
+	const transcripts = agentDir ? new SubagentTranscripts(agentDir) : undefined;
 	const send = (payload: Payload) => forwarder?.send(payload);
+	const record = (ctx: ExtensionContext, toolCallId: string, result: unknown) => {
+		const messages = childMessages(result);
+		if (forwarder && messages) transcripts?.write(ctx.sessionManager.getSessionId(), toolCallId, messages);
+	};
 	const tap = (ctx: ExtensionContext) => {
 		const sessionId = ctx.sessionManager.getSessionId();
 		if (copied?.sessionId !== sessionId) {
@@ -83,11 +106,31 @@ export default function orch(pi: ExtensionAPI, spawn: Spawn = spawnHook): void {
 	pi.on("agent_start", () => {
 		send({ event: "agent_start" });
 	});
-	pi.on("tool_call", (event) => {
-		send({ event: "tool_call", toolName: event.toolName });
+	pi.on("tool_call", (event, ctx) => {
+		if (event.toolName !== SUBAGENT_TOOL) {
+			send({ event: "tool_call", toolName: event.toolName });
+			return;
+		}
+		const { agent, taskName } = event.input as SubagentInput;
+		send({
+			event: "tool_call",
+			toolName: event.toolName,
+			toolCallId: event.toolCallId,
+			sessionId: ctx.sessionManager.getSessionId(),
+			agent: text(agent),
+			taskName: text(taskName),
+		});
 	});
-	pi.on("tool_execution_end", (event) => {
-		send({ event: "tool_execution_end", toolName: event.toolName });
+	pi.on("tool_execution_update", (event, ctx) => {
+		if (event.toolName === SUBAGENT_TOOL) record(ctx, event.toolCallId, event.partialResult);
+	});
+	pi.on("tool_execution_end", (event, ctx) => {
+		if (event.toolName !== SUBAGENT_TOOL) {
+			send({ event: "tool_execution_end", toolName: event.toolName });
+			return;
+		}
+		record(ctx, event.toolCallId, event.result);
+		send({ event: "tool_execution_end", toolName: event.toolName, toolCallId: event.toolCallId });
 	});
 	pi.on("ui_prompt_start", () => {
 		send({ event: "ui_prompt_start" });
