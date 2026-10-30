@@ -154,7 +154,10 @@ pub struct Hello {
     pub port_block: Option<PortBlock>,
     pub holder_pid: u32,
     pub agent_pid: Option<u32>,
-    pub agent: AgentStatus,
+    #[serde(rename = "agent")]
+    pub agent_status: AgentStatus,
+    #[serde(rename = "agent_name", default = "orch_agent::implied_agent")]
+    pub agent: String,
     #[serde(default)]
     pub sandboxed: bool,
 }

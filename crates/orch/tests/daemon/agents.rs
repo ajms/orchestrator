@@ -84,3 +84,30 @@ async fn hooks_and_taps_from_another_agent_are_dropped() {
         .await;
     client.until(&id, "Idle", agent_is(State::Idle)).await;
 }
+
+#[tokio::test]
+async fn an_adopted_holder_keeps_the_agent_it_was_started_for() {
+    let env = Env::new();
+    let mut daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let id = running_session(&env, &mut client, "Adopt me").await;
+    client
+        .until(&id, "held", |view| view.holder_pid.is_some())
+        .await;
+
+    daemon.kill();
+    env.lose_state_db();
+    env.write_config("[defaults.agent]\nname = \"pi\"\n");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let adopted = client
+        .until(&id, "adopted", |view| {
+            view.flags.recovered && view.holder_pid.is_some()
+        })
+        .await;
+
+    assert_eq!(adopted.agent, "claude");
+    let mut pane = env.pane(&id, PANE).await;
+    pane.hook(&hook("SessionStart", "")).await;
+    client.until(&id, "Idle", agent_is(State::Idle)).await;
+}

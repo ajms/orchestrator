@@ -385,7 +385,8 @@ async fn hold_replaying(
                         port_block: None,
                         holder_pid,
                         agent_pid: None,
-                        agent: AgentStatus::Running,
+                        agent_status: AgentStatus::Running,
+                        agent: "claude".into(),
                         sandboxed: false,
                     };
                     let _ = write_frame_async(&mut writer, &FromHolder::Hello(hello)).await;

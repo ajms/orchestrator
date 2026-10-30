@@ -12,7 +12,8 @@ async fn holder_greets_the_daemon_and_serves_the_agent_screen() {
     assert_eq!(hello.version, PROTOCOL_VERSION);
     assert_eq!(hello.session.as_str(), "s1");
     assert_eq!(hello.holder_pid, held.pid as u32);
-    assert_eq!(hello.agent, AgentStatus::Running);
+    assert_eq!(hello.agent_status, AgentStatus::Running);
+    assert_eq!(hello.agent, "claude");
     assert!(hello.agent_pid.is_some());
     wait_for_screen(&mut client, |text| text.contains("hello from the agent")).await;
 }
@@ -198,7 +199,7 @@ async fn holder_keeps_the_agent_alive_across_daemon_disconnects() {
 
     let (mut client, hello) = held.attach().await;
 
-    assert_eq!(hello.agent, AgentStatus::Running);
+    assert_eq!(hello.agent_status, AgentStatus::Running);
     wait_for_screen(&mut client, |text| text.contains("still here")).await;
 }
 
@@ -211,7 +212,7 @@ async fn holder_keeps_the_final_screen_until_shutdown() {
     drop(client);
 
     let (mut client, hello) = held.attach().await;
-    let AgentStatus::Exited(exit) = hello.agent else {
+    let AgentStatus::Exited(exit) = hello.agent_status else {
         panic!("agent should have exited: {hello:?}");
     };
     assert_eq!(exit.code, 3);

@@ -60,7 +60,7 @@ impl Daemon {
                     };
                     let (generation, _) = live.replace_holder(Some(link));
                     live.sandboxed = hello.sandboxed;
-                    let running = hello.agent == AgentStatus::Running;
+                    let running = hello.agent_status == AgentStatus::Running;
                     let now = Instant::now();
                     match (how, live.record.agent_state) {
                         (Attach::Reattach { .. }, _) => {}
@@ -71,7 +71,7 @@ impl Daemon {
                             live.status.observe(Observation::Spawned, now);
                         }
                     }
-                    if let AgentStatus::Exited(exit) = &hello.agent
+                    if let AgentStatus::Exited(exit) = &hello.agent_status
                         && !matches!(
                             live.status.agent_state(),
                             Some(AgentState::Exited | AgentState::Errored)
