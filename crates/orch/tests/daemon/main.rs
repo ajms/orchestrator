@@ -1,3 +1,4 @@
+mod agents;
 mod branch_lookup;
 mod broker;
 #[path = "../shared/bwrap.rs"]

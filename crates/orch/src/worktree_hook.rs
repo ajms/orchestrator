@@ -2,13 +2,17 @@ use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
 
-use orch_agent::{AgentAdapter, ClaudeCode, WorktreeRequest};
+use orch_agent::{AgentAdapter, CLAUDE, ClaudeCode, WorktreeRequest};
 use orch_git::Repo;
 
-pub fn run(worktree: &Path) -> ExitCode {
+pub fn run(worktree: &Path, agent: &str) -> ExitCode {
     let mut payload = String::new();
     if let Err(err) = std::io::stdin().read_to_string(&mut payload) {
         eprintln!("orch worktree-hook: {err}");
+        return ExitCode::FAILURE;
+    }
+    if agent != CLAUDE {
+        eprintln!("orch worktree-hook: unknown Agent {agent:?}");
         return ExitCode::FAILURE;
     }
     let Some(request) = ClaudeCode::default().worktree_request(&payload) else {

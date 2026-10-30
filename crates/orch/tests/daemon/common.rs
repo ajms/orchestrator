@@ -82,7 +82,7 @@ impl Env {
 
     pub fn write_config_with_agent(&self, extra: &str, binary: &str) {
         let config = format!(
-            "{extra}\n[defaults.agent]\nbinary = {binary:?}\nargs = [\"fake-agent\", \"--\"]\n"
+            "{extra}\n[defaults.agents.claude]\nbinary = {binary:?}\nargs = [\"fake-agent\", \"--\"]\n"
         );
         std::fs::write(self.path("config/orchestrator/config.toml"), config).unwrap();
     }

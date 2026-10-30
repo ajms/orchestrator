@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::process::{Command, ExitCode};
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, ClaudeCode};
+use orch_agent::{AgentAdapter, CLAUDE, ClaudeCode};
 use orch_config::xdg;
 use orch_core::{AgentEvent, SessionId};
 use orch_holder::{ToHolder, locate_socket, report};
@@ -11,7 +11,7 @@ use crate::subprocess::run_with_input;
 
 const STATUSLINE_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub fn run(session: &str) -> ExitCode {
+pub fn run(session: &str, agent: &str) -> ExitCode {
     let mut payload = String::new();
     if std::io::stdin().read_to_string(&mut payload).is_err() {
         return ExitCode::SUCCESS;
@@ -19,8 +19,12 @@ pub fn run(session: &str) -> ExitCode {
     if let Ok(session) = SessionId::parse(session) {
         let tap = ToHolder::Tap {
             payload: payload.clone(),
+            agent: agent.into(),
         };
         let _ = report(&locate_socket(&session), &tap);
+    }
+    if agent != CLAUDE {
+        return ExitCode::SUCCESS;
     }
     let claude = ClaudeCode::default();
     let line = std::env::current_dir()

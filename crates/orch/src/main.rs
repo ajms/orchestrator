@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use orch_agent::CLAUDE;
 
 const VERSION: &str = match option_env!("ORCH_VERSION") {
     Some(v) => v,
@@ -40,18 +41,24 @@ enum Command {
     Hook {
         #[arg(long)]
         session: String,
+        #[arg(long, default_value = CLAUDE)]
+        agent: String,
     },
     #[command(subcommand)]
     Repo(repo::RepoCommand),
     Tap {
         #[arg(long)]
         session: String,
+        #[arg(long, default_value = CLAUDE)]
+        agent: String,
     },
     Trust(trust::TrustArgs),
     #[command(hide = true)]
     WorktreeHook {
         #[arg(long)]
         worktree: PathBuf,
+        #[arg(long, default_value = CLAUDE)]
+        agent: String,
     },
     #[command(hide = true)]
     FakeAgent {
@@ -69,11 +76,11 @@ fn main() -> ExitCode {
         Some(Command::Daemon(args)) => daemon::run(args),
         Some(Command::Doctor(args)) => doctor::run(args),
         Some(Command::Hold(args)) => hold::run(args),
-        Some(Command::Hook { session }) => hook::run(&session),
+        Some(Command::Hook { session, agent }) => hook::run(&session, &agent),
         Some(Command::Repo(command)) => repo::run(command),
-        Some(Command::Tap { session }) => tap::run(&session),
+        Some(Command::Tap { session, agent }) => tap::run(&session, &agent),
         Some(Command::Trust(args)) => trust::run(args),
-        Some(Command::WorktreeHook { worktree }) => worktree_hook::run(&worktree),
+        Some(Command::WorktreeHook { worktree, agent }) => worktree_hook::run(&worktree, &agent),
         Some(Command::FakeAgent { script, agent_args }) => {
             fake_agent::run(script.as_deref(), &agent_args)
         }

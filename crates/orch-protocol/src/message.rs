@@ -387,6 +387,8 @@ pub struct RepoSettings {
     pub default_base: Option<String>,
     pub review_command: Option<String>,
     pub branch_prefix: String,
+    #[serde(default = "crate::view::claude")]
+    pub agent: String,
     pub trust: Option<TrustNeeded>,
 }
 

@@ -538,6 +538,7 @@ pub fn session(repo: &str, slug: &str) -> SessionView {
         base: "main".into(),
         phase: PhaseView::Active,
         agent: Some(AgentStateView::Idle),
+        agent_name: "claude".into(),
         flags: FlagsView::default(),
         preset: "inherit".into(),
         mode: None,

@@ -15,6 +15,7 @@ fn settings(repo: &str, base: &str) -> RepoSettings {
         default_base: Some(base.into()),
         review_command: None,
         branch_prefix: "me/".into(),
+        agent: "claude".into(),
         trust: None,
     }
 }

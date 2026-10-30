@@ -85,7 +85,7 @@ pub(crate) struct Live {
     pub(crate) record: SessionRecord,
     pub(crate) repo: PathBuf,
     pub(crate) status: SessionStatus,
-    pub(crate) adapter: Adapter,
+    pub(crate) adapter: Option<Adapter>,
     pub(crate) prompts: Vec<PendingGuard>,
     pub(crate) setup_output: Option<String>,
     pub(crate) last_error: Option<String>,
@@ -187,14 +187,21 @@ impl PaneSizes {
 }
 
 impl Live {
-    pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Adapter) -> Self {
-        let capabilities = adapter.capabilities();
+    pub(crate) fn adapter_for_payload(&self, agent: &str) -> Option<Adapter> {
+        self.adapter.clone().filter(|_| agent == self.record.agent)
+    }
+
+    pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Option<Adapter>) -> Self {
+        let capabilities = adapter
+            .as_ref()
+            .map(|adapter| adapter.capabilities())
+            .unwrap_or_default();
         let mut status = capabilities.session_status();
         status.restore(record.phase, record.flags.clone());
-        let transcripts = capabilities
-            .transcripts
-            .then(|| adapter.subagent_transcripts())
-            .flatten();
+        let transcripts = adapter
+            .as_ref()
+            .filter(|_| capabilities.transcripts)
+            .and_then(|adapter| adapter.subagent_transcripts());
         Self {
             record,
             repo,
@@ -367,6 +374,7 @@ impl Live {
             worktree: record.worktree.clone(),
             phase: self.status.phase().into(),
             agent: self.status.agent_state().map(Into::into),
+            agent_name: record.agent.clone(),
             flags: FlagsView::new(self.status.flags(), self.repo_missing),
             preset: record.preset.clone(),
             mode: record.last_mode.map(|mode| mode_name(mode).into()),

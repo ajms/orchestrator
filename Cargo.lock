@@ -1298,6 +1298,7 @@ version = "0.9.0"
 dependencies = [
  "base64",
  "nix 0.30.1",
+ "orch-agent",
  "orch-core",
  "orch-holder",
  "serde",

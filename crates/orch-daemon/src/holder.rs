@@ -129,9 +129,11 @@ impl Daemon {
                         tokio::spawn(async move { daemon.broker(session, broker, request).await });
                     }
                     if let (
-                        Some(titles),
-                        HolderEvent::Hook { payload, .. } | HolderEvent::Tap { payload },
+                        Some((titles, wanted)),
+                        HolderEvent::Hook { payload, agent, .. }
+                        | HolderEvent::Tap { payload, agent },
                     ) = (&titles, &event)
+                        && agent == wanted
                     {
                         let _ = titles.try_send(payload.clone());
                     }
@@ -150,16 +152,18 @@ impl Daemon {
         self.holder_lost(&id, generation, last_seq).await;
     }
 
-    fn watch_titles(self: &Arc<Self>, id: &SessionId) -> Option<Sender<String>> {
-        let watch = self
-            .lock()
-            .sessions
-            .get(id)
-            .filter(|live| live.adapter.capabilities().titles)
-            .and_then(|live| live.adapter.title_watch())?;
+    fn watch_titles(self: &Arc<Self>, id: &SessionId) -> Option<(Sender<String>, String)> {
+        let (watch, agent) = self.lock().sessions.get(id).and_then(|live| {
+            let adapter = live.adapter.as_ref()?;
+            let watch = adapter
+                .capabilities()
+                .titles
+                .then(|| adapter.title_watch())??;
+            Some((watch, live.record.agent.clone()))
+        })?;
         let (payloads, followed) = mpsc::channel(HOLDER_QUEUE);
         tokio::spawn(self.clone().follow_titles(id.clone(), watch, followed));
-        Some(payloads)
+        Some((payloads, agent))
     }
 
     async fn follow_titles(
@@ -275,22 +279,40 @@ impl Daemon {
                 note_sandbox_failure(live, &exit);
                 live.status.observe(exit_observation(&exit), now)
             }
-            HolderEvent::Hook { payload, guard } => {
-                if let Some(transcripts) = &mut live.transcripts {
-                    transcripts.follow(&payload);
+            HolderEvent::Hook {
+                payload,
+                guard,
+                agent,
+            } => match live.adapter_for_payload(&agent) {
+                None => {
+                    if let Some(guard) = guard {
+                        live.send_to_holder(ToHolder::GuardAnswer {
+                            id: guard,
+                            answer: GuardAnswer::Ask,
+                        });
+                    }
+                    Vec::new()
                 }
-                let events = live.adapter.map_hook(&payload).unwrap_or_default();
-                let effects = observe(live, &events, now, &mut conversations, &mut usage);
-                describe_subagents(live, &events);
-                if let Some(guard) = guard {
-                    decide_guard(live, guard, &events, now);
+                Some(adapter) => {
+                    if let Some(transcripts) = &mut live.transcripts {
+                        transcripts.follow(&payload);
+                    }
+                    let events = adapter.map_hook(&payload).unwrap_or_default();
+                    let effects = observe(live, &events, now, &mut conversations, &mut usage);
+                    describe_subagents(live, &events);
+                    if let Some(guard) = guard {
+                        decide_guard(live, adapter.as_ref(), guard, &events, now);
+                    }
+                    effects
                 }
-                effects
-            }
-            HolderEvent::Tap { payload } => {
-                let events = live.adapter.map_tap(&payload).unwrap_or_default();
-                observe(live, &events, now, &mut conversations, &mut usage)
-            }
+            },
+            HolderEvent::Tap { payload, agent } => match live.adapter_for_payload(&agent) {
+                None => Vec::new(),
+                Some(adapter) => {
+                    let events = adapter.map_tap(&payload).unwrap_or_default();
+                    observe(live, &events, now, &mut conversations, &mut usage)
+                }
+            },
             HolderEvent::Broker { .. } => Vec::new(),
         };
         live.deliver_prompt();
@@ -401,9 +423,15 @@ fn retitle(live: &mut Live, title: &str) {
         .map(Into::into);
 }
 
-fn decide_guard(live: &mut Live, guard: u64, events: &[AgentEvent], now: Instant) {
-    let check = guard_check(live.adapter.capabilities(), events);
-    let agent_dirs = guard_dirs(live.adapter.as_ref(), &live.record.worktree);
+fn decide_guard(
+    live: &mut Live,
+    adapter: &dyn AgentAdapter,
+    guard: u64,
+    events: &[AgentEvent],
+    now: Instant,
+) {
+    let check = guard_check(adapter.capabilities(), events);
+    let agent_dirs = guard_dirs(adapter, &live.record.worktree);
     let decision = check.map(|(tool, input_json, cwd)| {
         let context = GuardContext {
             worktree: &live.record.worktree,

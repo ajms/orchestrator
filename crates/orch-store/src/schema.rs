@@ -164,6 +164,9 @@ ALTER TABLE sessions ADD COLUMN existing_branch INTEGER NOT NULL DEFAULT 0;
     "
 ALTER TABLE sessions ADD COLUMN pr_base TEXT;
 ",
+    "
+ALTER TABLE sessions ADD COLUMN agent TEXT;
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {

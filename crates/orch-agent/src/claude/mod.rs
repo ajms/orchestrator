@@ -33,6 +33,8 @@ const CONFIG_CARVE_OUTS: [&str; 9] = [
     "CLAUDE.md",
 ];
 
+pub const CLAUDE: &str = "claude";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeCode {
     pub program: String,

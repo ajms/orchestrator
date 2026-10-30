@@ -1,7 +1,12 @@
 use std::path::PathBuf;
 
+use orch_agent::CLAUDE;
 use orch_core::{AgentState, Phase, SessionId};
 use serde::{Deserialize, Serialize};
+
+pub(crate) fn claude() -> String {
+    CLAUDE.into()
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionView {
@@ -15,6 +20,8 @@ pub struct SessionView {
     pub worktree: PathBuf,
     pub phase: PhaseView,
     pub agent: Option<AgentStateView>,
+    #[serde(default = "claude")]
+    pub agent_name: String,
     pub flags: FlagsView,
     pub preset: String,
     pub mode: Option<String>,

@@ -332,13 +332,18 @@ impl Shared {
         state.emulator.copy()
     }
 
-    fn open_guard(self: &Arc<Self>, payload: String) -> oneshot::Receiver<GuardAnswer> {
+    fn open_guard(
+        self: &Arc<Self>,
+        payload: String,
+        agent: String,
+    ) -> oneshot::Receiver<GuardAnswer> {
         let (reply, answer) = oneshot::channel();
         let mut state = self.lock();
         if state.upstream.is_none() {
             state.record(HolderEvent::Hook {
                 payload,
                 guard: None,
+                agent,
             });
             let _ = reply.send(GuardAnswer::Ask);
             return answer;
@@ -347,6 +352,7 @@ impl Shared {
         state.record(HolderEvent::Hook {
             payload,
             guard: Some(id),
+            agent,
         });
         drop(state);
         let shared = self.clone();
@@ -562,11 +568,14 @@ pub(crate) async fn handle(
             shared.shutdown.notify_one();
             return false;
         }
-        ToHolder::Hook { payload } => shared.lock().record(HolderEvent::Hook {
+        ToHolder::Hook { payload, agent } => shared.lock().record(HolderEvent::Hook {
             payload,
             guard: None,
+            agent,
         }),
-        ToHolder::Tap { payload } => shared.lock().record(HolderEvent::Tap { payload }),
+        ToHolder::Tap { payload, agent } => {
+            shared.lock().record(HolderEvent::Tap { payload, agent })
+        }
         ToHolder::Broker { request } => {
             let reply = shared
                 .open_broker(request)
@@ -582,8 +591,11 @@ pub(crate) async fn handle(
                 state.settle_broker(id, reply);
             }
         }
-        ToHolder::Guard { payload } => {
-            let answer = shared.open_guard(payload).await.unwrap_or(GuardAnswer::Ask);
+        ToHolder::Guard { payload, agent } => {
+            let answer = shared
+                .open_guard(payload, agent)
+                .await
+                .unwrap_or(GuardAnswer::Ask);
             outbox.send(FromHolder::GuardAnswer { answer });
         }
     }

@@ -1,4 +1,4 @@
-use orch_agent::GuardAnswer;
+use orch_agent::{CLAUDE, GuardAnswer};
 use orch_config::PortBlock;
 use orch_core::SessionId;
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,10 @@ use crate::ScreenSnapshot;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 pub type GuardId = u64;
+
+fn claude() -> String {
+    CLAUDE.into()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Size {
@@ -49,12 +53,18 @@ pub enum ToHolder {
     Shutdown,
     Hook {
         payload: String,
+        #[serde(default = "claude")]
+        agent: String,
     },
     Guard {
         payload: String,
+        #[serde(default = "claude")]
+        agent: String,
     },
     Tap {
         payload: String,
+        #[serde(default = "claude")]
+        agent: String,
     },
     Broker {
         request: BrokerRequest,
@@ -177,9 +187,13 @@ pub enum HolderEvent {
     Hook {
         payload: String,
         guard: Option<GuardId>,
+        #[serde(default = "claude")]
+        agent: String,
     },
     Tap {
         payload: String,
+        #[serde(default = "claude")]
+        agent: String,
     },
     Broker {
         id: GuardId,

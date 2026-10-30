@@ -393,6 +393,7 @@ async fn hold_replaying(
                         let event = HolderEvent::Hook {
                             payload: payload.clone(),
                             guard: None,
+                            agent: "claude".into(),
                         };
                         let event = FromHolder::Event { seq: *seq, event };
                         let _ = write_frame_async(&mut writer, &event).await;

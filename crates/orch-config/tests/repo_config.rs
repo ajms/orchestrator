@@ -12,9 +12,9 @@ fn repo_without_any_config_uses_built_in_defaults() {
     assert_eq!(config.base_branch(), None);
     assert_eq!(config.default_preset(), None);
     assert_eq!(config.review_command(), None);
-    assert_eq!(config.agent().unwrap().name, "claude");
-    assert_eq!(config.agent().unwrap().binary, None);
-    assert!(config.agent().unwrap().args.is_empty());
+    assert_eq!(config.default_agent(), "claude");
+    assert_eq!(config.agent("claude").unwrap().binary, None);
+    assert!(config.agent("claude").unwrap().args.is_empty());
 }
 
 #[test]
@@ -34,20 +34,54 @@ fn repo_file_wins_over_global_default_and_personal_override_wins_over_both() {
 }
 
 #[test]
+fn the_default_agent_comes_from_the_highest_layer_that_names_one() {
+    let fx = Fixture::new();
+    fx.global("[defaults.agent]\nname = \"pi\"\n");
+    assert_eq!(fx.approved().default_agent(), "pi");
+
+    fx.repo_file("[agent]\nname = \"claude\"\n");
+    assert_eq!(fx.approved().default_agent(), "claude");
+}
+
+#[test]
 fn agent_binary_and_args_come_from_the_highest_layer_that_sets_them() {
     let fx = Fixture::new();
     fx.global(&format!(
-        "[repos.{}.agent]\nbinary = \"/opt/claude/bin/claude\"\n",
+        "[repos.{}.agents.claude]\nbinary = \"/opt/claude/bin/claude\"\n",
         fx.repo_key()
     ));
-    fx.repo_file("[agent]\nname = \"claude\"\nargs = [\"--verbose\"]\n");
+    fx.repo_file("[agents.claude]\nargs = [\"--verbose\"]\n");
+
+    let claude = fx.approved().agent("claude").unwrap();
+    assert_eq!(claude.name, "claude");
+    assert_eq!(claude.binary.as_deref(), Some("/opt/claude/bin/claude"));
+    assert_eq!(claude.args, vec!["--verbose".to_string()]);
+}
+
+#[test]
+fn each_agent_has_its_own_binary_and_args() {
+    let fx = Fixture::new();
+    fx.global(
+        "[defaults.agent]\nname = \"pi\"\n\n[defaults.agents.pi]\nbinary = \"/opt/pi\"\nargs = [\"-na\"]\n",
+    );
 
     let config = fx.approved();
     assert_eq!(
-        config.agent().unwrap().binary.as_deref(),
-        Some("/opt/claude/bin/claude")
+        config.agent("pi").unwrap().binary.as_deref(),
+        Some("/opt/pi")
     );
-    assert_eq!(config.agent().unwrap().args, vec!["--verbose".to_string()]);
+    assert_eq!(config.agent("claude").unwrap().binary, None);
+    assert!(config.agent("claude").unwrap().args.is_empty());
+}
+
+#[test]
+fn the_agent_table_no_longer_takes_a_binary() {
+    let fx = Fixture::new();
+    fx.repo_file("[agent]\nbinary = \"/opt/claude\"\n");
+    assert!(matches!(
+        fx.loader.repo(fx.repo_path(), None),
+        Err(ConfigError::Parse { .. })
+    ));
 }
 
 #[test]

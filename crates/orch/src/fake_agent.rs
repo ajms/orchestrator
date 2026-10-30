@@ -110,7 +110,14 @@ fn execute(line: &str) -> Option<ExitCode> {
             std::env::var(rest).unwrap_or_else(|_| "<unset>".into())
         )),
         "hook" | "tap" => {
-            let output = run_orch_subcommand(command, rest);
+            let (agent, payload) = match rest.strip_prefix("--agent ") {
+                Some(tagged) => {
+                    let (agent, payload) = tagged.split_once(' ').unwrap_or((tagged, ""));
+                    (Some(agent), payload)
+                }
+                None => (None, rest),
+            };
+            let output = run_orch_subcommand(command, agent, payload);
             say(&format!("{command}> {}", output.trim_end()));
         }
         "flood" => {
@@ -247,11 +254,14 @@ fn unescape(text: &str) -> String {
     text.replace("\\e", "\x1b")
 }
 
-fn run_orch_subcommand(subcommand: &str, payload: &str) -> String {
+fn run_orch_subcommand(subcommand: &str, agent: Option<&str>, payload: &str) -> String {
     let session = std::env::var(SESSION_ENV).unwrap_or_default();
     let orch = std::env::current_exe().unwrap_or_else(|_| "orch".into());
     let mut command = Command::new(orch);
     command.args([subcommand, "--session", &session]);
+    if let Some(agent) = agent {
+        command.args(["--agent", agent]);
+    }
     run_with_input(&mut command, payload.as_bytes(), None)
         .map(|output| String::from_utf8_lossy(&output).into_owned())
         .unwrap_or_else(|| "<failed>".into())
