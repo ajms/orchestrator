@@ -356,3 +356,52 @@ async fn a_pi_session_name_is_the_title_until_it_is_cleared() {
         .await;
     assert_eq!(cleared.slug, "fix-it");
 }
+
+fn real_pi() -> Option<std::path::PathBuf> {
+    if std::env::var("ORCH_REAL_PI").as_deref() != Ok("1") {
+        return None;
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join("pi"))
+        .find(|pi| pi.is_file())
+}
+
+#[tokio::test]
+async fn real_pi_loads_orchs_extension_reports_its_start_and_resumes() {
+    let Some(pi) = real_pi() else {
+        return;
+    };
+    let env = Env::new();
+    env.write_config(&format!("{PI}[defaults.agents.pi]\nbinary = {pi:?}\n"));
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let repo = env.repo("app");
+    let id = client.create(CreateSession::new(&repo, "")).await;
+
+    let started = client
+        .until(&id, "pi's session_start", |view| {
+            view.agent_state == Some(State::Idle)
+        })
+        .await;
+    assert_eq!(started.conversation.as_deref(), Some(id.as_str()));
+    let profile = env.path("state/orchestrator/agent-profiles/pi");
+    assert!(profile.join("extensions/orch/extension/index.ts").is_file());
+
+    kill(client.holder_pid(&id).unwrap(), "-KILL");
+    client
+        .until(&id, "Suspended", |view| view.phase == PhaseView::Suspended)
+        .await;
+    let resumed = client
+        .request(Request::Resume {
+            session: id.clone(),
+        })
+        .await;
+    assert_eq!(resumed, Ok(Reply::Done));
+    let back = client
+        .until(&id, "pi's session_start after the resume", |view| {
+            view.phase == PhaseView::Active && view.agent_state == Some(State::Idle)
+        })
+        .await;
+    assert_eq!(back.conversation.as_deref(), Some(id.as_str()));
+}
