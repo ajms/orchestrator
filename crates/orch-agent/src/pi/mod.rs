@@ -1,9 +1,10 @@
+mod hooks;
 mod profile;
 
-use orch_core::{ConversationId, PermissionMode};
-use profile::{CREDENTIALS, Dirs, RESOURCES, path_text};
+use orch_core::{AgentEvent, ConversationId, PermissionMode};
+use profile::{CREDENTIALS, Dirs, RESOURCES, extension, path_text};
 
-use crate::{AgentAdapter, Argv, Capabilities, LaunchSpec, SandboxNeeds};
+use crate::{AgentAdapter, Argv, Capabilities, LaunchSpec, PayloadError, SandboxNeeds};
 
 const USER_READ_ONLY: [&str; 12] = [
     "install",
@@ -36,12 +37,23 @@ impl Default for Pi {
 }
 
 impl Pi {
-    fn argv_for(&self, conversation: &str) -> Argv {
+    fn argv_for(&self, conversation: &str, spec: &LaunchSpec) -> Argv {
+        let mut args: Vec<String> = ["-na", "--session-id", conversation]
+            .map(String::from)
+            .into();
+        if let Some(Dirs { profile, .. }) = Dirs::resolve(&|key| std::env::var(key).ok()) {
+            args.extend([
+                "-e".into(),
+                path_text(&extension(&profile)),
+                "--orch-bin".into(),
+                spec.orch_program.clone(),
+                "--orch-session".into(),
+                spec.session.as_str().into(),
+            ]);
+        }
         Argv {
             program: self.program.clone(),
-            args: ["-na", "--session-id", conversation]
-                .map(String::from)
-                .into(),
+            args,
         }
     }
 }
@@ -49,13 +61,15 @@ impl Pi {
 impl AgentAdapter for Pi {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
+            hooks: true,
             resume: true,
+            titles: true,
             ..Capabilities::default()
         }
     }
 
     fn launch(&self, spec: &LaunchSpec) -> Argv {
-        let mut argv = self.argv_for(spec.session.as_str());
+        let mut argv = self.argv_for(spec.session.as_str(), spec);
         if let Some(prompt) = &spec.prompt {
             argv.args.extend(["--".into(), prompt.clone()]);
         }
@@ -68,11 +82,15 @@ impl AgentAdapter for Pi {
 
     fn resume(
         &self,
-        _spec: &LaunchSpec,
+        spec: &LaunchSpec,
         conversation: &ConversationId,
         _mode: Option<PermissionMode>,
     ) -> Option<Argv> {
-        Some(self.argv_for(conversation.as_str()))
+        Some(self.argv_for(conversation.as_str(), spec))
+    }
+
+    fn map_hook(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
+        hooks::map_hook(payload)
     }
 
     fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {

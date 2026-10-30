@@ -32,7 +32,7 @@ async fn a_pi_session_runs_pi_from_its_agent_profile() {
         .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     assert_eq!(view.agent, "pi");
-    assert_eq!(view.agent_state, Some(State::Unknown));
+    assert_eq!(view.agent_state, Some(State::Starting));
     assert_eq!(view.conversation.as_deref(), Some(id.as_str()));
     let mut pane = env.pane(&id, PANE).await;
     pane.wait_for_text("arg> -na").await;
@@ -41,6 +41,14 @@ async fn a_pi_session_runs_pi_from_its_agent_profile() {
     pane.wait_for_text("prompt> Fix it").await;
 
     let profile = env.path("state/orchestrator/agent-profiles/pi");
+    let extension = profile.join("extensions/orch/extension/index.ts");
+    pane.wait_for_text(&format!("arg> {}", extension.display()))
+        .await;
+    pane.wait_for_text(&format!("orch-bin> {}", env!("CARGO_BIN_EXE_orch")))
+        .await;
+    pane.wait_for_text(&format!("orch-session> {}", id.as_str()))
+        .await;
+    assert!(extension.is_file());
     pane.type_line("env PI_CODING_AGENT_DIR").await;
     pane.wait_for_text(&format!("PI_CODING_AGENT_DIR={}", profile.display()))
         .await;
@@ -208,4 +216,143 @@ async fn an_edit_planted_in_the_profile_is_reset_at_the_next_launch() {
     let rebuilt = std::fs::read_to_string(&settings).unwrap();
     assert!(!rebuilt.contains("planted"), "{rebuilt}");
     assert!(rebuilt.contains("\"theme\": \"dark\""), "{rebuilt}");
+}
+
+fn pi_hook(payload: &str) -> String {
+    format!("hook --agent pi {payload}")
+}
+
+async fn started_pi_session(
+    env: &Env,
+    client: &mut TestClient,
+) -> (orch_core::SessionId, PaneView) {
+    let repo = env.repo("app");
+    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    client
+        .until(&id, "Starting", |view| {
+            view.agent_state == Some(State::Starting)
+        })
+        .await;
+    let mut pane = env.pane(&id, PANE).await;
+    pane.type_line(&pi_hook(&format!(
+        r#"{{"event":"session_start","reason":"startup","sessionId":"{}"}}"#,
+        id.as_str()
+    )))
+    .await;
+    client
+        .until(&id, "Idle", |view| view.agent_state == Some(State::Idle))
+        .await;
+    (id, pane)
+}
+
+async fn until_state(client: &mut TestClient, id: &orch_core::SessionId, state: State) {
+    client
+        .until(id, &format!("{state:?}"), |view| {
+            view.agent_state == Some(state)
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn pi_hooks_drive_the_agent_state_through_a_prompt() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = started_pi_session(&env, &mut client).await;
+
+    for (payload, state) in [
+        (r#"{"event":"input"}"#, State::Working),
+        (
+            r#"{"event":"tool_call","toolName":"question"}"#,
+            State::NeedsInput,
+        ),
+        (
+            r#"{"event":"tool_execution_end","toolName":"question","isError":false}"#,
+            State::Working,
+        ),
+        (
+            r#"{"event":"ui_prompt_start","kind":"confirm"}"#,
+            State::NeedsInput,
+        ),
+        (
+            r#"{"event":"ui_prompt_end","kind":"confirm","idle":false}"#,
+            State::Working,
+        ),
+        (
+            r#"{"event":"agent_settled","aborted":true,"stopReason":"aborted"}"#,
+            State::Idle,
+        ),
+        (r#"{"event":"agent_start"}"#, State::Working),
+        (
+            r#"{"event":"agent_settled","aborted":false,"stopReason":"error","errorMessage":"429 rate limit"}"#,
+            State::Errored,
+        ),
+    ] {
+        pane.type_line(&pi_hook(payload)).await;
+        until_state(&mut client, &id, state).await;
+    }
+}
+
+#[tokio::test]
+async fn a_new_conversation_in_pi_is_the_one_a_resume_continues() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = started_pi_session(&env, &mut client).await;
+
+    pane.type_line(&pi_hook(
+        r#"{"event":"session_start","reason":"new","sessionId":"conv-2"}"#,
+    ))
+    .await;
+    client
+        .until(&id, "the new Conversation", |view| {
+            view.conversation.as_deref() == Some("conv-2")
+        })
+        .await;
+    pane.type_line("exit 0").await;
+    until_state(&mut client, &id, State::Exited).await;
+
+    let resumed = client
+        .request(Request::Resume {
+            session: id.clone(),
+        })
+        .await;
+    assert_eq!(resumed, Ok(Reply::Done));
+    let mut pane = env.pane(&id, PANE).await;
+    pane.wait_for_text("session-id> conv-2").await;
+}
+
+#[tokio::test]
+async fn a_pi_session_name_is_the_title_until_it_is_cleared() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = started_pi_session(&env, &mut client).await;
+
+    pane.type_line(&pi_hook(
+        r#"{"event":"session_info_changed","name":"fix login"}"#,
+    ))
+    .await;
+    client
+        .until(&id, "the title", |view| {
+            view.title.as_deref() == Some("fix login")
+        })
+        .await;
+    pane.type_line(&pi_hook(
+        r#"{"event":"session_start","reason":"new","sessionId":"conv-2"}"#,
+    ))
+    .await;
+    let renewed = client
+        .until(&id, "the new Conversation", |view| {
+            view.conversation.as_deref() == Some("conv-2")
+        })
+        .await;
+    assert_eq!(renewed.title.as_deref(), Some("fix login"));
+
+    pane.type_line(&pi_hook(r#"{"event":"session_info_changed","name":""}"#))
+        .await;
+    let cleared = client
+        .until(&id, "the slug", |view| view.title.is_none())
+        .await;
+    assert_eq!(cleared.slug, "fix-it");
 }

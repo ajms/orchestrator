@@ -20,28 +20,57 @@ fn strings(args: &[&str]) -> Vec<String> {
     args.iter().map(|arg| arg.to_string()).collect()
 }
 
+fn orch_extension(args: &[String]) -> Vec<String> {
+    let at = args
+        .iter()
+        .position(|arg| arg == "-e")
+        .expect("orch's extension is loaded");
+    let path = &args[at + 1];
+    assert!(path.starts_with('/'), "{path}");
+    assert!(
+        path.ends_with("/orchestrator/agent-profiles/pi/extensions/orch/extension/index.ts"),
+        "{path}"
+    );
+    args[..at].iter().chain(&args[at + 2..]).cloned().collect()
+}
+
 #[test]
-fn pi_can_only_resume() {
-    let resume_only = Capabilities {
-        resume: true,
-        ..Capabilities::default()
-    };
-    assert_eq!(pi().capabilities(), resume_only);
+fn pi_reports_hooks_and_titles_and_resumes() {
+    assert_eq!(
+        pi().capabilities(),
+        Capabilities {
+            hooks: true,
+            resume: true,
+            titles: true,
+            ..Capabilities::default()
+        }
+    );
 }
 
 #[test]
 fn launch_opens_a_conversation_named_after_the_session_without_project_config() {
     let argv = pi().launch(&spec());
     assert_eq!(argv.program, "pi");
-    assert_eq!(argv.args, strings(&["-na", "--session-id", SESSION]));
+    assert_eq!(
+        orch_extension(&argv.args),
+        strings(&[
+            "-na",
+            "--session-id",
+            SESSION,
+            "--orch-bin",
+            "/opt/orch/bin/orch",
+            "--orch-session",
+            SESSION,
+        ])
+    );
 }
 
 #[test]
 fn launch_passes_the_initial_prompt_after_the_options() {
     let argv = pi().launch(&spec().with_prompt("-fix the bug"));
     assert_eq!(
-        argv.args,
-        strings(&["-na", "--session-id", SESSION, "--", "-fix the bug"])
+        argv.args[argv.args.len() - 2..],
+        strings(&["--", "-fix the bug"])
     );
 }
 
@@ -63,7 +92,18 @@ fn resume_reopens_the_latest_conversation_without_the_prompt() {
             Some(PermissionMode::Plan),
         )
         .expect("pi resumes");
-    assert_eq!(argv.args, strings(&["-na", "--session-id", "conv-7"]));
+    assert_eq!(
+        orch_extension(&argv.args),
+        strings(&[
+            "-na",
+            "--session-id",
+            "conv-7",
+            "--orch-bin",
+            "/opt/orch/bin/orch",
+            "--orch-session",
+            SESSION,
+        ])
+    );
 }
 
 #[test]

@@ -10,6 +10,11 @@ pub(super) const CREDENTIALS: [&str; 2] = ["auth.json", "models-store.json"];
 const LEFT_OUT: [&str; 4] = ["git-worktree-isolation", "sandbox", "notify", "caffeinate"];
 const LINKED: [&str; 4] = ["SYSTEM.md", "AGENTS.md", "keybindings.json", "agents"];
 const SETTINGS: &str = "settings.json";
+const EXTENSION_DIR: [&str; 2] = ["orch", "extension"];
+const EXTENSION: [(&str, &str); 2] = [
+    ("index.ts", include_str!("extension/index.ts")),
+    ("forward.ts", include_str!("extension/forward.ts")),
+];
 const STAGED: &str = ".orch-new";
 const RETIRED: &str = ".orch-old";
 
@@ -32,6 +37,13 @@ impl Dirs {
             home,
         })
     }
+}
+
+pub(super) fn extension(profile: &Path) -> PathBuf {
+    EXTENSION_DIR
+        .iter()
+        .fold(profile.join("extensions"), |dir, name| dir.join(name))
+        .join("index.ts")
 }
 
 pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
@@ -61,6 +73,9 @@ pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
     for kind in RESOURCES {
         let staged = staged(profile, kind)?;
         std::fs::create_dir(&staged)?;
+        if kind == "extensions" {
+            write_extension(&staged)?;
+        }
         swap(profile, kind, &staged)?;
     }
 
@@ -116,14 +131,29 @@ fn resolve(user: &Path, entry: &str) -> String {
     format!("{sign}{}", path_text(&user.join(path)))
 }
 
-fn write_file(profile: &Path, name: &str, content: &[u8]) -> io::Result<()> {
-    let staged = staged(profile, name)?;
-    let mut file = std::fs::OpenOptions::new()
+fn write_extension(extensions: &Path) -> io::Result<()> {
+    let mut dir = extensions.to_path_buf();
+    for name in EXTENSION_DIR {
+        dir.push(name);
+        std::fs::create_dir(&dir)?;
+    }
+    for (name, content) in EXTENSION {
+        create(&dir.join(name))?.write_all(content.as_bytes())?;
+    }
+    Ok(())
+}
+
+fn create(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(&staged)?;
-    file.write_all(content)?;
+        .open(path)
+}
+
+fn write_file(profile: &Path, name: &str, content: &[u8]) -> io::Result<()> {
+    let staged = staged(profile, name)?;
+    create(&staged)?.write_all(content)?;
     swap(profile, name, &staged)
 }
 

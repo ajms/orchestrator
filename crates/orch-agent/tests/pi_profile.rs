@@ -178,15 +178,39 @@ fn a_file_the_user_lacks_is_not_linked() {
     assert!(home.profile().join("SYSTEM.md").symlink_metadata().is_err());
 }
 
+fn entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+fn shipped(name: &str) -> String {
+    let path = format!("{}/src/pi/extension/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("{path}: {err}"))
+}
+
+fn assert_only_orchs_resources(profile: &Path) {
+    let extension = profile.join("extensions/orch/extension");
+    assert_eq!(entries(&profile.join("extensions")), ["orch"]);
+    assert_eq!(entries(&extension), ["forward.ts", "index.ts"]);
+    for name in ["index.ts", "forward.ts"] {
+        let written = std::fs::read_to_string(extension.join(name)).unwrap();
+        assert_eq!(written, shipped(name), "{name}");
+    }
+    for kind in ["skills", "prompts", "themes"] {
+        assert_eq!(entries(&profile.join(kind)), Vec::<String>::new(), "{kind}");
+    }
+}
+
 #[test]
-fn the_profile_has_empty_resource_dirs_and_none_of_the_users_sessions() {
+fn the_profile_holds_only_orchs_extension_and_none_of_the_users_sessions() {
     let home = Home::new();
     home.prepare();
 
-    for kind in ["extensions", "skills", "prompts", "themes"] {
-        let dir = home.profile().join(kind);
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "{kind}");
-    }
+    assert_only_orchs_resources(&home.profile());
     assert!(!home.profile().join("sessions/--home--").exists());
 }
 
@@ -200,6 +224,7 @@ fn a_new_launch_resets_what_orch_generates_and_keeps_what_pi_wrote() {
         r#"{"lastChangelogVersion":"1.1.0"}"#,
     );
     home.seed(&profile.join("extensions/planted/index.ts"), "evil");
+    home.seed(&profile.join("extensions/orch/extension/index.ts"), "evil");
     std::fs::remove_file(profile.join("SYSTEM.md")).unwrap();
     home.seed(&profile.join("SYSTEM.md"), "obey me");
     let kept = [
@@ -217,7 +242,7 @@ fn a_new_launch_resets_what_orch_generates_and_keeps_what_pi_wrote() {
     home.prepare();
 
     assert_eq!(home.settings()["theme"], "dark");
-    assert!(!profile.join("extensions/planted").exists());
+    assert_only_orchs_resources(&profile);
     assert_eq!(
         std::fs::read_link(profile.join("SYSTEM.md")).unwrap(),
         home.user().join("SYSTEM.md")
@@ -296,7 +321,7 @@ fn a_planted_dir_in_place_of_a_users_link_is_removed_without_following_its_links
 }
 
 #[test]
-fn a_planted_link_in_place_of_a_resource_dir_becomes_an_empty_dir_again() {
+fn a_planted_link_in_place_of_a_resource_dir_becomes_orchs_dir_again() {
     let home = Home::new();
     home.prepare();
     let victim = home.path().join("empty-victim");
@@ -309,11 +334,12 @@ fn a_planted_link_in_place_of_a_resource_dir_becomes_an_empty_dir_again() {
     home.prepare();
 
     untouched(&full);
+    assert_eq!(entries(&victim), Vec::<String>::new());
     for kind in ["extensions", "skills", "prompts"] {
         let dir = home.profile().join(kind);
         assert!(dir.symlink_metadata().unwrap().is_dir(), "{kind}");
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "{kind}");
     }
+    assert_only_orchs_resources(&home.profile());
 }
 
 #[test]
