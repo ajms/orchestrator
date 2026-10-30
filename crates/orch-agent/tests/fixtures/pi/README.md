@@ -13,7 +13,7 @@ node crates/orch-agent/tests/fixtures/pi/record.mjs
 - a `question` tool that asks through `ctx.ui.select`, like the user's own;
 - `/orch-dialog`, a dialog opened while idle, and `/orch-unname`, which clears the session name.
 
-It also loads `subagent.ts`, a stand-in for the user's `subagent` extension: a `subagent` tool (`agent`, `taskName`, `task`) that reports a child's message list in `details.messages` on each update, starts over once as a model-fallback retry would, and returns the full list.
+It also loads `subagent.ts`, a stand-in for the user's `subagent` extension: a `subagent` tool (`agent`, `taskName`, `task`) that reports a child's message list in `details.messages` on each update, starts over once as a model-fallback retry would, and returns the full list. So `hooks/tool_call_subagent.json`, `hooks/tool_execution_end_subagent.json` and `transcripts/subagent.jsonl` show the shape #201 describes, not one the user's own extension was seen to emit. Re-record them with the user's extension once it is available.
 
 It drives startup, a prompt, a tool call, a subagent call, a question, an idle dialog, an abort, five provider errors with auto-retry off, a rename, a cleared name, `/new` and a prompt in it, a clone (a fork at the leaf, whose copied entries keep their ids, so its tap's cost is 0) and a prompt in it, and a resume of the named Conversation. The error texts are scripted to look like Anthropic's.
 
