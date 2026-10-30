@@ -1,3 +1,4 @@
+use orch_core::TranscriptEntry;
 use orch_protocol::{
     AgentStateView as State, CreateSession, PhaseView, Reply, Request, UsageTotalsView,
 };
@@ -489,4 +490,105 @@ async fn real_pi_loads_orchs_extension_reports_its_start_and_resumes() {
         })
         .await;
     assert_eq!(back.conversation.as_deref(), Some(id.as_str()));
+}
+
+fn child_said(text: &str) -> String {
+    format!(
+        r#"{{"role":"assistant","content":[{{"type":"thinking","thinking":"hm"}},{{"type":"text","text":"{text}"}}]}}"#
+    )
+}
+
+fn write_transcript(path: &std::path::Path, lines: &[String]) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let staged = path.with_extension("jsonl.new");
+    std::fs::write(
+        &staged,
+        lines
+            .iter()
+            .map(|line| format!("{line}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    std::fs::rename(staged, path).unwrap();
+}
+
+#[tokio::test]
+async fn a_pi_subagent_call_is_a_subagent_row_with_a_live_transcript_that_outlives_it() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, mut pane) = started_pi_session(&env, &mut client).await;
+    let conversation = id.as_str();
+
+    pane.type_line(&pi_hook(&format!(
+        r#"{{"event":"tool_call","toolName":"subagent","toolCallId":"call_7","sessionId":"{conversation}","agent":"scout","taskName":"find the redirect"}}"#
+    )))
+    .await;
+    let view = client
+        .until(&id, "a Subagent", |view| !view.subagents.is_empty())
+        .await;
+    let row = &view.subagents[0];
+    assert_eq!(
+        (
+            row.id.as_str(),
+            row.agent_type.as_str(),
+            row.description.as_str(),
+            row.done
+        ),
+        ("call_7", "scout", "find the redirect", false)
+    );
+    assert_eq!(view.agent_state, Some(State::Working));
+
+    let transcript = env.path(&format!(
+        "state/orchestrator/agent-profiles/pi/subagents/{conversation}/call_7.jsonl"
+    ));
+    let task = r#"{"role":"user","content":[{"type":"text","text":"Task: find the redirect"}]}"#;
+    write_transcript(&transcript, &[task.into(), child_said("Overloaded.")]);
+    let subscribe = Request::SubscribeSubagent {
+        session: id.clone(),
+        subagent: "call_7".into(),
+    };
+    client.request(subscribe.clone()).await.unwrap();
+    client
+        .until_received("the backlog", |client| !client.transcripts.is_empty())
+        .await;
+    assert_eq!(
+        client.transcripts[0].entries,
+        [
+            TranscriptEntry::Prompt {
+                text: "Task: find the redirect".into()
+            },
+            TranscriptEntry::Text {
+                text: "Overloaded.".into()
+            },
+        ]
+    );
+
+    write_transcript(&transcript, &[task.into()]);
+    client
+        .until_received("the retry", |client| client.transcripts.len() >= 2)
+        .await;
+    assert!(client.transcripts[1].replace);
+    assert_eq!(client.transcripts[1].entries.len(), 1);
+
+    pane.type_line(&pi_hook(
+        r#"{"event":"tool_execution_end","toolName":"subagent","toolCallId":"call_7"}"#,
+    ))
+    .await;
+    client
+        .until(&id, "the Subagent done", |view| {
+            view.subagents.iter().all(|subagent| subagent.done)
+        })
+        .await;
+    client.request(Request::UnsubscribeSubagent).await.unwrap();
+    client.drain().await;
+    client.transcripts.clear();
+    client.request(subscribe).await.unwrap();
+    client
+        .until_received("the finished transcript", |client| {
+            !client.transcripts.is_empty()
+        })
+        .await;
+    assert!(client.transcripts[0].replace);
+    assert_eq!(client.transcripts[0].entries.len(), 1);
 }
