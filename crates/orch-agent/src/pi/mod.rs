@@ -1,3 +1,4 @@
+mod draft;
 mod hooks;
 mod profile;
 mod subagents;
@@ -10,7 +11,8 @@ use profile::{CREDENTIALS, Dirs, RESOURCES, extension, path_text};
 use subagents::PiSubagentTranscripts;
 
 use crate::{
-    AgentAdapter, Argv, Capabilities, LaunchSpec, PayloadError, SandboxNeeds, SubagentTranscripts,
+    AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, LaunchSpec, PayloadError, SandboxNeeds,
+    SubagentTranscripts,
 };
 
 const USER_READ_ONLY: [&str; 12] = [
@@ -99,6 +101,24 @@ impl AgentAdapter for Pi {
         _mode: Option<PermissionMode>,
     ) -> Option<Argv> {
         Some(self.argv_for(conversation.as_str(), spec))
+    }
+
+    fn draft(
+        &self,
+        spec: &DraftSpec,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<DraftRun>, String> {
+        let Some(Dirs { profile, .. }) = Dirs::resolve(lookup) else {
+            return Ok(None);
+        };
+        let copied =
+            draft::copy_conversation(&profile, &spec.worktree, &spec.conversation, &spec.scratch)
+                .map_err(|err| format!("copying pi's Conversation for the Draft: {err}"))?;
+        Ok(copied.then(|| DraftRun {
+            argv: draft::argv(&self.program, &spec.scratch),
+            env: self.env(lookup),
+            diff: true,
+        }))
     }
 
     fn map_hook(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {

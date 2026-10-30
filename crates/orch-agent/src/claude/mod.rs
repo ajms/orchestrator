@@ -14,8 +14,8 @@ use transcript::TranscriptTitles;
 
 use crate::shell::quote;
 use crate::{
-    AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, SandboxNeeds,
-    SubagentTranscripts, TitleWatch, WorktreeRequest,
+    AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, GuardAnswer, LaunchSpec, PayloadError,
+    SandboxNeeds, SubagentTranscripts, TitleWatch, WorktreeRequest,
 };
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
@@ -226,16 +226,24 @@ impl AgentAdapter for ClaudeCode {
         }
     }
 
-    fn draft(&self, conversation: &ConversationId) -> Option<Argv> {
-        Some(Argv {
-            program: self.program.clone(),
-            args: vec![
-                "-p".into(),
-                "--resume".into(),
-                conversation.as_str().into(),
-                "--fork-session".into(),
-            ],
-        })
+    fn draft(
+        &self,
+        spec: &DraftSpec,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<DraftRun>, String> {
+        Ok(Some(DraftRun {
+            argv: Argv {
+                program: self.program.clone(),
+                args: vec![
+                    "-p".into(),
+                    "--resume".into(),
+                    spec.conversation.as_str().into(),
+                    "--fork-session".into(),
+                ],
+            },
+            env: Vec::new(),
+            diff: false,
+        }))
     }
 }
 

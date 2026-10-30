@@ -88,7 +88,7 @@ impl FollowedLines {
     }
 }
 
-fn open(path: &Path, root: Option<&Path>) -> Option<File> {
+pub(crate) fn open(path: &Path, root: Option<&Path>) -> Option<File> {
     let file = File::options()
         .read(true)
         .custom_flags((OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK).bits())

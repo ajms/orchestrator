@@ -1,4 +1,4 @@
-use orch_agent::{AgentAdapter, ClaudeCode, LaunchSpec, Preset, Presets};
+use orch_agent::{AgentAdapter, ClaudeCode, DraftSpec, LaunchSpec, Preset, Presets};
 use orch_core::{ConversationId, PermissionMode, SessionId};
 use serde_json::Value;
 
@@ -169,9 +169,18 @@ fn resume_comes_back_in_the_given_mode_rather_than_the_presets() {
 
 #[test]
 fn draft_forks_the_conversation_in_print_mode_without_our_hooks() {
-    let draft = ClaudeCode::default()
-        .draft(&conversation())
+    let spec = DraftSpec {
+        conversation: conversation(),
+        worktree: "/repos/app/.orchestrator/worktrees/fix".into(),
+        scratch: "/tmp/draft".into(),
+    };
+    let run = ClaudeCode::default()
+        .draft(&spec, &|_| None)
+        .unwrap()
         .expect("claude can draft");
+    assert!(run.env.is_empty());
+    assert!(!run.diff);
+    let draft = run.argv;
     assert_eq!(draft.program, "claude");
     assert!(draft.args.contains(&"-p".to_string()));
     assert!(draft.args.contains(&"--fork-session".to_string()));

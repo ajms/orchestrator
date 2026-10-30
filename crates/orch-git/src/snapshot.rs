@@ -28,6 +28,14 @@ impl Repo {
         self.git(["diff", "--no-color", "--no-ext-diff", from, to])
             .run()
     }
+
+    pub fn status(&self, worktree: &SessionWorktree) -> Result<String, Error> {
+        git(
+            &worktree.path,
+            ["status", "--short", "--untracked-files=all"],
+        )
+        .run()
+    }
 }
 
 pub(crate) fn snapshot_commit(worktree: &Path) -> Result<String, Error> {

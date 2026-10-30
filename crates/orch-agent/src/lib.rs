@@ -11,8 +11,8 @@ mod sandbox_failure;
 mod shell;
 
 pub use agent::{
-    AgentAdapter, Argv, Capabilities, LaunchSpec, PayloadError, SubagentTranscripts, TitleWatch,
-    TranscriptRead, TranscriptReader, WorktreeRequest,
+    AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, LaunchSpec, PayloadError,
+    SubagentTranscripts, TitleWatch, TranscriptRead, TranscriptReader, WorktreeRequest,
 };
 pub use claude::{CLAUDE, ClaudeCode, mode_from_name, mode_name};
 pub use guard::{GuardAnswer, GuardContext, GuardDecision, GuardHit, GuardKind, evaluate_guard};

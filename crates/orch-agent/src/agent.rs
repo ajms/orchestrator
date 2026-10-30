@@ -92,6 +92,20 @@ impl LaunchSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftSpec {
+    pub conversation: ConversationId,
+    pub worktree: PathBuf,
+    pub scratch: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftRun {
+    pub argv: Argv,
+    pub env: Vec<(String, String)>,
+    pub diff: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorktreeRequest {
     Create { name: String },
     Remove { path: PathBuf },
@@ -151,8 +165,12 @@ pub trait AgentAdapter {
             .unwrap_or_else(|| self.launch(spec))
     }
 
-    fn draft(&self, _conversation: &ConversationId) -> Option<Argv> {
-        None
+    fn draft(
+        &self,
+        _spec: &DraftSpec,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<DraftRun>, String> {
+        Ok(None)
     }
 
     fn map_hook(&self, _payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
