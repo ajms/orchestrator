@@ -6,6 +6,7 @@ mod usage;
 
 use std::path::PathBuf;
 
+pub use draft::session_dir_name as pi_session_dir_name;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
 use profile::{CREDENTIALS, Dirs, RESOURCES, extension, path_text};
 use subagents::PiSubagentTranscripts;
@@ -103,6 +104,10 @@ impl AgentAdapter for Pi {
         Some(self.argv_for(conversation.as_str(), spec))
     }
 
+    fn needs_draft_scratch(&self) -> bool {
+        true
+    }
+
     fn draft(
         &self,
         spec: &DraftSpec,
@@ -111,13 +116,12 @@ impl AgentAdapter for Pi {
         let Some(Dirs { profile, .. }) = Dirs::resolve(lookup) else {
             return Ok(None);
         };
-        let copied =
-            draft::copy_conversation(&profile, &spec.worktree, &spec.conversation, &spec.scratch)
-                .map_err(|err| format!("copying pi's Conversation for the Draft: {err}"))?;
-        Ok(copied.then(|| DraftRun {
-            argv: draft::argv(&self.program, &spec.scratch),
+        let fork = draft::copy_conversation(&profile, spec)
+            .map_err(|err| format!("copying pi's Conversation for the Draft: {err}"))?;
+        Ok(fork.map(|fork| DraftRun {
+            argv: draft::argv(&self.program, &fork),
             env: self.env(lookup),
-            diff: true,
+            pipe_base_diff: true,
         }))
     }
 

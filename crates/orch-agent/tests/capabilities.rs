@@ -79,7 +79,7 @@ fn an_agent_without_resume_restarts_in_a_fresh_conversation() {
     let draft = DraftSpec {
         conversation: conversation(),
         worktree: "/repos/app".into(),
-        scratch: "/tmp/draft".into(),
+        scratch: None,
     };
     assert_eq!(Bare.draft(&draft, &|_| None), Ok(None));
 }

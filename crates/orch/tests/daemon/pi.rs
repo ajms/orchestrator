@@ -597,11 +597,7 @@ async fn a_pi_subagent_call_is_a_subagent_row_with_a_live_transcript_that_outliv
 }
 
 fn live_conversation(env: &Env, worktree: &std::path::Path, id: &orch_core::SessionId) -> PathBuf {
-    let worktree = worktree.to_string_lossy();
-    let dir = format!(
-        "--{}--",
-        worktree.trim_start_matches('/').replace(['/', ':'], "-")
-    );
+    let dir = orch_agent::pi_session_dir_name(worktree);
     let file = env
         .path("state/orchestrator/agent-profiles/pi/sessions")
         .join(dir)

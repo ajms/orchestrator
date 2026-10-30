@@ -242,7 +242,7 @@ impl AgentAdapter for ClaudeCode {
                 ],
             },
             env: Vec::new(),
-            diff: false,
+            pipe_base_diff: false,
         }))
     }
 }

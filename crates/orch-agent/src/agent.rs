@@ -95,14 +95,14 @@ impl LaunchSpec {
 pub struct DraftSpec {
     pub conversation: ConversationId,
     pub worktree: PathBuf,
-    pub scratch: PathBuf,
+    pub scratch: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DraftRun {
     pub argv: Argv,
     pub env: Vec<(String, String)>,
-    pub diff: bool,
+    pub pipe_base_diff: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +163,10 @@ pub trait AgentAdapter {
         conversation
             .and_then(|conversation| self.resume(spec, conversation, mode))
             .unwrap_or_else(|| self.launch(spec))
+    }
+
+    fn needs_draft_scratch(&self) -> bool {
+        false
     }
 
     fn draft(

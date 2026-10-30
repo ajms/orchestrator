@@ -28,7 +28,7 @@ fn instruction(mode: LandingMode, base: &str) -> String {
 async fn base_diff(record: &SessionRecord, repo: PathBuf) -> Result<String, RequestError> {
     let worktree = session_worktree(record);
     with_git(repo, move |git| {
-        let status = git.status(&worktree)?;
+        let status = orch_git::worktree_status(&worktree.path)?;
         let snapshot = git.review_snapshot(&worktree)?;
         let diff = capped(git.diff(&snapshot.merge_base, &snapshot.tree)?);
         Ok::<_, orch_git::Error>(format!(
@@ -72,29 +72,36 @@ impl Daemon {
             .agent(&record.agent)
             .map_err(|_| untrusted(&repo, &config))?;
         let adapter = adapter_for(&agent).map_err(refused)?;
-        let scratch = tempfile::Builder::new()
-            .prefix("orch-draft-")
-            .tempdir()
-            .map_err(refused)?;
-        let spec = DraftSpec {
+        let mut spec = DraftSpec {
             conversation,
             worktree: record.worktree.clone(),
-            scratch: scratch.path().into(),
+            scratch: None,
         };
-        let planned = tokio::task::spawn_blocking(move || adapter.draft(&spec, &xdg::process_env))
-            .await
-            .map_err(refused)?
-            .map_err(refused)?;
+        let (planned, scratch) = match adapter.needs_draft_scratch() {
+            false => (adapter.draft(&spec, &xdg::process_env), None),
+            true => {
+                let scratch = tempfile::Builder::new()
+                    .prefix("orch-draft-")
+                    .tempdir()
+                    .map_err(refused)?;
+                spec.scratch = Some(scratch.path().into());
+                let planned =
+                    tokio::task::spawn_blocking(move || adapter.draft(&spec, &xdg::process_env))
+                        .await
+                        .map_err(refused)?;
+                (planned, Some(scratch))
+            }
+        };
         let Some(DraftRun {
             argv: Argv { program, args },
             env,
-            diff,
-        }) = planned
+            pipe_base_diff,
+        }) = planned.map_err(refused)?
         else {
             return Ok(self.default_draft(id, &record.slug).await);
         };
         let mut input = instruction(mode, &record.base);
-        if diff {
+        if pipe_base_diff {
             input.push_str(&base_diff(&record, repo).await?);
         }
         let mut command = crate::subprocess::command(program);

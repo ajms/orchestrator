@@ -172,14 +172,15 @@ fn draft_forks_the_conversation_in_print_mode_without_our_hooks() {
     let spec = DraftSpec {
         conversation: conversation(),
         worktree: "/repos/app/.orchestrator/worktrees/fix".into(),
-        scratch: "/tmp/draft".into(),
+        scratch: None,
     };
+    assert!(!ClaudeCode::default().needs_draft_scratch());
     let run = ClaudeCode::default()
         .draft(&spec, &|_| None)
         .unwrap()
         .expect("claude can draft");
     assert!(run.env.is_empty());
-    assert!(!run.diff);
+    assert!(!run.pipe_base_diff);
     let draft = run.argv;
     assert_eq!(draft.program, "claude");
     assert!(draft.args.contains(&"-p".to_string()));

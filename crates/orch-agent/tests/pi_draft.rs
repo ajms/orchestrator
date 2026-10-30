@@ -49,7 +49,7 @@ impl Setup {
         let spec = DraftSpec {
             conversation: ConversationId(CONVERSATION.into()),
             worktree: WORKTREE.into(),
-            scratch: self.scratch.path().into(),
+            scratch: Some(self.scratch.path().into()),
         };
         Pi::default()
             .draft(&spec, &|key| match key {
@@ -94,7 +94,7 @@ fn a_draft_forks_a_copy_of_the_conversation_with_read_only_tools_and_the_diff_pi
             .into(),
         }
     );
-    assert!(draft.diff);
+    assert!(draft.pipe_base_diff);
     assert!(
         draft
             .env
@@ -118,6 +118,20 @@ fn a_draft_forks_the_conversations_newest_file_and_no_other_conversation() {
 
     let fork = setup.scratch.path().join("conversation.jsonl");
     assert_eq!(std::fs::read_to_string(fork).unwrap(), LIVE);
+}
+
+#[test]
+fn a_pi_draft_needs_a_scratch_dir() {
+    let setup = Setup::new();
+    setup.live();
+    let spec = DraftSpec {
+        conversation: ConversationId(CONVERSATION.into()),
+        worktree: WORKTREE.into(),
+        scratch: None,
+    };
+
+    assert!(Pi::default().needs_draft_scratch());
+    assert_eq!(Pi::default().draft(&spec, &|_| None), Ok(None));
 }
 
 #[test]

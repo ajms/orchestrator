@@ -16,7 +16,7 @@ pub use agent::{
 };
 pub use claude::{CLAUDE, ClaudeCode, mode_from_name, mode_name};
 pub use guard::{GuardAnswer, GuardContext, GuardDecision, GuardHit, GuardKind, evaluate_guard};
-pub use pi::{PI, Pi};
+pub use pi::{PI, Pi, pi_session_dir_name};
 pub use preset::{INHERIT, Preset, PresetSelection, Presets, ReservedPresetName, UnknownPreset};
 pub use registry::{Adapter, adapter_named, implied_agent};
 pub use sandbox::{
