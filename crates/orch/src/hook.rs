@@ -1,7 +1,7 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use orch_agent::{AgentAdapter, CLAUDE, ClaudeCode, GuardAnswer};
+use orch_agent::{GuardAnswer, adapter_named};
 use orch_core::SessionId;
 use orch_holder::{ToHolder, locate_socket, report, request_guard};
 
@@ -10,7 +10,7 @@ pub fn run(session: &str, agent: &str) -> ExitCode {
     if std::io::stdin().read_to_string(&mut payload).is_err() {
         return ExitCode::SUCCESS;
     }
-    let adapter = (agent == CLAUDE).then(ClaudeCode::default);
+    let adapter = adapter_named(agent, None);
     let socket = SessionId::parse(session)
         .ok()
         .map(|session| locate_socket(&session));

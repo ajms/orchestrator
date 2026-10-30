@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use orch_agent::adapter_named;
 use orch_config::{GlobalConfig, RepoConfig};
 use orch_core::{Phase, PhaseEvent, SessionId};
 use orch_git::{InUse, Leftover, Script, SessionName, slugify};
@@ -11,7 +12,6 @@ use orch_protocol::{
 };
 use orch_store::{NewSession, PortBlock, RepoRoot, SessionRecord};
 
-use crate::agents::session_adapter;
 use crate::cleanup::{CleanupMarker, remove_session_dir};
 use crate::discard::preview_reply;
 use crate::lifecycle::{
@@ -265,7 +265,7 @@ impl Daemon {
             })
             .await?
             .map_err(refused)?;
-        let adapter = session_adapter(&record.agent);
+        let adapter = adapter_named(&record.agent, None);
         let preset_sandboxed = self.preset_sandboxed(&repo, &record.preset).await;
         let mut live = Live::new(record.clone(), repo, adapter);
         live.preset_sandboxed = preset_sandboxed;

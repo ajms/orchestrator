@@ -5,7 +5,7 @@ mod statusline;
 mod subagents;
 mod transcript;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use hooks::HookEvent;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
@@ -186,6 +186,14 @@ impl AgentAdapter for ClaudeCode {
 
     fn worktree_request(&self, payload: &str) -> Option<WorktreeRequest> {
         hooks::worktree_request(payload)
+    }
+
+    fn user_statusline_command(
+        &self,
+        cwd: &Path,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        settings::user_statusline_command(cwd, lookup)
     }
 
     fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {

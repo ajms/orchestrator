@@ -170,6 +170,14 @@ pub trait AgentAdapter {
         None
     }
 
+    fn user_statusline_command(
+        &self,
+        _cwd: &Path,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        None
+    }
+
     fn agent_dirs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
         Vec::new()
     }

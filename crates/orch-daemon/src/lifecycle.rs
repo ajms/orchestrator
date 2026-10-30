@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset, SandboxPaths};
+use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset, SandboxPaths, adapter_named};
 use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
@@ -13,7 +13,7 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{Adapter, adapter_for, default_program, session_adapter};
+use crate::agents::{Adapter, adapter_for};
 use crate::branch::{BranchRequest, BranchTarget};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message};
@@ -79,10 +79,10 @@ fn describe(item: &TrustItem) -> String {
     match item {
         TrustItem::SetupScript(script) => format!("Setup script: {script}"),
         TrustItem::TeardownScript(script) => format!("Teardown script: {script}"),
-        TrustItem::Agent { name, binary, args } => {
-            let program = binary.clone().unwrap_or_else(|| default_program(name));
-            format!("Agent {name}: {program} {}", args.join(" "))
-        }
+        TrustItem::Agent { name, binary, args } => match binary {
+            Some(binary) => format!("Agent {name}: {binary} {}", args.join(" ")),
+            None => format!("Agent {name} args: {}", args.join(" ")),
+        },
         TrustItem::Preset(preset) => format!("Preset {}", preset.name),
         TrustItem::DefaultPreset(preset) => format!("default Preset {}", preset.name),
         TrustItem::SandboxPath { list, path } => format!("Sandbox {}: {path}", list.name()),
@@ -754,7 +754,7 @@ impl Daemon {
             let Some(repo) = repos.iter().find(|repo| repo.id == record.repo) else {
                 continue;
             };
-            let adapter = session_adapter(&record.agent);
+            let adapter = adapter_named(&record.agent, None);
             let id = record.id.clone();
             let preset_sandboxed = self.preset_sandboxed(&repo.path, &record.preset).await;
             let mut live = Live::new(record, repo.path.clone(), adapter);
