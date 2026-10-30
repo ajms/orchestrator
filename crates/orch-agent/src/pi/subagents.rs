@@ -163,7 +163,8 @@ fn open_within(profile: &Path, path: &Path) -> Option<File> {
         .open(path)
         .ok()?;
     let opened = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).ok()?;
-    (file.metadata().ok()?.is_file() && opened.starts_with(&root)).then_some(file)
+    let meta = file.metadata().ok()?;
+    (meta.is_file() && meta.nlink() == 1 && opened.starts_with(&root)).then_some(file)
 }
 
 #[derive(Deserialize)]

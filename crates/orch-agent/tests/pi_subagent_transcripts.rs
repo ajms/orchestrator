@@ -450,3 +450,15 @@ fn a_finished_subagents_transcript_stays_readable() {
         .unwrap();
     assert_eq!(profile.reader().read(&located).entries, [text("Done.")]);
 }
+
+#[test]
+fn a_transcript_hardlinked_to_another_file_is_not_read() {
+    let mut profile = Profile::new();
+    let path = profile.started();
+    let secret = profile.dir().join("auth.json");
+    write(&secret, &[said("secret")]);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::hard_link(&secret, &path).unwrap();
+
+    assert_eq!(profile.reader().read(&path).entries, []);
+}
