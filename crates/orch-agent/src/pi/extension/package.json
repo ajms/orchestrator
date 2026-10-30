@@ -1,0 +1,14 @@
+{
+  "name": "orch-pi-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test *.test.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3"
+  }
+}
