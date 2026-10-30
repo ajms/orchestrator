@@ -10,9 +10,10 @@ pub(super) const CREDENTIALS: [&str; 2] = ["auth.json", "models-store.json"];
 const LEFT_OUT: [&str; 4] = ["git-worktree-isolation", "sandbox", "notify", "caffeinate"];
 const LINKED: [&str; 4] = ["SYSTEM.md", "AGENTS.md", "keybindings.json", "agents"];
 const SETTINGS: &str = "settings.json";
-const EXTENSION_DIR: [&str; 2] = ["orch", "extension"];
-const EXTENSION: [(&str, &str); 2] = [
-    ("index.ts", include_str!("extension/index.ts")),
+const EXTENSION_DIR: &str = "orch/extension";
+const EXTENSION_ENTRY: &str = "index.ts";
+const EXTENSION_FILES: [(&str, &str); 2] = [
+    (EXTENSION_ENTRY, include_str!("extension/index.ts")),
     ("forward.ts", include_str!("extension/forward.ts")),
 ];
 const STAGED: &str = ".orch-new";
@@ -40,10 +41,11 @@ impl Dirs {
 }
 
 pub(super) fn extension(profile: &Path) -> PathBuf {
-    EXTENSION_DIR
-        .iter()
-        .fold(profile.join("extensions"), |dir, name| dir.join(name))
-        .join("index.ts")
+    extension_dir(&profile.join("extensions")).join(EXTENSION_ENTRY)
+}
+
+fn extension_dir(extensions: &Path) -> PathBuf {
+    extensions.join(EXTENSION_DIR)
 }
 
 pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
@@ -132,12 +134,12 @@ fn resolve(user: &Path, entry: &str) -> String {
 }
 
 fn write_extension(extensions: &Path) -> io::Result<()> {
-    let mut dir = extensions.to_path_buf();
-    for name in EXTENSION_DIR {
-        dir.push(name);
-        std::fs::create_dir(&dir)?;
+    let dir = extension_dir(extensions);
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir(parent)?;
     }
-    for (name, content) in EXTENSION {
+    std::fs::create_dir(&dir)?;
+    for (name, content) in EXTENSION_FILES {
         create(&dir.join(name))?.write_all(content.as_bytes())?;
     }
     Ok(())

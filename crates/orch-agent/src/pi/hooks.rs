@@ -6,12 +6,28 @@ use crate::PayloadError;
 const QUESTION_TOOL: &str = "question";
 const STATUS_WORDS: [&str; 4] = ["status", "code", "error", "http"];
 
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StartReason {
+    Reload,
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StopReason {
+    Error,
+    #[serde(other)]
+    Other,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 enum Hook {
     #[serde(rename_all = "camelCase")]
     SessionStart {
-        reason: String,
+        reason: StartReason,
         session_id: Option<String>,
         name: Option<String>,
     },
@@ -36,7 +52,7 @@ enum Hook {
     #[serde(rename_all = "camelCase")]
     AgentSettled {
         aborted: bool,
-        stop_reason: Option<String>,
+        stop_reason: Option<StopReason>,
         error_message: Option<String>,
     },
     #[serde(other)]
@@ -56,11 +72,11 @@ impl Hook {
                 session_id,
                 name,
             } => {
-                let conversation = session_id.filter(|_| reason != "reload").map(|id| {
-                    AgentEvent::ConversationChanged {
+                let conversation = session_id
+                    .filter(|_| reason != StartReason::Reload)
+                    .map(|id| AgentEvent::ConversationChanged {
                         id: ConversationId(id),
-                    }
-                });
+                    });
                 let title = name
                     .filter(|name| !name.is_empty())
                     .map(|title| AgentEvent::TitleChanged { title });
@@ -91,9 +107,9 @@ impl Hook {
             Hook::UiPromptEnd { idle: false } => vec![AgentEvent::PromptSubmitted],
             Hook::AgentSettled {
                 aborted: false,
-                stop_reason: Some(reason),
+                stop_reason: Some(StopReason::Error),
                 error_message,
-            } if reason == "error" => vec![AgentEvent::Failed {
+            } => vec![AgentEvent::Failed {
                 kind: failure_kind(error_message.as_deref().unwrap_or("unknown")),
             }],
             Hook::AgentSettled { .. } => vec![AgentEvent::TurnEnded],
