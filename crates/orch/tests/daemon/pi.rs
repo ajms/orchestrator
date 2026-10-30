@@ -135,3 +135,77 @@ async fn sandboxed_pi_sees_its_profile_but_not_the_users_sessions() {
         }
     }
 }
+
+async fn resumed_pane(env: &Env, client: &mut TestClient, id: &orch_core::SessionId) -> PaneView {
+    let resumed = client
+        .request(Request::Resume {
+            session: id.clone(),
+        })
+        .await;
+    assert_eq!(resumed, Ok(Reply::Done));
+    client
+        .until(id, "running again", |view| {
+            view.phase == PhaseView::Active && view.holder_pid.is_some()
+        })
+        .await;
+    let mut pane = env.pane(id, PANE).await;
+    pane.wait_for_text(&format!("session-id> {}", id.as_str()))
+        .await;
+    pane.type_line("print announced").await;
+    pane.wait_for_text("announced").await;
+    assert!(!pane.text().contains("prompt>"));
+    pane
+}
+
+#[tokio::test]
+async fn a_suspended_or_exited_pi_session_resumes_the_same_conversation() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let repo = env.repo("app");
+    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    client
+        .until(&id, "held", |view| view.holder_pid.is_some())
+        .await;
+
+    kill(client.holder_pid(&id).unwrap(), "-KILL");
+    client
+        .until(&id, "Suspended", |view| view.phase == PhaseView::Suspended)
+        .await;
+    let mut pane = resumed_pane(&env, &mut client, &id).await;
+
+    pane.type_line("exit 0").await;
+    client
+        .until(&id, "Exited", |view| {
+            view.agent_state == Some(State::Exited)
+        })
+        .await;
+    resumed_pane(&env, &mut client, &id).await;
+}
+
+#[tokio::test]
+async fn an_edit_planted_in_the_profile_is_reset_at_the_next_launch() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let repo = env.repo("app");
+    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    client
+        .until(&id, "held", |view| view.holder_pid.is_some())
+        .await;
+    let settings = env.path("state/orchestrator/agent-profiles/pi/settings.json");
+    std::fs::write(&settings, r#"{"planted":true}"#).unwrap();
+    let mut pane = env.pane(&id, PANE).await;
+    pane.type_line("exit 0").await;
+    client
+        .until(&id, "Exited", |view| {
+            view.agent_state == Some(State::Exited)
+        })
+        .await;
+
+    resumed_pane(&env, &mut client, &id).await;
+
+    let rebuilt = std::fs::read_to_string(&settings).unwrap();
+    assert!(!rebuilt.contains("planted"), "{rebuilt}");
+    assert!(rebuilt.contains("\"theme\": \"dark\""), "{rebuilt}");
+}
