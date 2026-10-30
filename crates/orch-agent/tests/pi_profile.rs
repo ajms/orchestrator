@@ -54,12 +54,27 @@ impl Home {
         std::fs::write(path, content).unwrap();
     }
 
-    fn prepare(&self) {
+    fn try_prepare(&self) -> Result<(), String> {
         let home = self.path().to_string_lossy().into_owned();
         let lookup = move |key: &str| (key == "HOME").then(|| home.clone());
-        Pi::default()
-            .prepare(&lookup)
-            .expect("the profile is built");
+        Pi::default().prepare(&lookup)
+    }
+
+    fn prepare(&self) {
+        self.try_prepare().expect("the profile is built");
+    }
+
+    fn victim(&self) -> PathBuf {
+        let victim = self.path().join("victim");
+        self.seed(&victim.join("keep.txt"), "keep");
+        victim
+    }
+
+    fn plant_link(&self, name: &str, target: &Path) {
+        let path = self.profile().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&path).or_else(|_| std::fs::remove_file(&path));
+        std::os::unix::fs::symlink(target, path).unwrap();
     }
 
     fn settings(&self) -> Value {
@@ -211,4 +226,93 @@ fn building_the_profile_never_touches_the_users_pi_dir() {
     home.prepare();
 
     assert_eq!(snapshot(&home.path().join(".pi")), before);
+}
+
+fn untouched(victim: &Path) {
+    assert_eq!(
+        std::fs::read_to_string(victim.join("keep.txt")).unwrap(),
+        "keep"
+    );
+    assert_eq!(std::fs::read_dir(victim).unwrap().count(), 1);
+}
+
+#[test]
+fn a_planted_staged_settings_link_is_not_written_through() {
+    let home = Home::new();
+    home.prepare();
+    let victim = home.victim();
+    home.plant_link("settings.json.orch-new", &victim.join("keep.txt"));
+
+    home.prepare();
+
+    untouched(&victim);
+    assert_eq!(home.settings()["theme"], "dark");
+}
+
+#[test]
+fn a_planted_link_in_place_of_a_users_file_is_replaced_without_following_it() {
+    let home = Home::new();
+    home.prepare();
+    let victim = home.victim();
+    home.plant_link("agents", &victim);
+    home.plant_link("SYSTEM.md.orch-new", &victim);
+
+    home.prepare();
+
+    untouched(&victim);
+    for name in ["agents", "SYSTEM.md"] {
+        assert_eq!(
+            std::fs::read_link(home.profile().join(name)).unwrap(),
+            home.user().join(name)
+        );
+    }
+}
+
+#[test]
+fn a_planted_dir_in_place_of_a_users_link_is_removed_without_following_its_links() {
+    let home = Home::new();
+    home.prepare();
+    let victim = home.victim();
+    std::fs::remove_file(home.profile().join("agents")).unwrap();
+    home.plant_link("agents/escape", &victim);
+
+    home.prepare();
+
+    untouched(&victim);
+    assert_eq!(
+        std::fs::read_link(home.profile().join("agents")).unwrap(),
+        home.user().join("agents")
+    );
+}
+
+#[test]
+fn a_planted_link_in_place_of_a_resource_dir_becomes_an_empty_dir_again() {
+    let home = Home::new();
+    home.prepare();
+    let victim = home.path().join("empty-victim");
+    std::fs::create_dir(&victim).unwrap();
+    home.plant_link("extensions", &victim);
+    let full = home.victim();
+    home.plant_link("skills", &full);
+    home.plant_link("prompts.orch-new", &full);
+
+    home.prepare();
+
+    untouched(&full);
+    for kind in ["extensions", "skills", "prompts"] {
+        let dir = home.profile().join(kind);
+        assert!(dir.symlink_metadata().unwrap().is_dir(), "{kind}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "{kind}");
+    }
+}
+
+#[test]
+fn a_profile_that_is_a_link_is_refused() {
+    let home = Home::new();
+    let victim = home.victim();
+    std::fs::create_dir_all(home.profile().parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&victim, home.profile()).unwrap();
+
+    assert!(home.try_prepare().is_err());
+    untouched(&victim);
 }

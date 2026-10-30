@@ -1,5 +1,5 @@
-use std::io;
-use std::os::unix::fs::PermissionsExt;
+use std::io::{self, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
@@ -12,6 +12,7 @@ const LINKED: [&str; 4] = ["SYSTEM.md", "AGENTS.md", "keybindings.json", "agents
 const KEPT: [&str; 2] = ["sessions", "index"];
 const SETTINGS: &str = "settings.json";
 const STAGED: &str = ".orch-new";
+const RETIRED: &str = ".orch-old";
 
 static BUILDING: Mutex<()> = Mutex::new(());
 
@@ -36,12 +37,18 @@ pub(super) fn profile_dir(lookup: &dyn Fn(&str) -> Option<String>) -> Option<Pat
 pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
     let _building = BUILDING.lock().unwrap_or_else(PoisonError::into_inner);
     std::fs::create_dir_all(profile)?;
+    for dir in [Some(profile), profile.parent()].into_iter().flatten() {
+        if !dir.symlink_metadata()?.is_dir() {
+            return Err(io::Error::other(format!(
+                "{} is not a directory",
+                dir.display()
+            )));
+        }
+    }
     std::fs::set_permissions(profile, std::fs::Permissions::from_mode(0o700))?;
 
     let settings = serde_json::to_vec_pretty(&settings(user)?)?;
-    let staged = profile.join(format!("{SETTINGS}{STAGED}"));
-    std::fs::write(&staged, settings)?;
-    std::fs::rename(&staged, profile.join(SETTINGS))?;
+    write_file(profile, SETTINGS, &settings)?;
 
     for name in LINKED.into_iter().chain(CREDENTIALS) {
         let target = user.join(name);
@@ -52,12 +59,9 @@ pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
         }
     }
     for kind in RESOURCES {
-        let dir = profile.join(kind);
-        let empty = std::fs::read_dir(&dir).map(|mut entries| entries.next().is_none());
-        if !matches!(empty, Ok(true)) {
-            remove(&dir)?;
-            std::fs::create_dir(&dir)?;
-        }
+        let staged = staged(profile, kind)?;
+        std::fs::create_dir(&staged)?;
+        swap(profile, kind, &staged)?;
     }
 
     let built = [SETTINGS]
@@ -125,18 +129,44 @@ fn resolve(user: &Path, entry: &str) -> String {
     format!("{sign}{}", text(&user.join(path)))
 }
 
+fn write_file(profile: &Path, name: &str, content: &[u8]) -> io::Result<()> {
+    let staged = staged(profile, name)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&staged)?;
+    file.write_all(content)?;
+    swap(profile, name, &staged)
+}
+
 fn link(profile: &Path, name: &str, target: &Path) -> io::Result<()> {
-    let path = profile.join(name);
-    if std::fs::read_link(&path).is_ok_and(|current| current == target) {
+    if std::fs::read_link(profile.join(name)).is_ok_and(|current| current == target) {
         return Ok(());
     }
+    let staged = staged(profile, name)?;
+    std::os::unix::fs::symlink(target, &staged)?;
+    swap(profile, name, &staged)
+}
+
+fn staged(profile: &Path, name: &str) -> io::Result<PathBuf> {
     let staged = profile.join(format!("{name}{STAGED}"));
     remove(&staged)?;
-    std::os::unix::fs::symlink(target, &staged)?;
-    if path.symlink_metadata().is_ok_and(|meta| meta.is_dir()) {
-        std::fs::remove_dir_all(&path)?;
+    Ok(staged)
+}
+
+fn swap(profile: &Path, name: &str, staged: &Path) -> io::Result<()> {
+    let path = profile.join(name);
+    match std::fs::rename(staged, &path) {
+        Err(_) if path.symlink_metadata().is_ok() => {
+            let retired = profile.join(format!("{name}{RETIRED}"));
+            remove(&retired)?;
+            std::fs::rename(&path, &retired)?;
+            std::fs::rename(staged, &path)?;
+            remove(&retired)
+        }
+        renamed => renamed,
     }
-    std::fs::rename(&staged, &path)
 }
 
 fn remove(path: &Path) -> io::Result<()> {
