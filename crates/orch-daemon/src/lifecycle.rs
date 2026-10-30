@@ -534,10 +534,10 @@ impl Daemon {
                     Ok(())
                 });
                 match sandbox {
-                    Ok(sandbox) => self
-                        .spawn_holder(&record, launch.argv, env, sandbox)
-                        .await
-                        .map(|()| self.opened_conversation(id, launch.conversation)),
+                    Ok(sandbox) => {
+                        self.opened_conversation(id, launch.conversation).await;
+                        self.spawn_holder(&record, launch.argv, env, sandbox).await
+                    }
                     Err(message) => Err(message),
                 }
             }
@@ -555,7 +555,7 @@ impl Daemon {
         }
     }
 
-    fn opened_conversation(&self, id: &SessionId, conversation: Option<ConversationId>) {
+    async fn opened_conversation(&self, id: &SessionId, conversation: Option<ConversationId>) {
         let Some(conversation) = conversation else {
             return;
         };
@@ -565,8 +565,10 @@ impl Daemon {
             Ok(())
         });
         let session = id.clone();
-        self.store
-            .write(move |store| store_conversations(store, &session, conversations));
+        let _ = self
+            .store
+            .call(move |store| store_conversations(store, &session, conversations))
+            .await;
     }
 
     fn agent_failed(&self, id: &SessionId, message: String) {
