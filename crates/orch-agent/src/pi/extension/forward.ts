@@ -1,6 +1,22 @@
 import { spawn } from "node:child_process";
+import type { ContextUsage } from "@earendil-works/pi-coding-agent";
 
 export type Payload = { event: string } & Record<string, unknown>;
+
+export interface Tokens {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+}
+
+export interface Tap {
+	sessionId: string;
+	model?: { id: string; name: string };
+	context?: ContextUsage;
+	lastResponse: Tokens;
+	cost: number;
+}
 
 export type Spawn = (bin: string, args: string[], payload: string) => Promise<void>;
 
@@ -35,11 +51,11 @@ export class Forwarder {
 		this.#chain("hook", payload);
 	}
 
-	tap(payload: object): void {
+	tap(payload: Tap): void {
 		this.#chain("tap", payload);
 	}
 
-	#chain(command: "hook" | "tap", payload: object): void {
+	#chain(command: "hook" | "tap", payload: Payload | Tap): void {
 		const args = [command, "--agent", "pi", "--session", this.#session];
 		const line = JSON.stringify(payload);
 		this.#tail = this.#tail.then(() => this.#spawn(this.#bin, args, line)).catch(() => {});

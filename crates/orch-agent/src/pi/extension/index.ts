@@ -1,40 +1,45 @@
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { Forwarder, type Payload, type Spawn, spawnHook } from "./forward.ts";
+import { readFileSync } from "node:fs";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Forwarder, type Payload, type Spawn, spawnHook, type Tap, type Tokens } from "./forward.ts";
 
 interface Outcome {
 	stopReason?: string;
 	errorMessage?: string;
 }
 
-function spent(entries: SessionEntry[], since: string) {
-	const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-	for (const entry of entries) {
-		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-		// A fork copies its parent's entries, which were spent before it began.
-		if (Date.parse(entry.timestamp) < Date.parse(since)) continue;
-		const { usage } = entry.message;
-		totals.input += usage.input;
-		totals.output += usage.output;
-		totals.cacheRead += usage.cacheRead;
-		totals.cacheWrite += usage.cacheWrite;
-		totals.cost += usage.cost.total;
+const TAPPED_STARTS = new Set(["startup", "resume", "fork"]);
+
+function idsIn(sessionFile: string | undefined): Set<string> {
+	if (!sessionFile) return new Set();
+	try {
+		const entries = readFileSync(sessionFile, "utf8")
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => JSON.parse(line) as { type?: string; id?: string });
+		return new Set(entries.flatMap((entry) => (entry.type !== "session" && entry.id ? [entry.id] : [])));
+	} catch {
+		return new Set();
 	}
-	return totals;
 }
 
-function usage(ctx: ExtensionContext): object {
-	const entries = ctx.sessionManager.getEntries();
-	const started = ctx.sessionManager.getHeader()?.timestamp ?? "";
+function tapPayload(ctx: ExtensionContext, copied: Set<string>): Tap {
+	let lastResponse: Tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+	let cost = 0;
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		const { input, output, cacheRead, cacheWrite, cost: spent } = entry.message.usage;
+		if (input + output + cacheRead + cacheWrite > 0) lastResponse = { input, output, cacheRead, cacheWrite };
+		if (!copied.has(entry.id)) cost += spent.total;
+	}
 	const context = ctx.getContextUsage();
 	return {
 		sessionId: ctx.sessionManager.getSessionId(),
 		...(ctx.model ? { model: { id: ctx.model.id, name: ctx.model.name } } : {}),
 		...(context ? { context } : {}),
-		usage: spent(entries, started),
+		lastResponse,
+		cost,
 	};
 }
-
-const resumed = (ctx: ExtensionContext) => ctx.sessionManager.getEntries().some((entry) => entry.type === "message");
 
 export default function orch(pi: ExtensionAPI, spawn: Spawn = spawnHook): void {
 	pi.registerFlag("orch-bin", { description: "The orch binary that receives pi's hooks", type: "string", default: "orch" });
@@ -42,7 +47,16 @@ export default function orch(pi: ExtensionAPI, spawn: Spawn = spawnHook): void {
 
 	let forwarder: Forwarder | undefined;
 	let outcome: Outcome = {};
+	let copied: { sessionId: string; ids: Set<string> } | undefined;
 	const send = (payload: Payload) => forwarder?.send(payload);
+	const tap = (ctx: ExtensionContext) => {
+		const sessionId = ctx.sessionManager.getSessionId();
+		if (copied?.sessionId !== sessionId) {
+			// A fork copies its parent's entries with their ids; they were spent there.
+			copied = { sessionId, ids: idsIn(ctx.sessionManager.getHeader()?.parentSession) };
+		}
+		forwarder?.tap(tapPayload(ctx, copied.ids));
+	};
 
 	pi.on("session_start", (event, ctx) => {
 		const bin = pi.getFlag("orch-bin");
@@ -57,7 +71,7 @@ export default function orch(pi: ExtensionAPI, spawn: Spawn = spawnHook): void {
 			sessionId: ctx.sessionManager.getSessionId(),
 			...(name ? { name } : {}),
 		});
-		if (resumed(ctx)) forwarder?.tap(usage(ctx));
+		if (TAPPED_STARTS.has(event.reason)) tap(ctx);
 	});
 	pi.on("session_info_changed", (event) => {
 		send({ event: "session_info_changed", name: event.name ?? "" });
@@ -88,6 +102,6 @@ export default function orch(pi: ExtensionAPI, spawn: Spawn = spawnHook): void {
 	});
 	pi.on("agent_settled", (event, ctx) => {
 		send({ event: "agent_settled", aborted: event.aborted, ...outcome });
-		forwarder?.tap(usage(ctx));
+		tap(ctx);
 	});
 }
