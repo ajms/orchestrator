@@ -17,6 +17,7 @@ mod landing;
 mod lifecycle;
 mod notifications;
 mod panes;
+mod pi;
 mod pr;
 mod preset;
 mod reconcile;

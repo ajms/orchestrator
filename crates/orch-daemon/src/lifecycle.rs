@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset, SandboxPaths, adapter_named};
-use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted};
+use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted, xdg};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
 };
@@ -518,13 +518,15 @@ impl Daemon {
         };
         let spawned = match launch {
             Ok(launch) => {
-                let sandbox = match &launch.sandbox {
-                    Some(configured) => {
+                let sandbox = match (prepare(&launch.adapter).await, &launch.sandbox) {
+                    (Err(message), _) => Err(message),
+                    (Ok(()), Some(configured)) => {
                         self.blocking_sandbox(&record, &repo, &launch.adapter, configured)
                             .await
                     }
-                    None => Ok(None),
+                    (Ok(()), None) => Ok(None),
                 };
+                let env = launch.adapter.env(&xdg::process_env);
                 let _ = self.update(id, |live| {
                     live.adapter = Some(launch.adapter);
                     live.preset_sandboxed = launch.sandbox.is_some();
@@ -532,7 +534,10 @@ impl Daemon {
                     Ok(())
                 });
                 match sandbox {
-                    Ok(sandbox) => self.spawn_holder(&record, launch.argv, sandbox).await,
+                    Ok(sandbox) => self
+                        .spawn_holder(&record, launch.argv, env, sandbox)
+                        .await
+                        .map(|()| self.opened_conversation(id, launch.conversation)),
                     Err(message) => Err(message),
                 }
             }
@@ -548,6 +553,24 @@ impl Daemon {
         if let Err(message) = attached {
             self.agent_failed(id, message);
         }
+    }
+
+    fn opened_conversation(&self, id: &SessionId, conversation: Option<ConversationId>) {
+        let Some(conversation) = conversation else {
+            return;
+        };
+        let _ = self.update(id, |live| {
+            if live.record.latest_conversation() != Some(&conversation) {
+                live.record.conversations.push(conversation.clone());
+            }
+            Ok(())
+        });
+        let session = id.clone();
+        self.store.write(move |store| {
+            if let Err(err) = store.record_conversation(&session, conversation) {
+                eprintln!("orch daemon: recording a Conversation: {err}");
+            }
+        });
     }
 
     fn agent_failed(&self, id: &SessionId, message: String) {
@@ -610,11 +633,16 @@ impl Daemon {
             (true, Some(conversation)) => Some((conversation, record.last_mode)),
             _ => None,
         };
+        let conversation = match resume {
+            Some(_) => None,
+            None => adapter.launch_conversation(&spec),
+        };
         let argv = agent_command(adapter.as_ref(), &agent.args, spec, resume);
         Ok(AgentLaunch {
             adapter,
             argv,
             sandbox,
+            conversation,
         })
     }
 
@@ -622,6 +650,7 @@ impl Daemon {
         &self,
         record: &SessionRecord,
         argv: Vec<String>,
+        agent_env: Vec<(String, String)>,
         sandbox: Option<SandboxLaunch>,
     ) -> Result<(), String> {
         let mut command = crate::subprocess::command(&self.config.orch_program);
@@ -658,6 +687,7 @@ impl Daemon {
         let env = session_env(record)
             .into_iter()
             .chain(display)
+            .chain(agent_env)
             .chain(broker_env);
         for (key, value) in env {
             command.arg("--env").arg(format!("{key}={value}"));
@@ -779,6 +809,14 @@ struct AgentLaunch {
     adapter: Adapter,
     argv: Vec<String>,
     sandbox: Option<SandboxPaths>,
+    conversation: Option<ConversationId>,
+}
+
+async fn prepare(adapter: &Adapter) -> Result<(), String> {
+    let adapter = adapter.clone();
+    tokio::task::spawn_blocking(move || adapter.prepare(&xdg::process_env))
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 pub(crate) fn select_preset(
