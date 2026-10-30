@@ -175,6 +175,14 @@ fn error_messages_are_matched_loosely() {
         ("503 Service Unavailable", FailureKind::Server),
         ("The model is overloaded", FailureKind::Server),
         ("Output length exceeded", FailureKind::MaxOutputTokens),
+        ("context length 512 exceeded", FailureKind::MaxOutputTokens),
+        ("HTTP 502 Bad Gateway", FailureKind::Server),
+        ("Request failed with status code 503", FailureKind::Server),
+        ("error 429 from upstream", FailureKind::RateLimited),
+        (
+            "tool 501 failed",
+            FailureKind::Other("tool 501 failed".into()),
+        ),
         (
             "status 5000 tokens",
             FailureKind::Other("status 5000 tokens".into()),

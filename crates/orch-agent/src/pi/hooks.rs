@@ -4,6 +4,7 @@ use serde::Deserialize;
 use crate::PayloadError;
 
 const QUESTION_TOOL: &str = "question";
+const STATUS_WORDS: [&str; 4] = ["status", "code", "error", "http"];
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -104,13 +105,8 @@ impl Hook {
 fn failure_kind(message: &str) -> FailureKind {
     let lower = message.to_lowercase();
     let says = |words: &[&str]| words.iter().any(|word| lower.contains(word));
-    let status = |matches: fn(&str) -> bool| {
-        lower
-            .split(|c: char| !c.is_ascii_alphanumeric())
-            .any(|word| {
-                word.len() == 3 && word.bytes().all(|b| b.is_ascii_digit()) && matches(word)
-            })
-    };
+    let code = status_code(&lower);
+    let status = |matches: fn(&str) -> bool| code.is_some_and(matches);
     if status(|code| code == "429") || says(&["rate limit", "rate_limit", "too many requests"]) {
         FailureKind::RateLimited
     } else if status(|code| code == "401" || code == "403")
@@ -124,4 +120,16 @@ fn failure_kind(message: &str) -> FailureKind {
     } else {
         FailureKind::Other(message.into())
     }
+}
+
+fn status_code(message: &str) -> Option<&str> {
+    let words: Vec<&str> = message
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    words.iter().enumerate().find_map(|(at, word)| {
+        let numbered = word.len() == 3 && word.bytes().all(|b| b.is_ascii_digit());
+        let named = at == 0 || STATUS_WORDS.contains(&words[at - 1]);
+        (numbered && named).then_some(*word)
+    })
 }

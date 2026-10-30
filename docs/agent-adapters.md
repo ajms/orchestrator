@@ -94,7 +94,7 @@ orch's pi extension (`crates/orch-agent/src/pi/extension/`, TypeScript) is a thi
 | `tool_execution_end` | `ToolFinished` | Working |
 | `ui_prompt_start` | `QuestionAsked` | Needs input |
 | `ui_prompt_end` | `PromptSubmitted`, or `SessionStarted` when `idle` (a dialog a command opened at pi's prompt) | Working, or Idle |
-| `agent_settled` | `TurnEnded`, including `aborted: true` (Escape). With `aborted: false` and `stopReason: "error"`, `Failed { kind }` instead, matched from `errorMessage`: 429 or rate limit → RateLimited, 401, 403 or auth → Authentication, overloaded or another 5xx → Server, context or length → MaxOutputTokens, otherwise `Other(errorMessage)` | Idle, or Errored |
+| `agent_settled` | `TurnEnded`, including `aborted: true` (Escape). With `aborted: false` and `stopReason: "error"`, `Failed { kind }` instead, matched from `errorMessage`: status 429 or rate limit → RateLimited, status 401 or 403 or auth → Authentication, another 5xx status or overloaded → Server, context or length → MaxOutputTokens, otherwise `Other(errorMessage)`. A status is a 3-digit number that starts the message (pi's providers write `429 {…}`) or follows `status`, `code`, `error` or `HTTP` | Idle, or Errored |
 | `session_info_changed` | `TitleChanged { name }`; an empty name clears it | — |
 
 Starting lasts from the launch until the first `session_start`. `agent_end` isn't used, because it can fire several times per prompt. pi retries some errors silently, so a retried 429 stays Working.
