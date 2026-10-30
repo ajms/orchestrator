@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Records what orch's pi extension sends to `orch hook`: node record.mjs (PI="node /path/to/cli.js" for an unreleased pi).
+// Records what orch's pi extension sends to `orch hook` and `orch tap`: node record.mjs (PI="node /path/to/cli.js" for an unreleased pi).
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const extension = join(here, "../../../src/pi/extension/index.ts");
 const hooks = join(here, "hooks");
+const taps = join(here, "taps");
 const [program, ...programArgs] = (process.env.PI ?? "pi").split(" ");
 const work = mkdtempSync(join(tmpdir(), "orch-pi-record-"));
 const capture = join(work, "capture.jsonl");
@@ -107,15 +108,24 @@ async function captured(action) {
 		quiet = now === seen ? quiet + 1 : 0;
 		seen = now;
 	}
-	return seen.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+	const lines = seen.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+	const payloads = lines.filter((line) => line.command === "hook").map((line) => line.payload);
+	payloads.taps = lines.filter((line) => line.command === "tap").map((line) => line.payload);
+	return payloads;
 }
 
 const fixtures = new Map();
+const tapped = new Map();
 
 function keep(name, payloads, event, matches = () => true) {
 	const payload = payloads.find((payload) => payload.event === event && matches(payload));
 	if (!payload) throw new Error(`${name}: no ${event} in ${JSON.stringify(payloads)}`);
 	fixtures.set(name, payload);
+}
+
+function keepTap(name, payloads) {
+	if (!payloads.taps.length) throw new Error(`${name}: no tap in ${JSON.stringify(payloads)}`);
+	tapped.set(name, payloads.taps.at(-1));
 }
 
 const first = randomUUID();
@@ -125,15 +135,18 @@ const startup = await captured(async () => {
 	await pi.send({ type: "get_state" });
 });
 keep("session_start_startup", startup, "session_start");
+if (startup.taps.length) throw new Error(`a fresh Conversation was tapped: ${JSON.stringify(startup.taps)}`);
 
 const reply = await captured(() => pi.prompt("reply"));
 keep("input", reply, "input");
 keep("agent_start", reply, "agent_start");
 keep("agent_settled", reply, "agent_settled");
+keepTap("agent_settled", reply);
 
 const tool = await captured(() => pi.prompt("tool"));
 keep("tool_call_bash", tool, "tool_call");
 keep("tool_execution_end_bash", tool, "tool_execution_end");
+keepTap("agent_settled_second_turn", tool);
 
 const question = await captured(() => pi.prompt("question"));
 keep("tool_call_question", question, "tool_call");
@@ -175,6 +188,10 @@ await captured(() => pi.send({ type: "set_session_name", name: "fix login" }));
 
 const fresh = await captured(() => pi.send({ type: "new_session" }));
 keep("session_start_new", fresh, "session_start");
+if (fresh.taps.length) throw new Error(`a new Conversation was tapped: ${JSON.stringify(fresh.taps)}`);
+keepTap("agent_settled_new", await captured(() => pi.prompt("reply")));
+keepTap("session_start_fork", await captured(() => pi.send({ type: "clone" })));
+keepTap("agent_settled_fork", await captured(() => pi.prompt("reply")));
 await pi.quit();
 
 const resumed = await captured(async () => {
@@ -182,14 +199,18 @@ const resumed = await captured(async () => {
 	await pi.send({ type: "get_state" });
 });
 keep("session_start_resumed_named", resumed, "session_start");
+keepTap("session_start_resumed", resumed);
 await pi.quit();
 
 const version = execFileSync(program, [...programArgs, "--version"], { env, encoding: "utf8" }).trim();
 rmSync(work, { recursive: true, force: true });
 mkdirSync(hooks, { recursive: true });
-for (const [name, payload] of fixtures) {
-	writeFileSync(join(hooks, `${name}.json`), `${JSON.stringify(payload, null, 2)}\n`);
+mkdirSync(taps, { recursive: true });
+for (const [dir, payloads] of [[hooks, fixtures], [taps, tapped]]) {
+	for (const [name, payload] of payloads) {
+		writeFileSync(join(dir, `${name}.json`), `${JSON.stringify(payload, null, 2)}\n`);
+	}
 }
 const readme = join(here, "README.md");
 writeFileSync(readme, readFileSync(readme, "utf8").replace(/^Recorded with pi .*$/m, `Recorded with pi ${version}.`));
-console.log(`recorded ${fixtures.size} payloads with pi ${version}`);
+console.log(`recorded ${fixtures.size} hook and ${tapped.size} tap payloads with pi ${version}`);

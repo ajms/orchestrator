@@ -17,6 +17,10 @@ class FakePi {
 	flags = new Map<string, string>();
 	name: string | undefined;
 	sessionId = "conv-1";
+	started = "2026-10-30T09:00:00.000Z";
+	entries: object[] = [];
+	model: { id: string; name: string } | undefined = { id: "claude-opus-5-5", name: "Opus 5.5" };
+	context: object | undefined = { tokens: 1200, contextWindow: 200_000, percent: 0.6 };
 	idle = false;
 	calls: Call[] = [];
 	pending: (() => void)[] = [];
@@ -51,7 +55,13 @@ class FakePi {
 
 	emit(type: string, event: object = {}): unknown[] {
 		const ctx = {
-			sessionManager: { getSessionId: () => this.sessionId },
+			sessionManager: {
+				getSessionId: () => this.sessionId,
+				getHeader: () => ({ type: "session", id: this.sessionId, timestamp: this.started, cwd: "/w" }),
+				getEntries: () => this.entries,
+			},
+			model: this.model,
+			getContextUsage: () => this.context,
 			isIdle: () => this.idle,
 		};
 		return (this.handlers.get(type) ?? []).map((handler) => handler({ type, ...event }, ctx));
@@ -66,7 +76,7 @@ class FakePi {
 
 	async payloads(): Promise<Record<string, unknown>[]> {
 		await this.settle();
-		return this.calls.map((call) => call.payload);
+		return this.calls.filter((call) => call.args[0] === "hook").map((call) => call.payload);
 	}
 }
 
@@ -224,4 +234,138 @@ test("a session_start forgets the last prompt's error", async () => {
 	pi.emit("session_start", { reason: "new" });
 	pi.emit("agent_settled", { aborted: false });
 	assert.deepEqual((await pi.payloads()).at(-1), { event: "agent_settled", aborted: false });
+});
+
+function assistant(at: string, input: number, output: number, cacheRead: number, cacheWrite: number, cost: number): object {
+	const usage = { input, output, cacheRead, cacheWrite, totalTokens: input + output, cost: { total: cost } };
+	return { type: "message", timestamp: at, message: { role: "assistant", usage } };
+}
+
+function user(at: string): object {
+	return { type: "message", timestamp: at, message: { role: "user", content: "hi" } };
+}
+
+const taps = (pi: FakePi) => pi.calls.filter((call) => call.args[0] === "tap");
+
+test("agent_settled taps orch with the Conversation's cumulative usage", async () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.entries.push(user("2026-10-30T09:01:00.000Z"), assistant("2026-10-30T09:01:05.000Z", 10, 20, 300, 40, 0.5));
+	pi.emit("agent_settled", { aborted: false });
+	pi.entries.push(user("2026-10-30T09:02:00.000Z"), assistant("2026-10-30T09:02:05.000Z", 1, 2, 400, 4, 0.25));
+	pi.emit("agent_settled", { aborted: false });
+	await pi.settle();
+	assert.deepEqual(
+		taps(pi).map(({ bin, args }) => ({ bin, args })),
+		[
+			{ bin: "/opt/orch", args: ["tap", "--agent", "pi", "--session", "s-1"] },
+			{ bin: "/opt/orch", args: ["tap", "--agent", "pi", "--session", "s-1"] },
+		],
+	);
+	assert.deepEqual(
+		taps(pi).map((call) => call.payload),
+		[
+			{
+				sessionId: "conv-1",
+				model: { id: "claude-opus-5-5", name: "Opus 5.5" },
+				context: { tokens: 1200, contextWindow: 200_000, percent: 0.6 },
+				usage: { input: 10, output: 20, cacheRead: 300, cacheWrite: 40, cost: 0.5 },
+			},
+			{
+				sessionId: "conv-1",
+				model: { id: "claude-opus-5-5", name: "Opus 5.5" },
+				context: { tokens: 1200, contextWindow: 200_000, percent: 0.6 },
+				usage: { input: 11, output: 22, cacheRead: 700, cacheWrite: 44, cost: 0.75 },
+			},
+		],
+	);
+});
+
+test("the tap follows the hook of the same agent_settled", async () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.emit("agent_settled", { aborted: false });
+	pi.emit("input", { text: "again", source: "interactive" });
+	await pi.settle();
+	assert.deepEqual(
+		pi.calls.map((call) => `${call.args[0]} ${call.payload.event ?? ""}`.trim()),
+		["hook session_start", "hook agent_settled", "tap", "hook input"],
+	);
+});
+
+test("a new Conversation starts its totals over", async () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.entries.push(assistant("2026-10-30T09:01:05.000Z", 10, 20, 300, 40, 0.5));
+	pi.emit("agent_settled", { aborted: false });
+	pi.sessionId = "conv-2";
+	pi.started = "2026-10-30T09:05:00.000Z";
+	pi.entries = [];
+	pi.emit("session_start", { reason: "new" });
+	pi.entries.push(assistant("2026-10-30T09:06:05.000Z", 1, 2, 3, 4, 0.125));
+	pi.emit("agent_settled", { aborted: false });
+	await pi.settle();
+	assert.deepEqual(
+		taps(pi).map((call) => [call.payload.sessionId, call.payload.usage]),
+		[
+			["conv-1", { input: 10, output: 20, cacheRead: 300, cacheWrite: 40, cost: 0.5 }],
+			["conv-2", { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: 0.125 }],
+		],
+	);
+});
+
+test("a fork counts only what was spent after it", async () => {
+	const pi = new FakePi();
+	pi.sessionId = "conv-fork";
+	pi.started = "2026-10-30T09:05:00.000Z";
+	pi.entries.push(
+		user("2026-10-30T09:01:00.000Z"),
+		assistant("2026-10-30T09:01:05.000Z", 10, 20, 300, 40, 0.5),
+		assistant("2026-10-30T09:06:05.000Z", 1, 2, 3, 4, 0.125),
+	);
+	pi.emit("session_start", { reason: "fork" });
+	pi.emit("agent_settled", { aborted: false });
+	await pi.settle();
+	assert.deepEqual(
+		taps(pi).map((call) => call.payload.usage),
+		[
+			{ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: 0.125 },
+			{ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: 0.125 },
+		],
+	);
+});
+
+test("a resumed Conversation is tapped at its session_start, a fresh one isn't", async () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	await pi.settle();
+	assert.deepEqual(taps(pi), []);
+	pi.entries.push(user("2026-10-30T09:01:00.000Z"), assistant("2026-10-30T09:01:05.000Z", 10, 20, 300, 40, 0.5));
+	pi.context = { tokens: null, contextWindow: 200_000, percent: null };
+	pi.emit("session_start", { reason: "startup" });
+	await pi.settle();
+	assert.deepEqual(
+		taps(pi).map((call) => call.payload),
+		[
+			{
+				sessionId: "conv-1",
+				model: { id: "claude-opus-5-5", name: "Opus 5.5" },
+				context: { tokens: null, contextWindow: 200_000, percent: null },
+				usage: { input: 10, output: 20, cacheRead: 300, cacheWrite: 40, cost: 0.5 },
+			},
+		],
+	);
+});
+
+test("a tap leaves out a model or context pi doesn't know", async () => {
+	const pi = new FakePi();
+	pi.model = undefined;
+	pi.context = undefined;
+	pi.emit("session_start", { reason: "startup" });
+	pi.emit("agent_settled", { aborted: false });
+	await pi.settle();
+	assert.deepEqual(
+		taps(pi).map((call) => call.payload),
+		[{ sessionId: "conv-1", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } }],
+	);
 });

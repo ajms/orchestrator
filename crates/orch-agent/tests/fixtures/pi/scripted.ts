@@ -1,4 +1,6 @@
 import {
+	calculateCost,
+	createAssistantMessageEventStream,
 	createFauxCore,
 	type FauxResponseFactory,
 	fauxAssistantMessage,
@@ -36,17 +38,29 @@ const respond: FauxResponseFactory = (context) => {
 export default function scripted(pi: ExtensionAPI): void {
 	const core = createFauxCore({ api: PROVIDER, provider: PROVIDER, models: [{ id: "scripted" }], tokensPerSecond: 200 });
 	core.setResponses(Array.from({ length: 200 }, () => respond));
+	const priced: typeof core.streamSimple = (model, context, options) => {
+		const inner = core.streamSimple(model, context, options);
+		const outer = createAssistantMessageEventStream();
+		(async () => {
+			for await (const event of inner) {
+				if (event.type === "done") calculateCost(model, event.message.usage);
+				if (event.type === "error") calculateCost(model, event.error.usage);
+				outer.push(event);
+			}
+		})();
+		return outer;
+	};
 	pi.registerProvider(PROVIDER, {
 		baseUrl: "http://localhost:0",
 		apiKey: "scripted",
 		api: PROVIDER,
-		streamSimple: core.streamSimple,
+		streamSimple: priced,
 		models: core.models.map((model) => ({
 			id: model.id,
-			name: model.name,
+			name: "Scripted",
 			reasoning: false,
 			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 			contextWindow: 100_000,
 			maxTokens: 4_096,
 		})),

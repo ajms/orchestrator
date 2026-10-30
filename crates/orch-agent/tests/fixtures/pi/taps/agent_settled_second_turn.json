@@ -1,0 +1,19 @@
+{
+  "sessionId": "1476af5a-45a3-495c-afc0-cced3b8aaa0e",
+  "model": {
+    "id": "scripted",
+    "name": "Scripted"
+  },
+  "context": {
+    "tokens": 1640,
+    "contextWindow": 100000,
+    "percent": 1.6400000000000001
+  },
+  "usage": {
+    "input": 1622,
+    "output": 10,
+    "cacheRead": 3205,
+    "cacheWrite": 1622,
+    "cost": 0.01206
+  }
+}

@@ -32,7 +32,15 @@ export class Forwarder {
 	}
 
 	send(payload: Payload): void {
-		const args = ["hook", "--agent", "pi", "--session", this.#session];
+		this.#chain("hook", payload);
+	}
+
+	tap(payload: object): void {
+		this.#chain("tap", payload);
+	}
+
+	#chain(command: "hook" | "tap", payload: object): void {
+		const args = [command, "--agent", "pi", "--session", this.#session];
 		const line = JSON.stringify(payload);
 		this.#tail = this.#tail.then(() => this.#spawn(this.#bin, args, line)).catch(() => {});
 	}
