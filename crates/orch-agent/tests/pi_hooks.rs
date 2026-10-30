@@ -128,6 +128,25 @@ fn a_subagent_call_is_a_subagent_row_named_by_its_agent_and_task_until_it_ends()
 }
 
 #[test]
+fn a_subagent_call_without_agent_or_task_name_falls_back_to_visible_labels() {
+    let payload = serde_json::json!({
+        "event": "tool_call",
+        "toolName": "subagent",
+        "toolCallId": "call_1",
+        "agent": "",
+        "task": "Find where the login redirect happens and explain why it loops forever",
+    });
+    assert_eq!(
+        Pi::default().map_hook(&payload.to_string()).unwrap()[1],
+        AgentEvent::SubagentStarted {
+            id: SubagentId("call_1".into()),
+            agent_type: "subagent".into(),
+            description: "Find where the login redirect happens and explain why it…".into(),
+        }
+    );
+}
+
+#[test]
 fn a_subagent_call_without_its_id_is_just_a_tool() {
     assert_eq!(
         Pi::default().map_hook(r#"{"event":"tool_call","toolName":"subagent"}"#),

@@ -468,3 +468,17 @@ test("other tools' updates and updates without messages write nothing", () => {
 	pi.emit("tool_execution_update", { toolCallId: "call_7", toolName: "subagent", partialResult: { content: [] } });
 	assert.equal(existsSync(join(pi.agentDir, "subagents")), false);
 });
+
+test("a subagent call without a task name forwards its task instead", async () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.emit("tool_call", { ...subagentCall, input: { agent: "scout", task: "Find where login redirects" } });
+	assert.deepEqual((await pi.payloads()).at(-1), {
+		event: "tool_call",
+		toolName: "subagent",
+		toolCallId: "call_7",
+		sessionId: "conv-1",
+		agent: "scout",
+		task: "Find where login redirects",
+	});
+});

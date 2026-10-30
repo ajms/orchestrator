@@ -5,6 +5,7 @@ use crate::PayloadError;
 
 const QUESTION_TOOL: &str = "question";
 pub(super) const SUBAGENT_TOOL: &str = "subagent";
+const LABEL_CHARS: usize = 60;
 const STATUS_WORDS: [&str; 4] = ["status", "code", "error", "http"];
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
@@ -43,6 +44,7 @@ enum Hook {
         tool_call_id: Option<String>,
         agent: Option<String>,
         task_name: Option<String>,
+        task: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
     ToolExecutionEnd {
@@ -103,12 +105,15 @@ impl Hook {
                 tool_call_id,
                 agent,
                 task_name,
+                task,
             } => {
                 let started =
                     subagent(&tool_name, tool_call_id).map(|id| AgentEvent::SubagentStarted {
                         id,
-                        agent_type: agent.unwrap_or_default(),
-                        description: task_name.unwrap_or_default(),
+                        agent_type: given(agent).unwrap_or_else(|| SUBAGENT_TOOL.into()),
+                        description: given(task_name)
+                            .or_else(|| given(task).map(|task| cut_short(&task)))
+                            .unwrap_or_default(),
                     });
                 std::iter::once(AgentEvent::ToolStarted {
                     tool: tool_name,
@@ -149,6 +154,21 @@ impl Hook {
 
 fn subagent(tool: &str, call: Option<String>) -> Option<SubagentId> {
     call.filter(|_| tool == SUBAGENT_TOOL).map(SubagentId)
+}
+
+fn given(label: Option<String>) -> Option<String> {
+    label.filter(|label| !label.trim().is_empty())
+}
+
+fn cut_short(text: &str) -> String {
+    if text.chars().count() <= LABEL_CHARS {
+        return text.into();
+    }
+    let head: String = text.chars().take(LABEL_CHARS).collect();
+    let words = head
+        .rsplit_once(' ')
+        .map_or(head.as_str(), |(words, _)| words);
+    format!("{}…", words.trim_end())
 }
 
 fn failure_kind(message: &str) -> FailureKind {

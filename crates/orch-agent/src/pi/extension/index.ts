@@ -14,9 +14,10 @@ const SUBAGENT_TOOL = "subagent";
 interface SubagentInput {
 	agent?: unknown;
 	taskName?: unknown;
+	task?: unknown;
 }
 
-const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+const stringOrNothing = (value: unknown) => (typeof value === "string" ? value : undefined);
 
 function childMessages(result: unknown): unknown[] | undefined {
 	const messages = (result as { details?: { messages?: unknown } } | undefined)?.details?.messages;
@@ -111,14 +112,15 @@ export default function orch(
 			send({ event: "tool_call", toolName: event.toolName });
 			return;
 		}
-		const { agent, taskName } = event.input as SubagentInput;
+		const { agent, taskName, task } = event.input as SubagentInput;
+		const named = stringOrNothing(taskName);
 		send({
 			event: "tool_call",
 			toolName: event.toolName,
 			toolCallId: event.toolCallId,
 			sessionId: ctx.sessionManager.getSessionId(),
-			agent: text(agent),
-			taskName: text(taskName),
+			agent: stringOrNothing(agent),
+			...(named ? { taskName: named } : { task: stringOrNothing(task) }),
 		});
 	});
 	pi.on("tool_execution_update", (event, ctx) => {
