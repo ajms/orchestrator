@@ -3,7 +3,7 @@ mod profile;
 use std::path::PathBuf;
 
 use orch_core::{ConversationId, PermissionMode};
-use profile::{RESOURCES, home, profile_dir, user_dir};
+use profile::{CREDENTIALS, RESOURCES, home, profile_dir, user_dir};
 
 use crate::{AgentAdapter, Argv, Capabilities, LaunchSpec, SandboxNeeds};
 
@@ -21,7 +21,6 @@ const USER_READ_ONLY: [&str; 12] = [
     "settings.json",
     "sandbox.json",
 ];
-const CREDENTIALS: [&str; 2] = ["auth.json", "models-store.json"];
 
 pub const PI: &str = "pi";
 
@@ -76,6 +75,14 @@ impl AgentAdapter for Pi {
         _mode: Option<PermissionMode>,
     ) -> Option<Argv> {
         Some(self.open(conversation.as_str()))
+    }
+
+    fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
+        let (Some(user), Some(profile)) = (user_dir(lookup), profile_dir(lookup)) else {
+            return Err("pi's Agent profile needs HOME to be set".into());
+        };
+        profile::build(&user, &profile)
+            .map_err(|err| format!("building pi's Agent profile {}: {err}", profile.display()))
     }
 
     fn env(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {

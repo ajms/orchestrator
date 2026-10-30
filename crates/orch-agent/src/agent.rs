@@ -186,6 +186,10 @@ pub trait AgentAdapter {
         Vec::new()
     }
 
+    fn prepare(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
+        Ok(())
+    }
+
     fn env(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
         Vec::new()
     }
