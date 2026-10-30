@@ -59,20 +59,49 @@ A Session's Agent is stored on the Session when it is created (`sessions.agent`)
 
 ## pi
 
-pi (`@earendil-works/pi-coding-agent` 1.1) is registered as `pi`. So far it only launches and resumes: its capabilities are `resume` alone, so its Sessions show Agent state Unknown and have no Guards, usage, titles or Subagents.
+pi (`@earendil-works/pi-coding-agent` 1.1) is registered as `pi`. Its capabilities are `hooks`, `resume` and `titles`, so its Sessions show Agent states and Session titles, but have no Guards, Preset modes, usage or Subagents.
 
-- **Launch.** `pi -na --session-id <Session id> [-- <prompt>]`. `-na` ignores a Repo's committed `.pi/`. `--session-id` creates the Conversation on its first message and opens it again later. `launch_conversation` names the Session id, so the Daemon records it.
-- **Resume.** `pi -na --session-id <latest Conversation>`, without the prompt. Until pi reports `ConversationChanged`, that is the launch's id, so a `/new` inside pi isn't followed.
+- **Launch.** `pi -na --session-id <Session id> -e <profile>/extensions/orch/extension/index.ts --orch-bin <orch> --orch-session <Session id> [-- <prompt>]`. `-na` ignores a Repo's committed `.pi/`. `--session-id` creates the Conversation on its first message and opens it again later. `launch_conversation` names the Session id, so the Daemon records it before pi starts; pi's own `session_start` then reports the same Conversation, which changes nothing.
+- **Resume.** The same, with `--session-id <latest Conversation>` and without the prompt. pi reports each `/new`, resume and fork as `ConversationChanged`, so this is the Conversation pi was last in.
 - **Env.** `PI_CODING_AGENT_DIR=<profile>`, `PI_OFFLINE=1` and `PI_INDEX_ROOT=<profile>/index`.
 - **Agent profile** (ADR 0014). `prepare` rebuilds `$XDG_STATE_HOME/orchestrator/agent-profiles/pi` from `~/.pi/agent` before every launch, and never writes to `~/.pi`:
   - `settings.json` is the user's without `sessionDir`. It lists `~/.pi/agent/{extensions,skills,prompts,themes}` by absolute path, with the user's relative entries resolved against `~/.pi/agent`, and excludes `git-worktree-isolation`, `sandbox`, `notify` and `caffeinate` by their exact `index.ts`.
   - `SYSTEM.md`, `AGENTS.md`, `keybindings.json`, `agents/`, `auth.json` and `models-store.json` link to the user's, if the user has them.
-  - Only these generated entries and the four empty resource dirs are rebuilt. Everything pi writes itself (`sessions/`, `index/`, `trust.json`, logs, …) is left alone. Each entry is staged and renamed into place, and an entry in the way is renamed aside and removed. No write follows a link the Agent may have planted, and a profile that is a link is refused.
+  - `extensions/orch/extension/` holds orch's own extension (below). pi only discovers `extensions/*.ts` and `extensions/*/index.ts`, so it loads just through `-e`, never in a Subagent child or `conversation-name`'s `pi -p`.
+  - Only these generated entries and the four resource dirs are rebuilt. Everything pi writes itself (`sessions/`, `index/`, `trust.json`, logs, …) is left alone. Each entry is staged and renamed into place, and an entry in the way is renamed aside and removed. No write follows a link the Agent may have planted, and a profile that is a link is refused.
 - **`sandbox_needs`**:
   - `writable`: the profile, `~/.pi/agent/auth.json` and `~/.pi/agent/models-store.json`.
   - `read_only`: `~/.pi/agent/{install,bin,extensions,skills,prompts,themes,agents,SYSTEM.md,AGENTS.md,keybindings.json,settings.json,sandbox.json}`, `~/.local/share/pi-node` and `~/.local/bin` (the `pi` launcher). The user's own `sessions/` stay hidden.
   - `carve_outs`: the profile's `extensions/`, `skills/`, `prompts/` and `themes/`.
   - `env`: the three variables above. No host `PI_*` or provider-key variables pass through.
+
+### orch's pi extension
+
+orch's pi extension (`crates/orch-agent/src/pi/extension/`, TypeScript) is a thin forwarder; all mapping is in `map_hook`. It is embedded with `include_str!` and uses only node built-ins and type-only pi imports, so it needs no `node_modules` at runtime.
+
+- It registers `--orch-bin` (default `orch`) and `--orch-session`, and forwards nothing without a Session or before pi's first `session_start`.
+- On each coarse event it spawns `orch hook --agent pi --session <id>` with a compact JSON payload on stdin: `event` plus the fields orch needs. It uses `node:child_process.spawn`, because `pi.exec` ignores stdin and a sync exec freezes the TUI. Spawns are chained, so payloads arrive in order, and no handler waits for one; each is killed after 10 seconds. `message_update` is never forwarded.
+- pi rebuilds the extension runtime on `/new`, resume and fork, and `session_start` can fire twice, so every `session_start` reopens the state: the chain (kept if the flags are unchanged) and the last assistant outcome.
+- `message_end` of an assistant message is kept, not forwarded, and `agent_settled` carries its `stopReason` and `errorMessage`. `ui_prompt_end` carries `idle`, whether pi was at its prompt.
+
+`map_hook` (`crates/orch-agent/src/pi/hooks.rs`):
+
+| Payload | Events | Agent state |
+|---|---|---|
+| `session_start` | `ConversationChanged { sessionId }` unless `reason` is `reload`, `SessionStarted`, and `TitleChanged` if it has a non-empty `name` | Idle |
+| `input`, `agent_start` | `PromptSubmitted` | Working |
+| `tool_call` | `ToolStarted`, or `QuestionAsked` for the `question` tool | Working, or Needs input |
+| `tool_execution_end` | `ToolFinished` | Working |
+| `ui_prompt_start` | `QuestionAsked` | Needs input |
+| `ui_prompt_end` | `PromptSubmitted`, or `SessionStarted` when `idle` (a dialog a command opened at pi's prompt) | Working, or Idle |
+| `agent_settled` | `TurnEnded`, including `aborted: true` (Escape). With `aborted: false` and `stopReason: "error"`, `Failed { kind }` instead, matched from `errorMessage`: 429 or rate limit → RateLimited, 401, 403 or auth → Authentication, overloaded or another 5xx → Server, context or length → MaxOutputTokens, otherwise `Other(errorMessage)` | Idle, or Errored |
+| `session_info_changed` | `TitleChanged { name }`; an empty name clears it | — |
+
+Starting lasts from the launch until the first `session_start`. `agent_end` isn't used, because it can fire several times per prompt. pi retries some errors silently, so a retried 429 stays Working.
+
+**Titles.** pi's session name is the Session title: `/name`, `pi.setSessionName()` (such as the user's `conversation-name` extension) and `--name`, which only `session_start` reports. There is no `title_watch`. A title is kept across a new Conversation until it is renamed. Renames from pi's `/resume` selector emit nothing and are missed.
+
+**Testing.** `crates/orch-agent/tests/fixtures/pi/hooks/` holds payloads recorded from real pi by `record.mjs` next to them; its README names the pi version and how to re-record. `pi_hooks.rs` maps them. The extension's `package.json` pins `@earendil-works/pi-coding-agent` for its types: `npx tsc --noEmit` and `npm test` (`node --test` against a fake ExtensionAPI) run in CI's `pi-extension` job. `ORCH_REAL_PI=1 cargo test -p orch --test daemon real_pi` launches the `pi` on PATH through the Daemon; it is skipped without either, and isn't run in CI.
 
 ## Capabilities and graceful degrade
 
