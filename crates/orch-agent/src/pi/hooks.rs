@@ -107,14 +107,15 @@ impl Hook {
                 task_name,
                 task,
             } => {
-                let started =
-                    subagent(&tool_name, tool_call_id).map(|id| AgentEvent::SubagentStarted {
+                let started = subagent_of_call(&tool_name, tool_call_id).map(|id| {
+                    AgentEvent::SubagentStarted {
                         id,
                         agent_type: given(agent).unwrap_or_else(|| SUBAGENT_TOOL.into()),
                         description: given(task_name)
                             .or_else(|| given(task).map(|task| cut_short(&task)))
                             .unwrap_or_default(),
-                    });
+                    }
+                });
                 std::iter::once(AgentEvent::ToolStarted {
                     tool: tool_name,
                     subagent: None,
@@ -126,7 +127,7 @@ impl Hook {
                 tool_name,
                 tool_call_id,
             } => {
-                let finished = subagent(&tool_name, tool_call_id)
+                let finished = subagent_of_call(&tool_name, tool_call_id)
                     .map(|id| AgentEvent::SubagentFinished { id });
                 std::iter::once(AgentEvent::ToolFinished {
                     tool: tool_name,
@@ -152,7 +153,7 @@ impl Hook {
     }
 }
 
-fn subagent(tool: &str, call: Option<String>) -> Option<SubagentId> {
+fn subagent_of_call(tool: &str, call: Option<String>) -> Option<SubagentId> {
     call.filter(|_| tool == SUBAGENT_TOOL).map(SubagentId)
 }
 
