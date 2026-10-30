@@ -1,5 +1,6 @@
 mod hooks;
 mod profile;
+mod usage;
 
 use std::path::PathBuf;
 
@@ -68,6 +69,7 @@ impl AgentAdapter for Pi {
             hooks: true,
             resume: true,
             titles: true,
+            usage: true,
             ..Capabilities::default()
         }
     }
@@ -95,6 +97,10 @@ impl AgentAdapter for Pi {
 
     fn map_hook(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         hooks::map_hook(payload)
+    }
+
+    fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
+        usage::map_tap(payload)
     }
 
     fn agent_profile(
