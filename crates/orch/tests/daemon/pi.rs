@@ -361,7 +361,7 @@ async fn a_pi_session_name_is_the_title_until_it_is_cleared() {
 
 fn pi_tap(conversation: &str, (input, output, cache): (u64, u64, u64), cost: f64) -> String {
     format!(
-        r#"tap --agent pi {{"sessionId":"{conversation}","model":{{"id":"claude-opus-5-5","name":"Opus 5.5"}},"context":{{"tokens":25000,"contextWindow":200000,"percent":12.5}},"usage":{{"input":{input},"output":{output},"cacheRead":{cache},"cacheWrite":0,"cost":{cost}}}}}"#
+        r#"tap --agent pi {{"sessionId":"{conversation}","model":{{"id":"claude-opus-5-5","name":"Opus 5.5"}},"context":{{"tokens":25000,"contextWindow":200000,"percent":12.5}},"lastResponse":{{"input":{input},"output":{output},"cacheRead":{cache},"cacheWrite":0}},"cost":{cost}}}"#
     )
 }
 
@@ -374,7 +374,7 @@ async fn until_cost(client: &mut TestClient, id: &orch_core::SessionId, cost: f6
 }
 
 #[tokio::test]
-async fn pi_taps_add_to_the_repos_usage_and_leave_the_rate_limits_alone() {
+async fn pi_taps_add_to_the_repos_usage_once_and_leave_the_rate_limits_alone() {
     let env = pi_env();
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
@@ -401,6 +401,9 @@ async fn pi_taps_add_to_the_repos_usage_and_leave_the_rate_limits_alone() {
         .until(&pi, "pi's usage", |view| view.cost_usd == Some(0.5))
         .await;
     assert_eq!(tapped.context_used_percent, Some(12.5));
+    pi_pane
+        .type_line(&pi_tap("conv-a", (100, 20, 300), 0.5))
+        .await;
     pi_pane
         .type_line(&pi_tap("conv-a", (200, 40, 600), 0.75))
         .await;
