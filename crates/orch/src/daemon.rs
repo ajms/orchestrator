@@ -23,6 +23,8 @@ pub struct DaemonArgs {
     pr_poll_ms: u64,
     #[arg(long, hide = true, default_value_t = DaemonConfig::DEFAULT_RECONCILE.as_millis() as u64)]
     reconcile_ms: u64,
+    #[arg(long, hide = true, default_value_t = DaemonConfig::DEFAULT_DRAFT_TIMEOUT.as_millis() as u64)]
+    draft_timeout_ms: u64,
     #[arg(long, hide = true)]
     notify_log: Option<PathBuf>,
 }
@@ -61,6 +63,7 @@ pub fn run(args: DaemonArgs) -> ExitCode {
         }),
         pr_poll_interval: Duration::from_millis(args.pr_poll_ms),
         reconcile_interval: Duration::from_millis(args.reconcile_ms),
+        draft_timeout: Duration::from_millis(args.draft_timeout_ms),
         notifications: args
             .notify_log
             .map_or(NotificationTarget::Desktop, NotificationTarget::Log),

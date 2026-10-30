@@ -51,11 +51,15 @@ pub(crate) async fn output(
         .kill_on_drop(true)
         .spawn()
         .map_err(|err| format!("cannot run {what}: {err}"))?;
-    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
-        let _ = stdin.write_all(&input).await;
-    }
-    tokio::time::timeout(limit, child.wait_with_output())
+    let stdin = child.stdin.take();
+    let feed = async move {
+        if let (Some(input), Some(mut stdin)) = (input, stdin) {
+            let _ = stdin.write_all(&input).await;
+        }
+    };
+    let run = async { tokio::join!(feed, child.wait_with_output()).1 };
+    tokio::time::timeout(limit, run)
         .await
-        .map_err(|_| format!("{what} took longer than {}s", limit.as_secs()))?
+        .map_err(|_| format!("{what} took longer than {}s", limit.as_secs_f32()))?
         .map_err(|err| format!("{what} failed: {err}"))
 }

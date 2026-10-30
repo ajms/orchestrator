@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::time::Duration;
 
 use orch_agent::{Argv, DraftRun, DraftSpec};
 use orch_config::xdg;
@@ -11,8 +10,6 @@ use crate::agents::adapter_for;
 use crate::lifecycle::{PROMPT_FILE, refused, untrusted, with_git};
 use crate::state::{Daemon, session_worktree};
 use crate::subprocess;
-
-const DRAFT_TIMEOUT: Duration = Duration::from_secs(180);
 
 fn instruction(mode: LandingMode, base: &str) -> String {
     match mode {
@@ -98,7 +95,7 @@ impl Daemon {
         let drafted = subprocess::run(
             command,
             Some(input.into()),
-            DRAFT_TIMEOUT,
+            self.config.draft_timeout,
             "the Agent's draft",
         )
         .await
