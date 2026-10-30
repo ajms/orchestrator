@@ -9,7 +9,8 @@ struct Tap {
     session_id: String,
     model: Option<Model>,
     context: Option<Context>,
-    usage: Spent,
+    last_response: Tokens,
+    cost: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,12 +28,11 @@ struct Context {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Spent {
+struct Tokens {
     input: u64,
     output: u64,
     cache_read: u64,
     cache_write: u64,
-    cost: f64,
 }
 
 pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
@@ -43,15 +43,15 @@ pub(super) fn map_tap(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
             .filter(|name| !name.is_empty())
             .unwrap_or(model.id)
     });
-    let spent = tap.usage;
+    let last = tap.last_response;
     Ok(vec![AgentEvent::UsageSample(UsageSample {
         conversation: Some(ConversationId(tap.session_id)),
         model,
         context_used_percent: tap.context.as_ref().and_then(|context| context.percent),
         context_window_tokens: tap.context.and_then(|context| context.context_window),
-        input_tokens: Some(spent.input + spent.cache_read + spent.cache_write),
-        output_tokens: Some(spent.output),
-        cost_usd: Some(spent.cost),
+        input_tokens: Some(last.input + last.cache_read + last.cache_write),
+        output_tokens: Some(last.output),
+        cost_usd: Some(tap.cost),
         five_hour: None,
         seven_day: None,
     })])

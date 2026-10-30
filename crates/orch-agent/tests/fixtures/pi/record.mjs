@@ -110,23 +110,22 @@ async function captured(action) {
 		seen = now;
 	}
 	const lines = seen.split("\n").filter(Boolean).map((line) => JSON.parse(line));
-	const payloads = lines.filter((line) => line.command === "hook").map((line) => line.payload);
-	payloads.taps = lines.filter((line) => line.command === "tap").map((line) => line.payload);
-	return payloads;
+	const sent = (command) => lines.filter((line) => line.command === command).map((line) => line.payload);
+	return { hooks: sent("hook"), taps: sent("tap") };
 }
 
 const fixtures = new Map();
 const tapped = new Map();
 
-function keep(name, payloads, event, matches = () => true) {
+function keep(name, { hooks: payloads }, event, matches = () => true) {
 	const payload = payloads.find((payload) => payload.event === event && matches(payload));
 	if (!payload) throw new Error(`${name}: no ${event} in ${JSON.stringify(payloads)}`);
 	fixtures.set(name, payload);
 }
 
-function keepTap(name, payloads) {
-	if (!payloads.taps.length) throw new Error(`${name}: no tap in ${JSON.stringify(payloads)}`);
-	tapped.set(name, payloads.taps.at(-1));
+function keepTap(name, { taps: payloads }) {
+	if (!payloads.length) throw new Error(`${name}: no tap`);
+	tapped.set(name, payloads.at(-1));
 }
 
 const first = randomUUID();
@@ -136,7 +135,7 @@ const startup = await captured(async () => {
 	await pi.send({ type: "get_state" });
 });
 keep("session_start_startup", startup, "session_start");
-if (startup.taps.length) throw new Error(`a fresh Conversation was tapped: ${JSON.stringify(startup.taps)}`);
+keepTap("session_start_startup", startup);
 
 const reply = await captured(() => pi.prompt("reply"));
 keep("input", reply, "input");

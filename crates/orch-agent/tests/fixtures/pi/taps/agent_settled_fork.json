@@ -1,19 +1,19 @@
 {
-  "sessionId": "01a18be7-a6af-737e-899a-3273df4fb979",
+  "sessionId": "01a18bf1-3e5c-724e-9417-0e5464e9ea02",
   "model": {
     "id": "scripted",
     "name": "Scripted"
   },
   "context": {
-    "tokens": 3214,
+    "tokens": 3166,
     "contextWindow": 100000,
-    "percent": 3.2140000000000004
+    "percent": 3.166
   },
-  "usage": {
-    "input": 1606,
+  "lastResponse": {
+    "input": 1582,
     "output": 2,
     "cacheRead": 0,
-    "cacheWrite": 1606,
-    "cost": 0.0108705
-  }
+    "cacheWrite": 1582
+  },
+  "cost": 0.0107085
 }
