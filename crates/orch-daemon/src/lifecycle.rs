@@ -16,7 +16,7 @@ use orch_store::{NewSession, RepoRoot, SessionRecord};
 use crate::agents::{Adapter, adapter_for};
 use crate::branch::{BranchRequest, BranchTarget};
 use crate::holder::Attach;
-use crate::state::{Daemon, Live, gate_message};
+use crate::state::{Daemon, Live, gate_message, store_conversations};
 
 pub(crate) const HOLDER_EXIT_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const PROMPT_FILE: &str = "prompt";
@@ -559,18 +559,14 @@ impl Daemon {
         let Some(conversation) = conversation else {
             return;
         };
+        let conversations = vec![conversation];
         let _ = self.update(id, |live| {
-            if live.record.latest_conversation() != Some(&conversation) {
-                live.record.conversations.push(conversation.clone());
-            }
+            live.note_conversations(&conversations);
             Ok(())
         });
         let session = id.clone();
-        self.store.write(move |store| {
-            if let Err(err) = store.record_conversation(&session, conversation) {
-                eprintln!("orch daemon: recording a Conversation: {err}");
-            }
-        });
+        self.store
+            .write(move |store| store_conversations(store, &session, conversations));
     }
 
     fn agent_failed(&self, id: &SessionId, message: String) {

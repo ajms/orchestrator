@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use orch_agent::{GuardAnswer, GuardHit, GuardKind, SubagentTranscripts, mode_name};
-use orch_core::{AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus};
+use orch_core::{
+    AgentState, ConversationId, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus,
+};
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
 use orch_notify::{AttentionEvent, ClientView};
@@ -12,7 +14,7 @@ use orch_protocol::{
     DisplayVars, FlagsView, FromDaemon, GuardKindView, GuardPrompt, ReconcileReport, SessionView,
     SubagentView,
 };
-use orch_store::SessionRecord;
+use orch_store::{SessionRecord, Store};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Notify, oneshot, watch};
 
@@ -329,6 +331,16 @@ impl Live {
     pub(crate) fn hand_back(&mut self, prompt: String) {
         self.record.queued_prompt = Some(prompt);
         self.deliver_prompt();
+    }
+
+    pub(crate) fn note_conversations(&mut self, conversations: &[ConversationId]) -> bool {
+        let first = self.record.conversations.is_empty() && !conversations.is_empty();
+        for conversation in conversations {
+            if self.record.latest_conversation() != Some(conversation) {
+                self.record.conversations.push(conversation.clone());
+            }
+        }
+        first
     }
 
     pub(crate) fn deliver_prompt(&mut self) -> bool {
@@ -849,5 +861,17 @@ impl State {
         let id = live.record.id.clone();
         self.sessions.insert(id.clone(), live);
         self.changed(&id);
+    }
+}
+
+pub(crate) fn store_conversations(
+    store: &mut Store,
+    session: &SessionId,
+    conversations: Vec<ConversationId>,
+) {
+    for conversation in conversations {
+        if let Err(err) = store.record_conversation(session, conversation) {
+            eprintln!("orch daemon: recording a Conversation: {err}");
+        }
     }
 }

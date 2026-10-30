@@ -23,7 +23,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::watch;
 
 use crate::lifecycle::PROMPT_FILE;
-use crate::state::{Daemon, HolderLink, Live, PendingGuard};
+use crate::state::{Daemon, HolderLink, Live, PendingGuard, store_conversations};
 
 const DENIED_BY_USER: &str = "The user denied this in the Orchestrator (Guard).";
 const HOLDER_QUEUE: usize = 256;
@@ -316,23 +316,14 @@ impl Daemon {
             HolderEvent::Broker { .. } => Vec::new(),
         };
         live.deliver_prompt();
-        let first_conversation = live.record.conversations.is_empty() && !conversations.is_empty();
-        for conversation in &conversations {
-            if live.record.latest_conversation() != Some(conversation) {
-                live.record.conversations.push(conversation.clone());
-            }
-        }
+        let first_conversation = live.note_conversations(&conversations);
         live.record.holder_seq = seq;
         let ack = live.holder_outbox();
         let session = id.clone();
         let prompt = self.session_dir(id).join(PROMPT_FILE);
         let samples = usage.clone();
         self.store.write(move |store| {
-            for conversation in conversations {
-                if let Err(err) = store.record_conversation(&session, conversation) {
-                    eprintln!("orch daemon: recording a Conversation: {err}");
-                }
-            }
+            store_conversations(store, &session, conversations);
             for sample in usage {
                 let _ = store.record_usage(&session, &sample);
             }
