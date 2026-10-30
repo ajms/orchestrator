@@ -12,6 +12,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const extension = join(here, "../../../src/pi/extension/index.ts");
 const hooks = join(here, "hooks");
 const taps = join(here, "taps");
+const transcripts = join(here, "transcripts");
 const pinned = `node ${join(here, "../../../src/pi/extension/node_modules/@earendil-works/pi-coding-agent/dist/cli.js")}`;
 const [program, ...programArgs] = (process.env.PI ?? pinned).split(" ");
 const work = mkdtempSync(join(tmpdir(), "orch-pi-record-"));
@@ -43,6 +44,7 @@ class Pi {
 				"--session-id", conversation,
 				"-e", extension,
 				"-e", join(here, "scripted.ts"),
+				"-e", join(here, "subagent.ts"),
 				"--orch-bin", join(here, "capture.sh"),
 				"--orch-session", "recorded",
 				"--provider", "orch-scripted",
@@ -148,6 +150,14 @@ keep("tool_call_bash", tool, "tool_call");
 keep("tool_execution_end_bash", tool, "tool_execution_end");
 keepTap("agent_settled_second_turn", tool);
 
+const delegated = await captured(() => pi.prompt("subagent"));
+keep("tool_call_subagent", delegated, "tool_call", (payload) => payload.toolName === "subagent");
+keep("tool_execution_end_subagent", delegated, "tool_execution_end", (payload) => payload.toolName === "subagent");
+const transcript = readFileSync(
+	join(env.PI_CODING_AGENT_DIR, "subagents", first, `${fixtures.get("tool_call_subagent").toolCallId}.jsonl`),
+	"utf8",
+);
+
 const question = await captured(() => pi.prompt("question"));
 keep("tool_call_question", question, "tool_call");
 keep("ui_prompt_start_select", question, "ui_prompt_start");
@@ -206,6 +216,8 @@ const version = execFileSync(program, [...programArgs, "--version"], { env, enco
 rmSync(work, { recursive: true, force: true });
 mkdirSync(hooks, { recursive: true });
 mkdirSync(taps, { recursive: true });
+mkdirSync(transcripts, { recursive: true });
+writeFileSync(join(transcripts, "subagent.jsonl"), transcript);
 for (const [dir, payloads] of [[hooks, fixtures], [taps, tapped]]) {
 	for (const [name, payload] of payloads) {
 		writeFileSync(join(dir, `${name}.json`), `${JSON.stringify(payload, null, 2)}\n`);

@@ -1,5 +1,5 @@
 use orch_agent::{AgentAdapter, PayloadError, Pi};
-use orch_core::{AgentEvent, ConversationId, FailureKind};
+use orch_core::{AgentEvent, ConversationId, FailureKind, SubagentId};
 
 fn fixture(name: &str) -> String {
     let path = format!(
@@ -95,6 +95,46 @@ fn tools_are_reported_as_they_start_and_finish() {
             tool: "bash".into(),
             subagent: None
         }]
+    );
+}
+
+#[test]
+fn a_subagent_call_is_a_subagent_row_named_by_its_agent_and_task_until_it_ends() {
+    let id = SubagentId("call_subagent".into());
+    assert_eq!(
+        events("tool_call_subagent"),
+        vec![
+            AgentEvent::ToolStarted {
+                tool: "subagent".into(),
+                subagent: None
+            },
+            AgentEvent::SubagentStarted {
+                id: id.clone(),
+                agent_type: "scout".into(),
+                description: "find the redirect".into(),
+            },
+        ]
+    );
+    assert_eq!(
+        events("tool_execution_end_subagent"),
+        vec![
+            AgentEvent::ToolFinished {
+                tool: "subagent".into(),
+                subagent: None
+            },
+            AgentEvent::SubagentFinished { id },
+        ]
+    );
+}
+
+#[test]
+fn a_subagent_call_without_its_id_is_just_a_tool() {
+    assert_eq!(
+        Pi::default().map_hook(r#"{"event":"tool_call","toolName":"subagent"}"#),
+        Ok(vec![AgentEvent::ToolStarted {
+            tool: "subagent".into(),
+            subagent: None
+        }])
     );
 }
 

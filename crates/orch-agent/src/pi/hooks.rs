@@ -1,9 +1,10 @@
-use orch_core::{AgentEvent, ConversationId, FailureKind};
+use orch_core::{AgentEvent, ConversationId, FailureKind, SubagentId};
 use serde::Deserialize;
 
 use crate::PayloadError;
 
 const QUESTION_TOOL: &str = "question";
+pub(super) const SUBAGENT_TOOL: &str = "subagent";
 const STATUS_WORDS: [&str; 4] = ["status", "code", "error", "http"];
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
@@ -39,10 +40,14 @@ enum Hook {
     #[serde(rename_all = "camelCase")]
     ToolCall {
         tool_name: String,
+        tool_call_id: Option<String>,
+        agent: Option<String>,
+        task_name: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
     ToolExecutionEnd {
         tool_name: String,
+        tool_call_id: Option<String>,
     },
     UiPromptStart,
     UiPromptEnd {
@@ -90,17 +95,41 @@ impl Hook {
                 title: name.unwrap_or_default(),
             }],
             Hook::Input | Hook::AgentStart => vec![AgentEvent::PromptSubmitted],
-            Hook::ToolCall { tool_name } if tool_name == QUESTION_TOOL => {
+            Hook::ToolCall { tool_name, .. } if tool_name == QUESTION_TOOL => {
                 vec![AgentEvent::QuestionAsked]
             }
-            Hook::ToolCall { tool_name } => vec![AgentEvent::ToolStarted {
-                tool: tool_name,
-                subagent: None,
-            }],
-            Hook::ToolExecutionEnd { tool_name } => vec![AgentEvent::ToolFinished {
-                tool: tool_name,
-                subagent: None,
-            }],
+            Hook::ToolCall {
+                tool_name,
+                tool_call_id,
+                agent,
+                task_name,
+            } => {
+                let started =
+                    subagent(&tool_name, tool_call_id).map(|id| AgentEvent::SubagentStarted {
+                        id,
+                        agent_type: agent.unwrap_or_default(),
+                        description: task_name.unwrap_or_default(),
+                    });
+                std::iter::once(AgentEvent::ToolStarted {
+                    tool: tool_name,
+                    subagent: None,
+                })
+                .chain(started)
+                .collect()
+            }
+            Hook::ToolExecutionEnd {
+                tool_name,
+                tool_call_id,
+            } => {
+                let finished = subagent(&tool_name, tool_call_id)
+                    .map(|id| AgentEvent::SubagentFinished { id });
+                std::iter::once(AgentEvent::ToolFinished {
+                    tool: tool_name,
+                    subagent: None,
+                })
+                .chain(finished)
+                .collect()
+            }
             Hook::UiPromptStart => vec![AgentEvent::QuestionAsked],
             // Back at pi's prompt: a dialog a command opened while no prompt ran.
             Hook::UiPromptEnd { idle: true } => vec![AgentEvent::SessionStarted],
@@ -116,6 +145,10 @@ impl Hook {
             Hook::Other => vec![],
         }
     }
+}
+
+fn subagent(tool: &str, call: Option<String>) -> Option<SubagentId> {
+    call.filter(|_| tool == SUBAGENT_TOOL).map(SubagentId)
 }
 
 fn failure_kind(message: &str) -> FailureKind {

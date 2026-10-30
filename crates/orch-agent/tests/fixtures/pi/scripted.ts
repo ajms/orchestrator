@@ -31,6 +31,10 @@ const respond: FauxResponseFactory = (context) => {
 	if (prompt === "question" && !answered) {
 		return fauxAssistantMessage(fauxToolCall("question", { question: "Which one?", options: ["this", "that"] }));
 	}
+	if (prompt === "subagent" && !answered) {
+		const task = { agent: "scout", taskName: "find the redirect", task: "Find where login redirects" };
+		return fauxAssistantMessage(fauxToolCall("subagent", task, { id: "call_subagent" }));
+	}
 	if (prompt === "slow") return fauxAssistantMessage("still thinking ".repeat(400));
 	return fauxAssistantMessage("Done.");
 };
