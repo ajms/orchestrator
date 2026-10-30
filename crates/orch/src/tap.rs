@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::process::{Command, ExitCode};
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, ClaudeCode};
+use orch_agent::{AgentAdapter, adapter_named};
 use orch_config::xdg;
 use orch_core::{AgentEvent, SessionId};
 use orch_holder::{ToHolder, locate_socket, report};
@@ -11,7 +11,7 @@ use crate::subprocess::run_with_input;
 
 const STATUSLINE_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub fn run(session: &str) -> ExitCode {
+pub fn run(session: &str, agent: &str) -> ExitCode {
     let mut payload = String::new();
     if std::io::stdin().read_to_string(&mut payload).is_err() {
         return ExitCode::SUCCESS;
@@ -19,13 +19,16 @@ pub fn run(session: &str) -> ExitCode {
     if let Ok(session) = SessionId::parse(session) {
         let tap = ToHolder::Tap {
             payload: payload.clone(),
+            agent: agent.into(),
         };
         let _ = report(&locate_socket(&session), &tap);
     }
-    let claude = ClaudeCode::default();
+    let Some(adapter) = adapter_named(agent, None) else {
+        return ExitCode::SUCCESS;
+    };
     let line = std::env::current_dir()
         .ok()
-        .and_then(|cwd| claude.user_statusline_command(&cwd, xdg::process_env))
+        .and_then(|cwd| adapter.user_statusline_command(&cwd, &xdg::process_env))
         .and_then(|command| {
             run_with_input(
                 Command::new("sh").args(["-c", &command]),
@@ -33,14 +36,14 @@ pub fn run(session: &str) -> ExitCode {
                 Some(STATUSLINE_TIMEOUT),
             )
         })
-        .unwrap_or_else(|| minimal_line(&claude, &payload).into_bytes());
+        .unwrap_or_else(|| minimal_line(adapter.as_ref(), &payload).into_bytes());
     let mut stdout = std::io::stdout();
     let _ = stdout.write_all(&line);
     let _ = stdout.flush();
     ExitCode::SUCCESS
 }
 
-fn minimal_line(agent: &impl AgentAdapter, payload: &str) -> String {
+fn minimal_line(agent: &dyn AgentAdapter, payload: &str) -> String {
     let sample = agent
         .map_tap(payload)
         .ok()

@@ -1,4 +1,6 @@
-use orch_agent::{AgentAdapter, Argv, Capabilities, ClaudeCode, LaunchSpec, Preset, Presets};
+use orch_agent::{
+    AgentAdapter, Argv, Capabilities, ClaudeCode, DraftSpec, LaunchSpec, Preset, Presets,
+};
 use orch_core::{AgentState, ConversationId, Observation, PermissionMode, PhaseEvent, SessionId};
 use std::time::Instant;
 
@@ -74,7 +76,12 @@ fn guards_need_both_the_guards_capability_and_hooks() {
 fn an_agent_without_resume_restarts_in_a_fresh_conversation() {
     let restart = Bare.restart(&spec(Preset::inherit()), Some(&conversation()), None);
     assert_eq!(restart, Bare.launch(&spec(Preset::inherit())));
-    assert_eq!(Bare.draft(&conversation()), None);
+    let draft = DraftSpec {
+        conversation: conversation(),
+        worktree: "/repos/app".into(),
+        scratch: None,
+    };
+    assert_eq!(Bare.draft(&draft, &|_| None), Ok(None));
 }
 
 #[test]
@@ -112,5 +119,5 @@ fn an_agent_without_hooks_or_usage_maps_nothing() {
     assert_eq!(Bare.map_hook(r#"{"hook_event_name":"Stop"}"#), Ok(vec![]));
     assert_eq!(Bare.map_tap("{}"), Ok(vec![]));
     assert!(Bare.title_watch().is_none());
-    assert!(Bare.subagent_transcripts().is_none());
+    assert!(Bare.subagent_transcripts(&|_| None).is_none());
 }

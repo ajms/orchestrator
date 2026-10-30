@@ -1850,7 +1850,7 @@ fn landing_refusal(view: &SessionView) -> Option<String> {
             phase_label(view.phase)
         ));
     }
-    match view.agent {
+    match view.agent_state {
         Some(AgentStateView::Idle | AgentStateView::Exited | AgentStateView::Errored) => None,
         Some(AgentStateView::Working) => Some("Landing is blocked: the Agent is Working".into()),
         Some(AgentStateView::NeedsInput) => {

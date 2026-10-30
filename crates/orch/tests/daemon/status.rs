@@ -3,7 +3,7 @@ use orch_protocol::{AgentStateView as State, Request, SessionView};
 use crate::common::*;
 
 fn agent_is(state: State) -> impl Fn(&SessionView) -> bool {
-    move |view| view.agent == Some(state)
+    move |view| view.agent_state == Some(state)
 }
 
 #[tokio::test]
@@ -23,7 +23,7 @@ async fn the_agent_state_follows_the_agents_hooks_and_exit() {
         .await;
     client
         .until(&id, "Working in plan mode", |view| {
-            view.agent == Some(State::Working) && view.mode.as_deref() == Some("plan")
+            view.agent_state == Some(State::Working) && view.mode.as_deref() == Some("plan")
         })
         .await;
 
@@ -68,7 +68,7 @@ async fn reports_reach_the_agent_without_counting_as_answering_it() {
             view.conversation.as_deref() == Some("conv-2")
         })
         .await;
-    assert_eq!(reported.agent, Some(State::NeedsInput));
+    assert_eq!(reported.agent_state, Some(State::NeedsInput));
 }
 
 #[tokio::test]
@@ -116,7 +116,7 @@ async fn a_finished_turn_marks_the_session_unseen_only_while_nobody_watches_it()
     client.until(&id, "Working", agent_is(State::Working)).await;
     pane.hook(&hook("Stop", "")).await;
     let unseen = client.until(&id, "Unseen", |view| view.flags.unseen).await;
-    assert_eq!(unseen.agent, Some(State::Idle));
+    assert_eq!(unseen.agent_state, Some(State::Idle));
 
     client
         .request(Request::View {
@@ -141,11 +141,11 @@ async fn a_working_session_without_activity_is_flagged_stalled_until_it_acts_aga
     let stalled = client
         .until(&id, "Stalled", |view| view.flags.stalled)
         .await;
-    assert_eq!(stalled.agent, Some(State::Working));
+    assert_eq!(stalled.agent_state, Some(State::Working));
     pane.hook(&hook("Stop", "")).await;
     client
         .until(&id, "Idle and not stalled", |view| {
-            view.agent == Some(State::Idle) && !view.flags.stalled
+            view.agent_state == Some(State::Idle) && !view.flags.stalled
         })
         .await;
 }

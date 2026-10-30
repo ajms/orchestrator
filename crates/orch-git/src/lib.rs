@@ -23,6 +23,6 @@ pub use leftover::Leftover;
 pub use repo::Repo;
 pub use script::{Script, ScriptOutcome};
 pub use slug::slugify;
-pub use snapshot::ReviewSnapshot;
+pub use snapshot::{ReviewSnapshot, worktree_status};
 pub use subagent::subagent_worktrees_dir;
 pub use worktree::{DEFAULT_BRANCH_PREFIX, SessionName, SessionWorktree};

@@ -49,12 +49,18 @@ pub enum ToHolder {
     Shutdown,
     Hook {
         payload: String,
+        #[serde(default = "orch_agent::implied_agent")]
+        agent: String,
     },
     Guard {
         payload: String,
+        #[serde(default = "orch_agent::implied_agent")]
+        agent: String,
     },
     Tap {
         payload: String,
+        #[serde(default = "orch_agent::implied_agent")]
+        agent: String,
     },
     Broker {
         request: BrokerRequest,
@@ -148,7 +154,10 @@ pub struct Hello {
     pub port_block: Option<PortBlock>,
     pub holder_pid: u32,
     pub agent_pid: Option<u32>,
-    pub agent: AgentStatus,
+    #[serde(rename = "agent")]
+    pub agent_status: AgentStatus,
+    #[serde(rename = "agent_name", default = "orch_agent::implied_agent")]
+    pub agent: String,
     #[serde(default)]
     pub sandboxed: bool,
 }
@@ -177,9 +186,13 @@ pub enum HolderEvent {
     Hook {
         payload: String,
         guard: Option<GuardId>,
+        #[serde(default = "orch_agent::implied_agent")]
+        agent: String,
     },
     Tap {
         payload: String,
+        #[serde(default = "orch_agent::implied_agent")]
+        agent: String,
     },
     Broker {
         id: GuardId,

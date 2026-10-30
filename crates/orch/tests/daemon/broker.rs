@@ -28,7 +28,7 @@ async fn session(
     create.preset = Some(preset.into());
     let id = client.create(create).await;
     let view = client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     let pane = env.pane(&id, PANE).await;
     (id, view, pane)

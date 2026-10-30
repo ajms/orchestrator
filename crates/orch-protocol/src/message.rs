@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -387,6 +387,8 @@ pub struct RepoSettings {
     pub default_base: Option<String>,
     pub review_command: Option<String>,
     pub branch_prefix: String,
+    #[serde(default = "orch_agent::implied_agent")]
+    pub agent: String,
     pub trust: Option<TrustNeeded>,
 }
 

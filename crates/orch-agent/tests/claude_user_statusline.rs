@@ -39,7 +39,7 @@ impl Layout {
     }
 
     fn resolve(&self, extra: &[(&str, &str)]) -> Option<String> {
-        ClaudeCode::default().user_statusline_command(&self.path("worktree"), self.lookup(extra))
+        ClaudeCode::default().user_statusline_command(&self.path("worktree"), &self.lookup(extra))
     }
 }
 

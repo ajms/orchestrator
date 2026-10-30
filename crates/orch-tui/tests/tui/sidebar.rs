@@ -114,9 +114,49 @@ fn flags_are_marked_on_the_row() {
 }
 
 #[test]
+fn every_session_row_ends_with_its_agent() {
+    let mut pi = session("webshop", "on-pi");
+    pi.agent = "pi".into();
+    pi.flags.muted = true;
+    let mut tui = Harness::new();
+    tui.sessions(vec![session("webshop", "on-claude"), pi]);
+
+    let lines = tui.sidebar_lines();
+    let row = |slug: &str| lines.iter().position(|line| line.contains(slug)).unwrap();
+    let text = |at: usize| lines[at].trim_end_matches(['│', ' ']).to_string();
+    assert!(text(row("on-claude")).ends_with(" claude"), "{lines:?}");
+    assert!(text(row("on-pi")).ends_with(" pi"), "{lines:?}");
+    assert_eq!(row("on-pi"), row("on-claude") + 1, "{lines:?}");
+    assert!(!text(row("on-pi") + 1).contains("pi"), "{lines:?}");
+    assert!(text(row("on-pi") + 1).contains("muted"), "{lines:?}");
+}
+
+#[test]
+fn a_long_title_is_truncated_to_make_room_for_the_agent() {
+    let mut view = with_agent(
+        titled(
+            session("webshop", "long"),
+            "a title far longer than the slug column",
+        ),
+        AgentStateView::Working,
+    );
+    view.context_used_percent = Some(91.0);
+    let mut tui = Harness::new();
+    tui.sessions(vec![view]);
+
+    let row = tui.sidebar_line_with("a title");
+    assert!(row.contains('…'), "{row}");
+    assert!(row.contains("Working 91%"), "{row}");
+    assert!(
+        row.trim_end_matches(['│', ' ']).ends_with(" claude"),
+        "{row}"
+    );
+}
+
+#[test]
 fn a_pr_session_shows_checks_review_and_new_comments() {
     let mut view = in_phase(session("webshop", "in-review"), PhaseView::PrOpen);
-    view.agent = Some(AgentStateView::Idle);
+    view.agent_state = Some(AgentStateView::Idle);
     view.flags.pr_number = Some(57);
     view.flags.pr = Some(PrView {
         checks: PrChecksView::Failing,

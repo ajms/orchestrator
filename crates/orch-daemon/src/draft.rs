@@ -1,15 +1,18 @@
-use std::time::Duration;
+use std::path::PathBuf;
 
-use orch_agent::Argv;
+use orch_agent::{Argv, DraftRun, DraftSpec};
+use orch_config::xdg;
 use orch_core::SessionId;
 use orch_protocol::{LandingMode, Reply, RequestError};
+use orch_store::SessionRecord;
 
 use crate::agents::adapter_for;
-use crate::lifecycle::{PROMPT_FILE, refused, untrusted};
-use crate::state::Daemon;
+use crate::lifecycle::{PROMPT_FILE, refused, untrusted, with_git};
+use crate::state::{Daemon, session_worktree};
 use crate::subprocess;
 
-const DRAFT_TIMEOUT: Duration = Duration::from_secs(180);
+const DIFF_CAP: usize = 256 * 1024;
+const CUT_OFF: &str = "\n[the diff is cut off here]";
 
 fn instruction(mode: LandingMode, base: &str) -> String {
     match mode {
@@ -20,6 +23,29 @@ fn instruction(mode: LandingMode, base: &str) -> String {
             "Write a pull request title and description for all changes on this Branch compared with the Base branch {base}. Reply with the title only on the first line, a blank line, then the description in Markdown."
         ),
     }
+}
+
+async fn base_diff(record: &SessionRecord, repo: PathBuf) -> Result<String, RequestError> {
+    let worktree = session_worktree(record);
+    with_git(repo, move |git| {
+        let status = orch_git::worktree_status(&worktree.path)?;
+        let snapshot = git.review_snapshot(&worktree)?;
+        let diff = capped(git.diff(&snapshot.merge_base, &snapshot.tree)?);
+        Ok::<_, orch_git::Error>(format!(
+            "\n\n`git status --short`:\n{status}\n\nDiff against the Base branch {}:\n{diff}\n",
+            worktree.base
+        ))
+    })
+    .await?
+    .map_err(refused)
+}
+
+fn capped(mut diff: String) -> String {
+    if diff.len() > DIFF_CAP {
+        diff.truncate(diff.floor_char_boundary(DIFF_CAP));
+        diff.push_str(CUT_OFF);
+    }
+    diff
 }
 
 fn split_draft(text: &str) -> Reply {
@@ -42,24 +68,57 @@ impl Daemon {
             return Ok(self.default_draft(id, &record.slug).await);
         };
         let config = self.repo_config(&repo).await?;
-        let agent = config.agent().map_err(|_| untrusted(&repo, &config))?;
-        let adapter = adapter_for(agent).map_err(refused)?;
-        let Some(Argv { program, args }) = adapter.draft(&conversation) else {
+        let agent = config
+            .agent(&record.agent)
+            .map_err(|_| untrusted(&repo, &config))?;
+        let adapter = adapter_for(&agent).map_err(refused)?;
+        let mut spec = DraftSpec {
+            conversation,
+            worktree: record.worktree.clone(),
+            scratch: None,
+        };
+        let (planned, scratch) = match adapter.needs_draft_scratch() {
+            false => (adapter.draft(&spec, &xdg::process_env), None),
+            true => {
+                let scratch = tempfile::Builder::new()
+                    .prefix("orch-draft-")
+                    .tempdir()
+                    .map_err(refused)?;
+                spec.scratch = Some(scratch.path().into());
+                let planned =
+                    tokio::task::spawn_blocking(move || adapter.draft(&spec, &xdg::process_env))
+                        .await
+                        .map_err(refused)?;
+                (planned, Some(scratch))
+            }
+        };
+        let Some(DraftRun {
+            argv: Argv { program, args },
+            env,
+            pipe_base_diff,
+        }) = planned.map_err(refused)?
+        else {
             return Ok(self.default_draft(id, &record.slug).await);
         };
+        let mut input = instruction(mode, &record.base);
+        if pipe_base_diff {
+            input.push_str(&base_diff(&record, repo).await?);
+        }
         let mut command = crate::subprocess::command(program);
         command
             .args(&agent.args)
             .args(args)
+            .envs(env)
             .current_dir(&record.worktree);
         let drafted = subprocess::run(
             command,
-            Some(instruction(mode, &record.base).into()),
-            DRAFT_TIMEOUT,
+            Some(input.into()),
+            self.config.draft_timeout,
             "the Agent's draft",
         )
         .await
         .map_err(refused)?;
+        drop(scratch);
         Ok(split_draft(&drafted))
     }
 

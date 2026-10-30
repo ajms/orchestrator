@@ -6,6 +6,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+orch-agent.workspace = true
 orch-core.workspace = true
 orch-holder.workspace = true
 serde.workspace = true

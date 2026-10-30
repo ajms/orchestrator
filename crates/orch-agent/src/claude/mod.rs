@@ -1,11 +1,10 @@
 mod hooks;
-mod lines;
 mod settings;
 mod statusline;
 mod subagents;
 mod transcript;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use hooks::HookEvent;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
@@ -15,8 +14,8 @@ use transcript::TranscriptTitles;
 
 use crate::shell::quote;
 use crate::{
-    AgentAdapter, Argv, Capabilities, GuardAnswer, LaunchSpec, PayloadError, SandboxNeeds,
-    SubagentTranscripts, TitleWatch, WorktreeRequest,
+    AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, GuardAnswer, LaunchSpec, PayloadError,
+    SandboxNeeds, SubagentTranscripts, TitleWatch, WorktreeRequest,
 };
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
@@ -32,6 +31,8 @@ const CONFIG_CARVE_OUTS: [&str; 9] = [
     "plugins",
     "CLAUDE.md",
 ];
+
+pub const CLAUDE: &str = "claude";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeCode {
@@ -152,7 +153,10 @@ impl AgentAdapter for ClaudeCode {
         Some(Box::new(TranscriptTitles::default()))
     }
 
-    fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>> {
+    fn subagent_transcripts(
+        &self,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<Box<dyn SubagentTranscripts>> {
         Some(Box::new(ClaudeSubagentTranscripts::default()))
     }
 
@@ -186,6 +190,14 @@ impl AgentAdapter for ClaudeCode {
         hooks::worktree_request(payload)
     }
 
+    fn user_statusline_command(
+        &self,
+        cwd: &Path,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        settings::user_statusline_command(cwd, lookup)
+    }
+
     fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
         settings::config_dir(lookup)
             .map(|dir| vec![dir.join("projects"), dir.join("plans")])
@@ -214,16 +226,24 @@ impl AgentAdapter for ClaudeCode {
         }
     }
 
-    fn draft(&self, conversation: &ConversationId) -> Option<Argv> {
-        Some(Argv {
-            program: self.program.clone(),
-            args: vec![
-                "-p".into(),
-                "--resume".into(),
-                conversation.as_str().into(),
-                "--fork-session".into(),
-            ],
-        })
+    fn draft(
+        &self,
+        spec: &DraftSpec,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<DraftRun>, String> {
+        Ok(Some(DraftRun {
+            argv: Argv {
+                program: self.program.clone(),
+                args: vec![
+                    "-p".into(),
+                    "--resume".into(),
+                    spec.conversation.as_str().into(),
+                    "--fork-session".into(),
+                ],
+            },
+            env: Vec::new(),
+            pipe_base_diff: false,
+        }))
     }
 }
 

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use orch_agent::GuardHit;
+use orch_agent::{GuardHit, implied_agent};
 use orch_core::{AgentState, ConversationId, Flags, PermissionMode, Phase, PrStatus, SessionId};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
@@ -21,6 +21,7 @@ pub struct NewSession {
     pub phase: Phase,
     pub preset: String,
     pub existing_branch: bool,
+    pub agent: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub struct SessionRecord {
     pub title: Option<String>,
     pub branch: String,
     pub existing_branch: bool,
+    pub agent: String,
     pub base: String,
     pub pr_base: Option<String>,
     pub worktree: PathBuf,
@@ -63,7 +65,7 @@ const COLUMNS: &str = "id, repo_id, slug, branch, base, worktree, phase, preset,
     unseen, stalled, needs_rebase, recovered, worktree_missing, base_missing, muted,
     pr_number, pr_checks, pr_review, pr_new_comments, pr_state,
     port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title,
-    holder_seq, existing_branch, pr_base";
+    holder_seq, existing_branch, pr_base, agent";
 
 fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
     let pr = match row.get::<_, Option<i64>>("pr_number")? {
@@ -83,6 +85,9 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         title: row.get("title")?,
         branch: row.get("branch")?,
         existing_branch: row.get("existing_branch")?,
+        agent: row
+            .get::<_, Option<String>>("agent")?
+            .unwrap_or_else(implied_agent),
         base: row.get("base")?,
         pr_base: row.get("pr_base")?,
         worktree: PathBuf::from(row.get::<_, String>("worktree")?),
@@ -121,8 +126,8 @@ impl Store {
         self.conn.execute(
             "INSERT INTO sessions
                 (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at,
-                 existing_branch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
+                 existing_branch, agent)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11)",
             params![
                 new.id.as_str(),
                 new.repo.0,
@@ -134,6 +139,7 @@ impl Store {
                 new.preset,
                 now,
                 new.existing_branch,
+                new.agent,
             ],
         )?;
         self.existing_session(&new.id)

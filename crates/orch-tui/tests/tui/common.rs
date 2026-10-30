@@ -537,7 +537,8 @@ pub fn session(repo: &str, slug: &str) -> SessionView {
         branch: format!("orch/{slug}"),
         base: "main".into(),
         phase: PhaseView::Active,
-        agent: Some(AgentStateView::Idle),
+        agent_state: Some(AgentStateView::Idle),
+        agent: "claude".into(),
         flags: FlagsView::default(),
         preset: "inherit".into(),
         mode: None,
@@ -572,13 +573,13 @@ pub fn titled(mut view: SessionView, title: &str) -> SessionView {
 }
 
 pub fn with_agent(mut view: SessionView, state: AgentStateView) -> SessionView {
-    view.agent = Some(state);
+    view.agent_state = Some(state);
     view
 }
 
 pub fn in_phase(mut view: SessionView, phase: PhaseView) -> SessionView {
     view.phase = phase;
-    view.agent = None;
+    view.agent_state = None;
     view
 }
 

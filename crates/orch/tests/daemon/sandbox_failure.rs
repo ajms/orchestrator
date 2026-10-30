@@ -21,7 +21,7 @@ fn sandboxed(env: &Env, prompt: &str) -> CreateSession {
 async fn running_sandboxed(env: &Env, client: &mut TestClient) -> SessionId {
     let id = client.create(sandboxed(env, "Boxed")).await;
     client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     id
 }
@@ -68,7 +68,9 @@ async fn resuming_into_a_sandbox_that_cannot_run_is_refused() {
     let mut pane = env.pane(&id, PANE).await;
     pane.type_line("exit 0").await;
     client
-        .until(&id, "Exited", |view| view.agent == Some(State::Exited))
+        .until(&id, "Exited", |view| {
+            view.agent_state == Some(State::Exited)
+        })
         .await;
 
     env.bwrap_switch("outer-fails", true);
@@ -87,7 +89,9 @@ async fn a_relaunch_into_a_broken_sandbox_errors_and_an_opted_out_preset_recover
 
     set_preset(&mut client, &id, "plan").await;
     let errored = client
-        .until(&id, "Errored", |view| view.agent == Some(State::Errored))
+        .until(&id, "Errored", |view| {
+            view.agent_state == Some(State::Errored)
+        })
         .await;
     let error = errored.error.unwrap_or_default();
     assert!(error.starts_with("The Sandbox can't run"), "{error}");
@@ -95,7 +99,8 @@ async fn a_relaunch_into_a_broken_sandbox_errors_and_an_opted_out_preset_recover
     set_preset(&mut client, &id, "open").await;
     let relaunched = client
         .until(&id, "running again", |view| {
-            view.agent.is_some_and(|agent| agent != State::Errored)
+            view.agent_state
+                .is_some_and(|agent| agent != State::Errored)
         })
         .await;
     assert_eq!(relaunched.error, None);
@@ -128,7 +133,9 @@ async fn a_sandbox_that_fails_to_start_errors_the_agent_with_what_bwrap_said() {
     let id = client.create(sandboxed(&env, "Boxed")).await;
 
     let errored = client
-        .until(&id, "Errored", |view| view.agent == Some(State::Errored))
+        .until(&id, "Errored", |view| {
+            view.agent_state == Some(State::Errored)
+        })
         .await;
     assert_eq!(
         errored.error.as_deref(),

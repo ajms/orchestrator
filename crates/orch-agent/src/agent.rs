@@ -54,6 +54,7 @@ pub struct LaunchSpec {
     pub preset: Preset,
     pub prompt: Option<String>,
     pub worktree: Option<PathBuf>,
+    pub agent_profile: Option<PathBuf>,
 }
 
 impl LaunchSpec {
@@ -64,6 +65,7 @@ impl LaunchSpec {
             preset,
             prompt: None,
             worktree: None,
+            agent_profile: None,
         }
     }
 
@@ -80,6 +82,27 @@ impl LaunchSpec {
             ..self
         }
     }
+
+    pub fn with_agent_profile(self, profile: impl Into<PathBuf>) -> Self {
+        Self {
+            agent_profile: Some(profile.into()),
+            ..self
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftSpec {
+    pub conversation: ConversationId,
+    pub worktree: PathBuf,
+    pub scratch: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftRun {
+    pub argv: Argv,
+    pub env: Vec<(String, String)>,
+    pub pipe_base_diff: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +141,10 @@ pub trait AgentAdapter {
 
     fn launch(&self, spec: &LaunchSpec) -> Argv;
 
+    fn launch_conversation(&self, _spec: &LaunchSpec) -> Option<ConversationId> {
+        None
+    }
+
     fn resume(
         &self,
         _spec: &LaunchSpec,
@@ -138,8 +165,16 @@ pub trait AgentAdapter {
             .unwrap_or_else(|| self.launch(spec))
     }
 
-    fn draft(&self, _conversation: &ConversationId) -> Option<Argv> {
-        None
+    fn needs_draft_scratch(&self) -> bool {
+        false
+    }
+
+    fn draft(
+        &self,
+        _spec: &DraftSpec,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<DraftRun>, String> {
+        Ok(None)
     }
 
     fn map_hook(&self, _payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
@@ -154,7 +189,10 @@ pub trait AgentAdapter {
         None
     }
 
-    fn subagent_transcripts(&self) -> Option<Box<dyn SubagentTranscripts>> {
+    fn subagent_transcripts(
+        &self,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<Box<dyn SubagentTranscripts>> {
         None
     }
 
@@ -170,7 +208,30 @@ pub trait AgentAdapter {
         None
     }
 
+    fn user_statusline_command(
+        &self,
+        _cwd: &Path,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
+        None
+    }
+
     fn agent_dirs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn agent_profile(
+        &self,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<PathBuf>, String> {
+        Ok(None)
+    }
+
+    fn prepare(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn env(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
         Vec::new()
     }
 

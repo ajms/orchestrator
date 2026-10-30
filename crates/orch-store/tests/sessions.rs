@@ -123,13 +123,50 @@ fn a_session_on_an_existing_branch_is_remembered_across_reopening() {
 }
 
 #[test]
+fn a_session_keeps_the_agent_it_was_created_with() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let pi = fx
+        .store
+        .create_session(NewSession {
+            agent: "pi".into(),
+            ..new_session(&repo, "on-pi")
+        })
+        .unwrap();
+    let claude = fx.session(&repo, "on-claude");
+
+    fx.reopen();
+
+    let loaded = |id| fx.store.session(id).unwrap().unwrap().agent;
+    assert_eq!(loaded(&pi.id), "pi");
+    assert_eq!(loaded(&claude.id), "claude");
+}
+
+#[test]
+fn a_session_stored_before_agents_were_recorded_resolves_to_claude() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let session = fx.session(&repo, "older");
+    let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
+    conn.execute_batch("ALTER TABLE sessions DROP COLUMN agent; PRAGMA user_version = 11;")
+        .unwrap();
+
+    fx.reopen();
+
+    assert_eq!(
+        fx.store.session(&session.id).unwrap().unwrap().agent,
+        "claude"
+    );
+}
+
+#[test]
 fn a_session_stored_before_existing_branches_loads_as_on_a_branch_orch_created() {
     let mut fx = Fixture::new();
     let repo = fx.register("proj");
     let session = fx.session(&repo, "older");
     let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
     conn.execute_batch(
-        "ALTER TABLE sessions DROP COLUMN pr_base; ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;",
+        "ALTER TABLE sessions DROP COLUMN agent; ALTER TABLE sessions DROP COLUMN pr_base; ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;",
     )
     .unwrap();
 

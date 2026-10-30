@@ -1,0 +1,5 @@
+{
+  "event": "agent_settled",
+  "aborted": false,
+  "stopReason": "stop"
+}

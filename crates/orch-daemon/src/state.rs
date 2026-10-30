@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use orch_agent::{GuardAnswer, GuardHit, GuardKind, SubagentTranscripts, mode_name};
-use orch_core::{AgentState, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus};
+use orch_core::{
+    AgentState, ConversationId, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus,
+};
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
 use orch_notify::{AttentionEvent, ClientView};
@@ -12,7 +14,7 @@ use orch_protocol::{
     DisplayVars, FlagsView, FromDaemon, GuardKindView, GuardPrompt, ReconcileReport, SessionView,
     SubagentView,
 };
-use orch_store::SessionRecord;
+use orch_store::{SessionRecord, Store};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Notify, oneshot, watch};
 
@@ -85,7 +87,7 @@ pub(crate) struct Live {
     pub(crate) record: SessionRecord,
     pub(crate) repo: PathBuf,
     pub(crate) status: SessionStatus,
-    pub(crate) adapter: Adapter,
+    pub(crate) adapter: Option<Adapter>,
     pub(crate) prompts: Vec<PendingGuard>,
     pub(crate) setup_output: Option<String>,
     pub(crate) last_error: Option<String>,
@@ -187,14 +189,21 @@ impl PaneSizes {
 }
 
 impl Live {
-    pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Adapter) -> Self {
-        let capabilities = adapter.capabilities();
+    pub(crate) fn adapter_for_payload(&self, agent: &str) -> Option<Adapter> {
+        self.adapter.clone().filter(|_| agent == self.record.agent)
+    }
+
+    pub(crate) fn new(record: SessionRecord, repo: PathBuf, adapter: Option<Adapter>) -> Self {
+        let capabilities = adapter
+            .as_ref()
+            .map(|adapter| adapter.capabilities())
+            .unwrap_or_default();
         let mut status = capabilities.session_status();
         status.restore(record.phase, record.flags.clone());
-        let transcripts = capabilities
-            .transcripts
-            .then(|| adapter.subagent_transcripts())
-            .flatten();
+        let transcripts = adapter
+            .as_ref()
+            .filter(|_| capabilities.transcripts)
+            .and_then(|adapter| adapter.subagent_transcripts(&orch_config::xdg::process_env));
         Self {
             record,
             repo,
@@ -324,6 +333,16 @@ impl Live {
         self.deliver_prompt();
     }
 
+    pub(crate) fn note_conversations(&mut self, conversations: &[ConversationId]) -> bool {
+        let first = self.record.conversations.is_empty() && !conversations.is_empty();
+        for conversation in conversations {
+            if self.record.latest_conversation() != Some(conversation) {
+                self.record.conversations.push(conversation.clone());
+            }
+        }
+        first
+    }
+
     pub(crate) fn deliver_prompt(&mut self) -> bool {
         let ready = self.status.agent_state() == Some(AgentState::Idle)
             && self.has_holder()
@@ -366,7 +385,8 @@ impl Live {
             base: record.base.clone(),
             worktree: record.worktree.clone(),
             phase: self.status.phase().into(),
-            agent: self.status.agent_state().map(Into::into),
+            agent_state: self.status.agent_state().map(Into::into),
+            agent: record.agent.clone(),
             flags: FlagsView::new(self.status.flags(), self.repo_missing),
             preset: record.preset.clone(),
             mode: record.last_mode.map(|mode| mode_name(mode).into()),
@@ -841,5 +861,17 @@ impl State {
         let id = live.record.id.clone();
         self.sessions.insert(id.clone(), live);
         self.changed(&id);
+    }
+}
+
+pub(crate) fn store_conversations(
+    store: &mut Store,
+    session: &SessionId,
+    conversations: Vec<ConversationId>,
+) {
+    for conversation in conversations {
+        if let Err(err) = store.record_conversation(session, conversation) {
+            eprintln!("orch daemon: recording a Conversation: {err}");
+        }
     }
 }
