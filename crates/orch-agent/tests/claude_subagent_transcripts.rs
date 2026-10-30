@@ -286,3 +286,18 @@ fn a_background_subagents_hand_back_reads_as_its_text() {
         [text("Found it in login.rs.")]
     );
 }
+
+#[test]
+fn a_transcript_that_is_a_link_or_a_hardlink_is_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let secret = dir.path().join("secret.jsonl");
+    append(&secret, &[said("secret")]);
+    let linked = dir.path().join("linked.jsonl");
+    std::os::unix::fs::symlink(&secret, &linked).unwrap();
+    let hardlinked = dir.path().join("hardlinked.jsonl");
+    std::fs::hard_link(&secret, &hardlinked).unwrap();
+
+    for path in [linked, hardlinked] {
+        assert_eq!(reader().read(&path).entries, [], "{}", path.display());
+    }
+}

@@ -5,8 +5,8 @@ use orch_core::{SubagentId, TranscriptEntry};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::lines::FollowedLines;
 use crate::key_argument::key_argument;
+use crate::lines::FollowedLines;
 use crate::{SubagentTranscripts, TranscriptRead, TranscriptReader};
 
 const HAND_BACK: &str = "SubagentHandback";
