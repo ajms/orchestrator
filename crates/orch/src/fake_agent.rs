@@ -44,13 +44,28 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
 fn draft(agent_args: &[String]) -> ExitCode {
     let mut instruction = String::new();
     let _ = std::io::stdin().read_to_string(&mut instruction);
-    let conversation = agent_args
-        .iter()
-        .skip_while(|arg| *arg != "--resume")
-        .nth(1)
-        .map_or("nothing", String::as_str);
+    let value = |flag: &str| {
+        agent_args
+            .iter()
+            .skip_while(|arg| *arg != flag)
+            .nth(1)
+            .map(String::as_str)
+    };
+    let forked = value("--fork").and_then(|fork| std::fs::read_to_string(fork).ok());
+    let conversation = value("--resume")
+        .or(forked.as_deref().and_then(|fork| fork.lines().next()))
+        .unwrap_or("nothing");
+    if let Some(dir) = value("--session-dir") {
+        let _ = std::fs::create_dir_all(dir);
+        let _ = std::fs::write(Path::new(dir).join("fork.jsonl"), conversation);
+    }
+    if instruction.contains("fail the draft") {
+        eprintln!("fake-agent cannot draft: {}", agent_args.join(" "));
+        return ExitCode::FAILURE;
+    }
+    let profile = std::env::var("PI_CODING_AGENT_DIR").unwrap_or_default();
     print!(
-        "Drafted from {conversation}\n\nargs: {}\n{}\n",
+        "Drafted from {conversation}\n\nargs: {}\nPI_CODING_AGENT_DIR={profile}\n{}\n",
         agent_args.join(" "),
         instruction.trim()
     );

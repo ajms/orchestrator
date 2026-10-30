@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use orch_core::TranscriptEntry;
 use orch_protocol::{
     AgentStateView as State, CreateSession, PhaseView, Reply, Request, UsageTotalsView,
@@ -591,4 +593,120 @@ async fn a_pi_subagent_call_is_a_subagent_row_with_a_live_transcript_that_outliv
         .await;
     assert!(client.transcripts[0].replace);
     assert_eq!(client.transcripts[0].entries.len(), 1);
+}
+
+fn live_conversation(env: &Env, worktree: &std::path::Path, id: &orch_core::SessionId) -> PathBuf {
+    let worktree = worktree.to_string_lossy();
+    let dir = format!(
+        "--{}--",
+        worktree.trim_start_matches('/').replace(['/', ':'], "-")
+    );
+    let file = env
+        .path("state/orchestrator/agent-profiles/pi/sessions")
+        .join(dir)
+        .join(format!("2026-10-30T09-00-00-000Z_{}.jsonl", id.as_str()));
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "the live conversation\n").unwrap();
+    file
+}
+
+fn flag_value(text: &str, flag: &str) -> PathBuf {
+    let at = text
+        .find(flag)
+        .unwrap_or_else(|| panic!("{flag} in {text}"));
+    text[at + flag.len()..]
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .into()
+}
+
+async fn draft(client: &mut TestClient, id: &orch_core::SessionId) -> Result<Reply, String> {
+    client
+        .request(Request::Draft {
+            session: id.clone(),
+            mode: orch_protocol::LandingMode::Squash,
+        })
+        .await
+        .map_err(|err| match err {
+            orch_protocol::RequestError::Refused { message } => message,
+            other => format!("{other:?}"),
+        })
+}
+
+#[tokio::test]
+async fn a_pi_draft_forks_the_conversation_and_reads_the_base_diff_from_stdin() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _pane) = started_pi_session(&env, &mut client).await;
+    let worktree = client.sessions[&id].worktree.clone();
+    let live = live_conversation(&env, &worktree, &id);
+    commit(&worktree, "committed.txt", "on the branch\n");
+    std::fs::write(worktree.join("untracked.txt"), "not yet added\n").unwrap();
+
+    let Ok(Reply::Drafted { title, body }) = draft(&mut client, &id).await else {
+        panic!("pi drafts");
+    };
+
+    assert_eq!(title, "Drafted from the live conversation");
+    assert!(
+        body.contains("-p -ne -ns -np --tools read,grep,find,ls --fork "),
+        "{body}"
+    );
+    let profile = env.path("state/orchestrator/agent-profiles/pi");
+    assert!(
+        body.contains(&format!("PI_CODING_AGENT_DIR={}", profile.display())),
+        "{body}"
+    );
+    assert!(body.contains("commit message"), "{body}");
+    assert!(body.contains("?? untracked.txt"), "{body}");
+    assert!(body.contains("+on the branch"), "{body}");
+    assert!(body.contains("+not yet added"), "{body}");
+    let fork = flag_value(&body, "--fork ");
+    assert_ne!(fork, live);
+    assert!(!fork.exists());
+    let sessions = flag_value(&body, "--session-dir ");
+    assert!(sessions.ends_with("sessions"), "{body}");
+    assert!(!sessions.parent().unwrap().exists());
+    assert_eq!(
+        std::fs::read_to_string(&live).unwrap(),
+        "the live conversation\n"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_pi_draft_still_leaves_no_fork_behind() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _pane) = started_pi_session(&env, &mut client).await;
+    let worktree = client.sessions[&id].worktree.clone();
+    live_conversation(&env, &worktree, &id);
+    std::fs::write(worktree.join("note.txt"), "fail the draft\n").unwrap();
+
+    let failed = draft(&mut client, &id).await.unwrap_err();
+
+    assert!(failed.contains("fake-agent cannot draft"), "{failed}");
+    let sessions = flag_value(&failed, "--session-dir ");
+    assert!(sessions.ends_with("sessions"), "{failed}");
+    assert!(!sessions.parent().unwrap().exists());
+}
+
+#[tokio::test]
+async fn without_its_conversation_file_a_pi_session_gets_the_default_draft() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _pane) = started_pi_session(&env, &mut client).await;
+
+    let drafted = draft(&mut client, &id).await;
+
+    assert_eq!(
+        drafted,
+        Ok(Reply::Drafted {
+            title: "Fix it".into(),
+            body: String::new(),
+        })
+    );
 }
