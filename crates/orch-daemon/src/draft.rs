@@ -11,6 +11,9 @@ use crate::lifecycle::{PROMPT_FILE, refused, untrusted, with_git};
 use crate::state::{Daemon, session_worktree};
 use crate::subprocess;
 
+const DIFF_CAP: usize = 256 * 1024;
+const CUT_OFF: &str = "\n[the diff is cut off here]";
+
 fn instruction(mode: LandingMode, base: &str) -> String {
     match mode {
         LandingMode::Squash => format!(
@@ -27,7 +30,7 @@ async fn base_diff(record: &SessionRecord, repo: PathBuf) -> Result<String, Requ
     with_git(repo, move |git| {
         let status = git.status(&worktree)?;
         let snapshot = git.review_snapshot(&worktree)?;
-        let diff = git.diff(&snapshot.merge_base, &snapshot.tree)?;
+        let diff = capped(git.diff(&snapshot.merge_base, &snapshot.tree)?);
         Ok::<_, orch_git::Error>(format!(
             "\n\n`git status --short`:\n{status}\n\nDiff against the Base branch {}:\n{diff}\n",
             worktree.base
@@ -35,6 +38,14 @@ async fn base_diff(record: &SessionRecord, repo: PathBuf) -> Result<String, Requ
     })
     .await?
     .map_err(refused)
+}
+
+fn capped(mut diff: String) -> String {
+    if diff.len() > DIFF_CAP {
+        diff.truncate(diff.floor_char_boundary(DIFF_CAP));
+        diff.push_str(CUT_OFF);
+    }
+    diff
 }
 
 fn split_draft(text: &str) -> Reply {

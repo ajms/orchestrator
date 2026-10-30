@@ -42,6 +42,10 @@ pub fn run(script: Option<&Path>, agent_args: &[String]) -> ExitCode {
 }
 
 fn draft(agent_args: &[String]) -> ExitCode {
+    if Path::new("hang-draft").exists() {
+        let _ = std::fs::write("hang-draft", agent_args.join(" "));
+        std::thread::sleep(Duration::from_secs(3600));
+    }
     let mut instruction = String::new();
     let _ = std::io::stdin().read_to_string(&mut instruction);
     let value = |flag: &str| {
@@ -63,9 +67,11 @@ fn draft(agent_args: &[String]) -> ExitCode {
         eprintln!("fake-agent cannot draft: {}", agent_args.join(" "));
         return ExitCode::FAILURE;
     }
-    let profile = std::env::var("PI_CODING_AGENT_DIR").unwrap_or_default();
+    let profile = std::env::var("PI_CODING_AGENT_DIR")
+        .map(|profile| format!("PI_CODING_AGENT_DIR={profile}\n"))
+        .unwrap_or_default();
     print!(
-        "Drafted from {conversation}\n\nargs: {}\nPI_CODING_AGENT_DIR={profile}\n{}\n",
+        "Drafted from {conversation}\n\nargs: {}\n{profile}{}\n",
         agent_args.join(" "),
         instruction.trim()
     );

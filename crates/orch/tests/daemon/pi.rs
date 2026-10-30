@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use orch_core::TranscriptEntry;
 use orch_protocol::{
@@ -709,4 +710,59 @@ async fn without_its_conversation_file_a_pi_session_gets_the_default_draft() {
             body: String::new(),
         })
     );
+}
+
+fn big_change(worktree: &std::path::Path) {
+    std::fs::write(
+        worktree.join("big.txt"),
+        "a changed line\n".repeat(64 * 1024),
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_pi_draft_reads_at_most_a_capped_base_diff() {
+    let env = pi_env();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _pane) = started_pi_session(&env, &mut client).await;
+    let worktree = client.sessions[&id].worktree.clone();
+    live_conversation(&env, &worktree, &id);
+    big_change(&worktree);
+
+    let Ok(Reply::Drafted { body, .. }) = draft(&mut client, &id).await else {
+        panic!("pi drafts");
+    };
+
+    assert!(
+        body.contains("[the diff is cut off here]"),
+        "{}",
+        body.len()
+    );
+    assert!(body.len() < 300 * 1024, "{}", body.len());
+}
+
+#[tokio::test]
+async fn a_pi_draft_that_never_reads_its_input_times_out_and_leaves_no_fork_behind() {
+    let env = pi_env();
+    let _daemon = env
+        .start_daemon_args(Duration::from_secs(600), &["--draft-timeout-ms", "1500"])
+        .await;
+    let mut client = env.client().await;
+    let (id, _pane) = started_pi_session(&env, &mut client).await;
+    let worktree = client.sessions[&id].worktree.clone();
+    live_conversation(&env, &worktree, &id);
+    big_change(&worktree);
+    std::fs::write(worktree.join("hang-draft"), "").unwrap();
+
+    let failed = tokio::time::timeout(Duration::from_secs(20), draft(&mut client, &id))
+        .await
+        .expect("the Draft times out")
+        .unwrap_err();
+
+    assert!(failed.contains("took longer"), "{failed}");
+    let args = std::fs::read_to_string(worktree.join("hang-draft")).unwrap();
+    let sessions = flag_value(&args, "--session-dir ");
+    assert!(sessions.ends_with("sessions"), "{args}");
+    assert!(!sessions.parent().unwrap().exists());
 }
