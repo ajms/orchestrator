@@ -209,7 +209,7 @@ fn the_childs_messages_map_to_entries_and_thinking_is_dropped() {
 }
 
 #[test]
-fn a_tool_call_names_claudes_key_argument_before_pis_path() {
+fn a_tool_call_names_its_key_argument_as_claudes_do() {
     let mut profile = Profile::new();
     let path = profile.started();
     let tool = |name: &str, arguments: Value| {

@@ -158,6 +158,7 @@ fn a_tool_call_names_its_key_argument() {
                 "WebFetch",
                 json!({"url": "https://example.com", "prompt": "summarise"}),
             ),
+            call("LS", json!({"path": "src", "ignore": ["target"]})),
             call("TodoWrite", json!({"todos": []})),
         ],
     );
@@ -175,6 +176,7 @@ fn a_tool_call_names_its_key_argument() {
         [
             Some("src/login.rs".into()),
             Some("https://example.com".into()),
+            Some("src".into()),
             None
         ]
     );

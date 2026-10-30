@@ -179,8 +179,7 @@ fn message_entries(line: &[u8]) -> Vec<TranscriptEntry> {
                     arguments,
                 } => Some(TranscriptEntry::ToolCall {
                     id,
-                    argument: key_argument(&arguments)
-                        .or_else(|| arguments.get("path")?.as_str().map(String::from)),
+                    argument: key_argument(&arguments),
                     tool: name,
                 }),
                 Block::Other => None,

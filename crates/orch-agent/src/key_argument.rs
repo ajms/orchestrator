@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-const KEY_ARGUMENTS: [&str; 9] = [
+const KEY_ARGUMENTS: [&str; 10] = [
     "command",
     "file_path",
     "notebook_path",
@@ -10,6 +10,7 @@ const KEY_ARGUMENTS: [&str; 9] = [
     "skill",
     "description",
     "prompt",
+    "path",
 ];
 
 pub(crate) fn key_argument(input: &Value) -> Option<String> {
