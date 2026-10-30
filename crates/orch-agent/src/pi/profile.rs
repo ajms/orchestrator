@@ -15,22 +15,23 @@ const RETIRED: &str = ".orch-old";
 
 static BUILDING: Mutex<()> = Mutex::new(());
 
-pub(super) fn home(lookup: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    lookup("HOME")
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
+pub(super) struct Dirs {
+    pub(super) home: PathBuf,
+    pub(super) user: PathBuf,
+    pub(super) profile: PathBuf,
 }
 
-pub(super) fn user_dir(lookup: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    home(lookup).map(|home| home.join(".pi/agent"))
-}
-
-pub(super) fn profile_dir(lookup: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let state = lookup("XDG_STATE_HOME")
-        .filter(|state| !state.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| home(lookup).map(|home| home.join(".local/state")))?;
-    Some(state.join("orchestrator/agent-profiles/pi"))
+impl Dirs {
+    pub(super) fn resolve(lookup: &dyn Fn(&str) -> Option<String>) -> Option<Self> {
+        let set = |key: &str| lookup(key).filter(|value| !value.is_empty());
+        let home = PathBuf::from(set("HOME")?);
+        let state = set("XDG_STATE_HOME").map_or_else(|| home.join(".local/state"), PathBuf::from);
+        Some(Self {
+            user: home.join(".pi/agent"),
+            profile: state.join("orchestrator/agent-profiles/pi"),
+            home,
+        })
+    }
 }
 
 pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
@@ -72,7 +73,7 @@ fn settings(user: &Path) -> io::Result<Map<String, Value>> {
         Ok(text) => serde_json::from_str::<Map<String, Value>>(&text).map_err(|err| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("{}: {err}", path.display()),
+                format!("{}: {err}", path_text(&path)),
             )
         })?,
         Err(err) if err.kind() == io::ErrorKind::NotFound => Map::new(),
@@ -90,13 +91,13 @@ fn settings(user: &Path) -> io::Result<Map<String, Value>> {
                 Some(text) => Value::from(resolve(user, text)),
                 None => entry,
             });
-        let mut entries: Vec<Value> = std::iter::once(text(&user.join(kind)).into())
+        let mut entries: Vec<Value> = std::iter::once(path_text(&user.join(kind)).into())
             .chain(own)
             .collect();
         if kind == "extensions" {
             entries.extend(LEFT_OUT.map(|name| {
                 let entry = user.join(kind).join(name).join("index.ts");
-                Value::from(format!("-{}", text(&entry)))
+                Value::from(format!("-{}", path_text(&entry)))
             }));
         }
         settings.insert(kind.into(), entries.into());
@@ -112,7 +113,7 @@ fn resolve(user: &Path, entry: &str) -> String {
     if path.starts_with(['/', '~', '!']) || path.contains(':') {
         return entry.into();
     }
-    format!("{sign}{}", text(&user.join(path)))
+    format!("{sign}{}", path_text(&user.join(path)))
 }
 
 fn write_file(profile: &Path, name: &str, content: &[u8]) -> io::Result<()> {
@@ -167,6 +168,6 @@ fn remove(path: &Path) -> io::Result<()> {
     }
 }
 
-fn text(path: &Path) -> String {
+pub(super) fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }

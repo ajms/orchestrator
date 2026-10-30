@@ -1,9 +1,7 @@
 mod profile;
 
-use std::path::PathBuf;
-
 use orch_core::{ConversationId, PermissionMode};
-use profile::{CREDENTIALS, RESOURCES, home, profile_dir, user_dir};
+use profile::{CREDENTIALS, Dirs, RESOURCES, path_text};
 
 use crate::{AgentAdapter, Argv, Capabilities, LaunchSpec, SandboxNeeds};
 
@@ -38,7 +36,7 @@ impl Default for Pi {
 }
 
 impl Pi {
-    fn open(&self, conversation: &str) -> Argv {
+    fn argv_for(&self, conversation: &str) -> Argv {
         Argv {
             program: self.program.clone(),
             args: ["-na", "--session-id", conversation]
@@ -57,7 +55,7 @@ impl AgentAdapter for Pi {
     }
 
     fn launch(&self, spec: &LaunchSpec) -> Argv {
-        let mut argv = self.open(spec.session.as_str());
+        let mut argv = self.argv_for(spec.session.as_str());
         if let Some(prompt) = &spec.prompt {
             argv.args.extend(["--".into(), prompt.clone()]);
         }
@@ -74,11 +72,11 @@ impl AgentAdapter for Pi {
         conversation: &ConversationId,
         _mode: Option<PermissionMode>,
     ) -> Option<Argv> {
-        Some(self.open(conversation.as_str()))
+        Some(self.argv_for(conversation.as_str()))
     }
 
     fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
-        let (Some(user), Some(profile)) = (user_dir(lookup), profile_dir(lookup)) else {
+        let Some(Dirs { user, profile, .. }) = Dirs::resolve(lookup) else {
             return Err("pi's Agent profile needs HOME to be set".into());
         };
         profile::build(&user, &profile)
@@ -86,20 +84,22 @@ impl AgentAdapter for Pi {
     }
 
     fn env(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
-        let Some(profile) = profile_dir(lookup) else {
+        let Some(Dirs { profile, .. }) = Dirs::resolve(lookup) else {
             return Vec::new();
         };
-        let text = |path: PathBuf| path.to_string_lossy().into_owned();
         vec![
-            ("PI_CODING_AGENT_DIR".into(), text(profile.clone())),
+            ("PI_CODING_AGENT_DIR".into(), path_text(&profile)),
             ("PI_OFFLINE".into(), "1".into()),
-            ("PI_INDEX_ROOT".into(), text(profile.join("index"))),
+            ("PI_INDEX_ROOT".into(), path_text(&profile.join("index"))),
         ]
     }
 
     fn sandbox_needs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> SandboxNeeds {
-        let (Some(home), Some(user), Some(profile)) =
-            (home(lookup), user_dir(lookup), profile_dir(lookup))
+        let Some(Dirs {
+            home,
+            user,
+            profile,
+        }) = Dirs::resolve(lookup)
         else {
             return SandboxNeeds::default();
         };
