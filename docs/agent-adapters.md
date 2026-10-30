@@ -1,6 +1,6 @@
 # Agent adapters
 
-An **Agent adapter** teaches the Orchestrator to launch, resume and observe one kind of Agent. Adapters are compiled in: the trait lives in `crates/orch-agent/src/agent.rs`, and Claude Code (`crates/orch-agent/src/claude/`) is the only implementation today.
+An **Agent adapter** teaches the Orchestrator to launch, resume and observe one kind of Agent. Adapters are compiled in: the trait lives in `crates/orch-agent/src/agent.rs`, and there are two implementations: Claude Code (`crates/orch-agent/src/claude/`) and pi (`crates/orch-agent/src/pi/`).
 
 The Agent's own TUI always runs in the Holder's PTY (ADR 0001). The adapter never renders anything. It only builds command lines and translates the Agent's side-channel output (hooks, statusline, and files the Agent writes such as its transcript) into the normalized event vocabulary. The Daemon's status machine depends on nothing else.
 
@@ -10,6 +10,7 @@ The Agent's own TUI always runs in the Holder's PTY (ADR 0001). The adapter neve
 pub trait AgentAdapter {
     fn capabilities(&self) -> Capabilities;
     fn launch(&self, spec: &LaunchSpec) -> Argv;
+    fn launch_conversation(&self, spec: &LaunchSpec) -> Option<ConversationId>;
     fn resume(&self, spec: &LaunchSpec, conversation: &ConversationId, mode: Option<PermissionMode>) -> Option<Argv>;
     fn restart(&self, spec: &LaunchSpec, conversation: Option<&ConversationId>, mode: Option<PermissionMode>) -> Argv;
     fn draft(&self, conversation: &ConversationId) -> Option<Argv>;
@@ -22,6 +23,8 @@ pub trait AgentAdapter {
     fn worktree_request(&self, payload: &str) -> Option<WorktreeRequest>;
     fn user_statusline_command(&self, cwd: &Path, lookup: &dyn Fn(&str) -> Option<String>) -> Option<String>;
     fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf>;
+    fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String>;
+    fn env(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)>;
     fn sandbox_needs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> SandboxNeeds;
 }
 ```
@@ -31,6 +34,7 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | Method | Supplies |
 |---|---|
 | `launch` | The argv that starts a fresh Agent in the Worktree. `LaunchSpec` carries the Session id, the absolute `orch` binary (for hook and tap commands), the effective Preset, an optional initial prompt and the Session's Worktree. Claude gets `--session-id`, `--settings` JSON (hooks → `orch hook --session <id>`, `WorktreeCreate`/`WorktreeRemove` → `orch worktree-hook --worktree <worktree>`, `statusLine` → `orch tap --session <id>`, the Preset's allow/deny), and `--permission-mode` unless the Preset is `inherit`. |
+| `launch_conversation` | The Conversation a fresh launch opens, when the Agent lets orch name it. The Daemon records it as soon as the Holder runs, so an Agent without hooks still resumes the same Conversation. Claude names none, because its SessionStart hook reports it. |
 | `resume` | The argv that continues the latest Conversation in the last observed mode. `None` means the Agent can't resume, so `restart` falls back to `launch`. |
 | `draft` | A side-channel one-shot that drafts a commit message or PR title/body without adding turns to the live Conversation. Claude uses `-p --resume <conv> --fork-session`. |
 | `map_hook` | Parses one hook payload, which `orch hook` forwards through the Holder, into normalized events. |
@@ -41,6 +45,8 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | `worktree_request` | Recognises the hook payloads in which the Agent asks for a Subagent worktree to be created (`Create { name }`) or removed (`Remove { path }`). `orch worktree-hook` answers them itself, outside the event vocabulary: it makes the worktree under `.orchestrator/subagents/<slug>/` and prints its path, so Guards count it as part of the Session. Claude sends `name` in `WorktreeCreate` and `worktree_path` in `WorktreeRemove`. |
 | `user_statusline_command` | The user's own statusline command for the Worktree, which `orch tap` runs on the payload and prints; without one it prints the model and context gauge. Claude reads it from its settings files. |
 | `agent_dirs` | Directories the Agent keeps its own state in (Claude: `projects` and `plans` under its config dir). Guards let the Agent write there, as they do in the Session's Subagent worktrees. |
+| `prepare` | Runs before every launch, resume and restart, before the Sandbox is set up. An error leaves the Session Errored with it. Claude needs nothing; pi rebuilds its Agent profile. |
+| `env` | Variables every launch of the Agent sets, sandboxed or not. The Daemon passes them to the Holder. |
 | `sandbox_needs` | What the Agent needs from the Sandbox, as `SandboxNeeds { writable, read_only, carve_outs, env }`. The Agent-agnostic `sandbox_args` (`crates/orch-agent/src/sandbox.rs`) turns these and the Session's paths into bwrap args. `writable` paths are bound back read-write, `read_only` paths read-only, and `carve_outs` are read-only again inside a writable path. Missing paths are skipped, except carve-outs, which `orch` creates empty first so the Agent can't create them. These paths beat the user's `[sandbox]` config: a configured `readable`, `writable` or `hidden` entry at or inside one of them is ignored, and they come back inside a hidden directory. Claude: `~/.claude` (or `$CLAUDE_CONFIG_DIR`) and `~/.claude.json` writable; `settings.json`, `settings.local.json`, `hooks/`, `skills/`, `agents/`, `commands/`, `rules/`, `plugins/` and `CLAUDE.md` in it carved out; `~/.local/share/claude` and `~/.local/bin` read-only; `DISABLE_AUTOUPDATER=1`. The default needs nothing, so such an Agent sees only the shipped allowlist. |
 
 ## Choosing a Session's Agent
@@ -50,6 +56,23 @@ A Session's Agent is stored on the Session when it is created (`sessions.agent`)
 - **Config.** `[agent] name = "<agent>"` picks a Repo's default Agent (`[defaults.agent] name` the global default, `claude` if unset). A committed `name` needs no Trust, because it only picks a compiled-in adapter. Each Agent's `binary` and `args` live in its own table, `[agents.<name>]` (e.g. `[agents.claude]`), and a committed `binary` or `args` needs Trust. `RepoConfig::default_agent` reads the name and `RepoConfig::agent(name)` one Agent's binary and args.
 - **Resolving.** Launch, resume, Draft and the launch checks resolve the adapter with `adapter_named` (`crates/orch-agent/src/registry.rs`) from the **Session's** Agent, and the binary and args from `[agents.<that name>]`, read again each time. Changing the Repo's default only affects new Sessions. The Holder is started with `--agent` and reports it in its Hello, so a Session rebuilt from an orphaned Holder keeps its Agent (a Holder too old to report one counts as `claude`). An unknown Agent, such as one written by a newer build, leaves the Session Errored with the reason; a missing binary does too. orch never falls back to Claude.
 - **Routing.** `orch hook`, `orch tap` and `orch worktree-hook` take `--agent <name>` (default `claude`) and use that Agent's adapter. Claude's command lines leave it out; another adapter puts `--agent <name>` into the commands it builds. The Holder passes the name on with each payload, and the Daemon drops a hook or statusline payload whose Agent differs from the Session's (a dropped Guard is answered with ask), as it does every payload of a Session whose Agent it doesn't know.
+
+## pi
+
+pi (`@earendil-works/pi-coding-agent` 1.1) is registered as `pi`. So far it only launches and resumes: its capabilities are `resume` alone, so its Sessions show Agent state Unknown and have no Guards, usage, titles or Subagents.
+
+- **Launch.** `pi -na --session-id <Session id> [-- <prompt>]`. `-na` ignores a Repo's committed `.pi/`. `--session-id` creates the Conversation on its first message and opens it again later. `launch_conversation` names the Session id, so the Daemon records it.
+- **Resume.** `pi -na --session-id <latest Conversation>`, without the prompt. Until pi reports `ConversationChanged`, that is the launch's id, so a `/new` inside pi isn't followed.
+- **Env.** `PI_CODING_AGENT_DIR=<profile>`, `PI_OFFLINE=1` and `PI_INDEX_ROOT=<profile>/index`.
+- **Agent profile** (ADR 0014). `prepare` rebuilds `$XDG_STATE_HOME/orchestrator/agent-profiles/pi` from `~/.pi/agent` before every launch, and never writes to `~/.pi`:
+  - `settings.json` is the user's without `sessionDir`. It lists `~/.pi/agent/{extensions,skills,prompts,themes}` by absolute path, with the user's relative entries resolved against `~/.pi/agent`, and excludes `git-worktree-isolation`, `sandbox`, `notify` and `caffeinate` by their exact `index.ts`.
+  - `SYSTEM.md`, `AGENTS.md`, `keybindings.json`, `agents/`, `auth.json` and `models-store.json` link to the user's, if the user has them.
+  - `sessions/`, `index/` and lock files are kept. Everything else is removed, and the four resource dirs are emptied. Files and links are staged and renamed into place.
+- **`sandbox_needs`**:
+  - `writable`: the profile, `~/.pi/agent/auth.json` and `~/.pi/agent/models-store.json`.
+  - `read_only`: `~/.pi/agent/{install,bin,extensions,skills,prompts,themes,agents,SYSTEM.md,AGENTS.md,keybindings.json,settings.json,sandbox.json}`, `~/.local/share/pi-node` and `~/.local/bin` (the `pi` launcher). The user's own `sessions/` stay hidden.
+  - `carve_outs`: the profile's `extensions/`, `skills/`, `prompts/` and `themes/`.
+  - `env`: the three variables above. No host `PI_*` or provider-key variables pass through.
 
 ## Capabilities and graceful degrade
 
@@ -102,7 +125,7 @@ The mapping from these events to Agent states (Starting, Working, Needs input, I
    - for Guards, implement `is_guard_payload` and `guard_answer` for the Agent's blocking-hook protocol, and `agent_dirs` for the Agent's own state;
    - if the Agent can isolate Subagents in worktrees through a hook, route that hook to `orch worktree-hook` and implement `worktree_request`.
    - implement `sandbox_needs` with the paths the Agent writes and reads in `$HOME`, the config inside them it must not change, and any env it needs in the Sandbox.
-4. **Never write to the user's own Agent config.** Inject everything per launch through flags or env, as the Claude adapter does with `--settings`.
+4. **Never write to the user's own Agent config.** Inject everything per launch through flags or env, as the Claude adapter does with `--settings`, or build an Agent profile in `prepare` that only reads the user's config, as pi does.
 5. **Test the mapping as pure functions** (Seam 3): fixture → events, and launch/resume argv for each Preset and capability combination. Test a `TitleWatch` through `follow` / `poll` and `SubagentTranscripts` through `follow` / `locate` / `read` against temporary transcript files. See `crates/orch-agent/tests/claude_*.rs`.
 6. **Register the adapter** in `adapter_named` (`crates/orch-agent/src/registry.rs`) under its config name. That one lookup serves the Daemon and `orch hook`, `orch tap` and `orch worktree-hook`, so `[defaults.agent] name = "<agent>"` (or a Repo's `[agent] name`) selects it for new Sessions and `[agents.<agent>]` sets its binary. Have its hook and statusline commands pass `--agent <agent>`.
 7. **Run it end to end** with the scriptable fake Agent (`orch fake-agent`) through the Daemon tests, if the new adapter changes launch or event routing.
