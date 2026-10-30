@@ -118,6 +118,10 @@ pub trait AgentAdapter {
 
     fn launch(&self, spec: &LaunchSpec) -> Argv;
 
+    fn launch_conversation(&self, _spec: &LaunchSpec) -> Option<ConversationId> {
+        None
+    }
+
     fn resume(
         &self,
         _spec: &LaunchSpec,
@@ -179,6 +183,10 @@ pub trait AgentAdapter {
     }
 
     fn agent_dirs(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn env(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
         Vec::new()
     }
 
