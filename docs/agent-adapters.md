@@ -61,7 +61,7 @@ A Session's Agent is stored on the Session when it is created (`sessions.agent`)
 
 ## pi
 
-pi (`@earendil-works/pi-coding-agent` 1.1) is registered as `pi`. Its capabilities are `hooks`, `resume` and `titles`, so its Sessions show Agent states and Session titles, but have no Guards, Preset modes, usage or Subagents.
+pi (`@earendil-works/pi-coding-agent` 1.1) is registered as `pi`. Its capabilities are `hooks`, `resume`, `titles` and `usage`, so its Sessions show Agent states, Session titles and usage, but have no Guards, Preset modes or Subagents.
 
 - **Launch.** `pi -na --session-id <Session id> -e <Agent profile>/extensions/orch/extension/index.ts --orch-bin <orch> --orch-session <Session id> [-- <prompt>]`. The Agent profile comes from `agent_profile`, the same one `prepare` builds; without `HOME` there is none, and the Session is Errored instead of running pi without orch's extension. `-na` ignores a Repo's committed `.pi/`. `--session-id` creates the Conversation on its first message and opens it again later. `launch_conversation` names the Session id, so the Daemon records it before pi starts; pi's own `session_start` then reports the same Conversation, which changes nothing.
 - **Resume.** The same, with `--session-id <latest Conversation>` and without the prompt. pi reports each `/new`, resume and fork as `ConversationChanged`, so this is the Conversation pi was last in.
@@ -82,7 +82,7 @@ pi (`@earendil-works/pi-coding-agent` 1.1) is registered as `pi`. Its capabiliti
 orch's pi extension (`crates/orch-agent/src/pi/extension/`, TypeScript) is a thin forwarder; all mapping is in `map_hook`. It is embedded with `include_str!` and uses only node built-ins and type-only pi imports, so it needs no `node_modules` at runtime.
 
 - It registers `--orch-bin` (default `orch`) and `--orch-session`, and forwards nothing without a Session or before pi's first `session_start`.
-- On each coarse event it spawns `orch hook --agent pi --session <id>` with a compact JSON payload on stdin: `event` plus the fields orch needs. It uses `node:child_process.spawn`, because `pi.exec` ignores stdin and a sync exec freezes the TUI. Spawns are chained, so payloads arrive in order, and no handler waits for one; each is killed after 10 seconds. `message_update` is never forwarded.
+- On each coarse event it spawns `orch hook --agent pi --session <id>` with a compact JSON payload on stdin: `event` plus the fields orch needs. For usage it spawns `orch tap --agent pi --session <id>` (below). It uses `node:child_process.spawn`, because `pi.exec` ignores stdin and a sync exec freezes the TUI. Spawns are chained, so payloads arrive in order, and no handler waits for one; each is killed after 10 seconds. `message_update` is never forwarded.
 - pi rebuilds the extension runtime on `/new`, resume and fork, and `session_start` can fire twice, so every `session_start` reopens the state: the chain (kept if the flags are unchanged) and the last assistant outcome.
 - `message_end` of an assistant message is kept, not forwarded, and `agent_settled` carries its `stopReason` and `errorMessage`. `ui_prompt_end` carries `idle`, whether pi was at its prompt.
 
@@ -101,9 +101,19 @@ orch's pi extension (`crates/orch-agent/src/pi/extension/`, TypeScript) is a thi
 
 Starting lasts from the launch until the first `session_start`. `agent_end` isn't used, because it can fire several times per prompt. pi retries some errors silently, so a retried 429 stays Working.
 
+**Usage.** After the `agent_settled` hook, and after a `session_start` whose Conversation already holds messages (a resume or a fork), the extension taps on the same chain, so hooks and taps stay in order. The payload is `sessionId`, `model` (`id`, `name`), `context` (`ctx.getContextUsage()`, left out when pi has none) and `usage`: the Conversation's cumulative `input`, `output`, `cacheRead`, `cacheWrite` and `cost` (`cost.total`), summed from its assistant messages in `ctx.sessionManager.getEntries()`. A fork copies its parent's entries with their timestamps, so entries older than the session header are left out, and a fork's totals start at zero rather than counting the parent's again. `map_tap` (`crates/orch-agent/src/pi/usage.rs`) makes one `UsageSample` for `sessionId`:
+
+- the model's `name`, or its `id`;
+- the context gauge from `context.percent` and `context.contextWindow`; `percent` is null after a compaction until the next response, which leaves the gauge empty;
+- input tokens as `input + cacheRead + cacheWrite`, as Claude's statusline counts them, and output tokens;
+- pi's list-price cost as is: on a subscription it is an API-equivalent figure, and a local model costs 0;
+- no rate-limit windows. `RateLimits::after` keeps the badge's last values when a sample has none, so pi Sessions never change or clear the 5h/7d badge.
+
+The totals are per Conversation, like Claude's, so the store needs nothing new: `/new`, a fork and a resume of another Conversation start their own `usage` row, and `record_usage` adds only the growth of each row into the Repo's `usage_daily`, which `:usage` shows for both Agents together.
+
 **Titles.** pi's session name is the Session title: `/name`, `pi.setSessionName()` (such as the user's `conversation-name` extension) and `--name`, which only `session_start` reports. There is no `title_watch`. A title is kept across a new Conversation until it is renamed. Renames from pi's `/resume` selector emit nothing and are missed.
 
-**Testing.** `crates/orch-agent/tests/fixtures/pi/hooks/` holds payloads recorded from real pi by `record.mjs` next to them; its README names the pi version and how to re-record. `pi_hooks.rs` maps them. The extension's `package.json` pins `@earendil-works/pi-coding-agent` for its types: `npx tsc --noEmit` and `npm test` (`node --test` against a fake ExtensionAPI) run in CI's `pi-extension` job. `ORCH_REAL_PI=1 cargo test -p orch --test daemon real_pi` launches the `pi` on PATH through the Daemon; it is skipped without either, and isn't run in CI.
+**Testing.** `crates/orch-agent/tests/fixtures/pi/hooks/` holds payloads recorded from real pi by `record.mjs` next to them; its README names the pi version and how to re-record. `taps/` holds its taps, which `pi_usage.rs` maps; `pi_hooks.rs` maps the hooks. The extension's `package.json` pins `@earendil-works/pi-coding-agent` for its types: `npx tsc --noEmit` and `npm test` (`node --test` against a fake ExtensionAPI) run in CI's `pi-extension` job. `ORCH_REAL_PI=1 cargo test -p orch --test daemon real_pi` launches the `pi` on PATH through the Daemon; it is skipped without either, and isn't run in CI.
 
 ## Capabilities and graceful degrade
 
