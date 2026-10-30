@@ -61,6 +61,19 @@ fn the_new_form_shows_the_repos_resolved_default_base_presets_and_branch_prefix(
 }
 
 #[test]
+fn the_new_form_names_the_agent_the_session_will_use() {
+    let mut tui = Harness::with_config(config());
+    tui.daemon().settings = vec![RepoSettings {
+        agent: "pi".into(),
+        ..settings("/home/me/recent", "develop")
+    }];
+    tui.command("new");
+    tui.keys("Fix it");
+
+    assert!(field(&mut tui, "Agent").contains("pi"));
+}
+
+#[test]
 fn picking_another_repo_fetches_its_settings() {
     let mut tui = Harness::with_config(config());
     tui.daemon().settings = vec![

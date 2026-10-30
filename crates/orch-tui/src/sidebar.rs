@@ -63,7 +63,7 @@ pub(crate) enum Row<'a> {
     },
     MissingRepo(&'a Path),
     Session(&'a SessionView),
-    Flags(&'a SessionView, Vec<Flag>),
+    Flags(&'a SessionView, Vec<Flag<'a>>),
     Subagent(&'a SessionView, &'a SubagentView),
     SubagentsDone(&'a SessionView, usize),
     Preparing(&'a Preparing),
@@ -85,7 +85,8 @@ impl Row<'_> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Flag {
+pub(crate) enum Flag<'a> {
+    Agent(&'a str),
     Pr(u64),
     Checks(PrChecksView),
     Review(PrReviewView),
@@ -100,9 +101,10 @@ pub(crate) enum Flag {
     Unsandboxed,
 }
 
-impl Flag {
+impl Flag<'_> {
     pub fn text(self) -> String {
         match self {
+            Flag::Agent(name) => name.into(),
             Flag::Pr(number) => format!("PR #{number}"),
             Flag::Checks(PrChecksView::Pending) => "⋯ checks".into(),
             Flag::Checks(PrChecksView::Passing) => "✓ checks".into(),
@@ -334,9 +336,9 @@ fn subagent_rows(view: &SessionView, expanded: bool) -> Vec<Row<'_>> {
     rows
 }
 
-fn flags(view: &SessionView) -> Vec<Flag> {
+fn flags(view: &SessionView) -> Vec<Flag<'_>> {
     let flags = &view.flags;
-    let mut found = Vec::new();
+    let mut found = vec![Flag::Agent(&view.agent_name)];
     found.extend(flags.pr_number.map(Flag::Pr));
     if let Some(pr) = &flags.pr {
         if pr.checks != PrChecksView::None {

@@ -182,6 +182,7 @@ fn flag_line(flags: &[Flag]) -> Line<'static> {
 
 fn flag_style(flag: Flag) -> Style {
     let colour = match flag {
+        Flag::Agent(_) => Color::DarkGray,
         Flag::Pr(_) => Color::Magenta,
         Flag::Checks(PrChecksView::Pending) => Color::Yellow,
         Flag::Checks(PrChecksView::Passing) => Color::Green,

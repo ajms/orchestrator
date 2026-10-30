@@ -107,10 +107,29 @@ fn flags_are_marked_on_the_row() {
     assert!(!tui.sidebar_line_with("plain").contains('●'));
     let flags = tui.sidebar_lines().join("\n");
     let after = &flags[flags.find("flagged").unwrap()..];
-    let row_block: String = after.lines().take(2).collect::<Vec<_>>().join(" ");
+    let row_block: String = after.lines().take(3).collect::<Vec<_>>().join(" ");
     assert!(row_block.contains("stalled?"), "{row_block}");
     assert!(row_block.contains("rebase"), "{row_block}");
     assert!(row_block.contains("muted"), "{row_block}");
+}
+
+#[test]
+fn every_session_row_names_its_agent() {
+    let mut pi = session("webshop", "on-pi");
+    pi.agent_name = "pi".into();
+    pi.flags.muted = true;
+    let mut tui = Harness::new();
+    tui.sessions(vec![session("webshop", "on-claude"), pi]);
+
+    let lines = tui.sidebar_lines();
+    let below = |slug: &str| {
+        let at = lines.iter().position(|line| line.contains(slug)).unwrap();
+        lines[at + 1].trim_start_matches(['│', ' ']).to_string()
+    };
+    assert!(below("on-claude").starts_with("claude"), "{lines:?}");
+    let pi_flags = below("on-pi");
+    assert!(pi_flags.starts_with("pi"), "{pi_flags}");
+    assert!(pi_flags.contains("muted"), "{pi_flags}");
 }
 
 #[test]

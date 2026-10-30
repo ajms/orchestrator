@@ -44,6 +44,7 @@ pub struct NewForm {
     pub base: Suggested,
     pub default_base: Option<String>,
     pub default_preset: Option<String>,
+    pub agent: Option<String>,
     pub base_candidates: Vec<String>,
     base_choice: usize,
     pub presets: Vec<String>,
@@ -71,6 +72,7 @@ impl NewForm {
             base: Suggested::default(),
             default_base: None,
             default_preset: None,
+            agent: None,
             base_candidates: Vec::new(),
             base_choice: 0,
             presets,
@@ -111,6 +113,7 @@ impl NewForm {
             wanted.and_then(|name| self.presets.iter().position(|preset| *preset == name));
         self.default_preset = settings.default_preset;
         self.default_base = settings.default_base;
+        self.agent = Some(settings.agent);
         self.branch_prefix = settings.branch_prefix;
         self.prefill_branch();
     }
