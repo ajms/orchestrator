@@ -15,7 +15,7 @@ use crate::key_argument::key_argument;
 use crate::{SubagentTranscripts, TranscriptRead, TranscriptReader};
 
 const DIR: &str = "subagents";
-const MAX_ID: usize = 200;
+const MAX_ID_BYTES: usize = 200;
 const READ_BUDGET: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug)]
@@ -43,7 +43,10 @@ struct Call {
 }
 
 fn plain_name(id: &str) -> bool {
-    !id.is_empty() && id.len() <= MAX_ID && !id.starts_with('.') && !id.contains(['/', '\\', '\0'])
+    !id.is_empty()
+        && id.len() <= MAX_ID_BYTES
+        && !id.starts_with('.')
+        && !id.contains(['/', '\\', '\0'])
 }
 
 impl SubagentTranscripts for PiSubagentTranscripts {

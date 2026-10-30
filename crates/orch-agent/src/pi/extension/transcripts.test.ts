@@ -68,3 +68,11 @@ test("an id that isn't a plain file name writes nothing", () => {
 	assert.equal(existsSync(join(dir, "subagents")), false);
 	assert.equal(existsSync(join(dir, "escape.jsonl")), false);
 });
+
+test("an id longer than 200 bytes writes nothing", () => {
+	const { writer, dir } = transcripts();
+	writer.write("conv-1", "é".repeat(101), [task]);
+	assert.equal(existsSync(join(dir, "subagents")), false);
+	writer.write("conv-1", "é".repeat(100), [task]);
+	assert.deepEqual(lines(join(dir, "subagents", "conv-1", `${"é".repeat(100)}.jsonl`)), [task]);
+});

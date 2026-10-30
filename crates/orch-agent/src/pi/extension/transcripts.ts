@@ -1,10 +1,10 @@
 import { appendFileSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const MAX_ID = 200;
+const MAX_ID_BYTES = 200;
 
-export function plainName(id: string): boolean {
-	return id.length > 0 && id.length <= MAX_ID && !id.startsWith(".") && !/[/\\\0]/.test(id);
+function plainName(id: string): boolean {
+	return id.length > 0 && Buffer.byteLength(id) <= MAX_ID_BYTES && !id.startsWith(".") && !/[/\\\0]/.test(id);
 }
 
 const jsonl = (messages: unknown[]) => messages.map((message) => `${JSON.stringify(message)}\n`).join("");
