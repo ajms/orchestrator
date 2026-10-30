@@ -13,6 +13,6 @@ node crates/orch-agent/tests/fixtures/pi/record.mjs
 - a `question` tool that asks through `ctx.ui.select`, like the user's own;
 - `/orch-dialog`, a dialog opened while idle, and `/orch-unname`, which clears the session name.
 
-It drives startup, a prompt, a tool call, a question, an idle dialog, an abort, five provider errors with auto-retry off, a rename, a cleared name, `/new` and a prompt in it, a clone (a fork at the leaf) and a prompt in it, and a resume of the named Conversation. The error texts are scripted to look like Anthropic's.
+It drives startup, a prompt, a tool call, a question, an idle dialog, an abort, five provider errors with auto-retry off, a rename, a cleared name, `/new` and a prompt in it, a clone (a fork at the leaf, whose copied entries keep their ids, so its tap's cost is 0) and a prompt in it, and a resume of the named Conversation. The error texts are scripted to look like Anthropic's.
 
 Starting has no payload: the Daemon shows it from the launch until the first `session_start`.
