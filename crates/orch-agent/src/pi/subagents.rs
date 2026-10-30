@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use orch_core::{SubagentId, TranscriptEntry};
+use orch_core::{ConversationId, SubagentId, TranscriptEntry};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -16,7 +16,7 @@ const MAX_ID_BYTES: usize = 200;
 #[derive(Debug)]
 pub(super) struct PiSubagentTranscripts {
     profile: PathBuf,
-    conversations: HashMap<String, String>,
+    conversations: HashMap<SubagentId, ConversationId>,
 }
 
 impl PiSubagentTranscripts {
@@ -34,7 +34,7 @@ struct Call {
     event: String,
     tool_name: Option<String>,
     tool_call_id: Option<String>,
-    session_id: Option<String>,
+    session_id: Option<ConversationId>,
 }
 
 fn plain_name(id: &str) -> bool {
@@ -54,18 +54,18 @@ impl SubagentTranscripts for PiSubagentTranscripts {
         }
         if let (Some(id), Some(conversation)) = (call.tool_call_id, call.session_id)
             && plain_name(&id)
-            && plain_name(&conversation)
+            && plain_name(conversation.as_str())
         {
-            self.conversations.insert(id, conversation);
+            self.conversations.insert(SubagentId(id), conversation);
         }
     }
 
     fn locate(&self, subagent: &SubagentId) -> Option<PathBuf> {
-        let conversation = self.conversations.get(subagent.as_str())?;
+        let conversation = self.conversations.get(subagent)?;
         Some(
             self.profile
                 .join(DIR)
-                .join(conversation)
+                .join(conversation.as_str())
                 .join(format!("{}.jsonl", subagent.as_str())),
         )
     }
