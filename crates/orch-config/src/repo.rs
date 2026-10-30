@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use orch_agent::{CLAUDE, INHERIT, Preset, Presets, SandboxPaths, mode_from_name};
+use orch_agent::{INHERIT, Preset, Presets, SandboxPaths, implied_agent, mode_from_name};
 use serde::Deserialize;
 
 use crate::error::ConfigProblem;
@@ -180,8 +180,8 @@ impl RepoConfig {
                 })
             })
         };
-        let default_agent = pick(&|layer| layer.agent.name.as_ref())
-            .map_or_else(|| CLAUDE.into(), |name| name.value);
+        let default_agent =
+            pick(&|layer| layer.agent.name.as_ref()).map_or_else(implied_agent, |name| name.value);
         let mut agents = BTreeMap::<String, AgentProgram>::new();
         for (source, layer) in &layers {
             for (name, program) in &layer.agents {

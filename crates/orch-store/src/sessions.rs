@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use orch_agent::{CLAUDE, GuardHit};
+use orch_agent::{GuardHit, implied_agent};
 use orch_core::{AgentState, ConversationId, Flags, PermissionMode, Phase, PrStatus, SessionId};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
@@ -87,7 +87,7 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         existing_branch: row.get("existing_branch")?,
         agent: row
             .get::<_, Option<String>>("agent")?
-            .unwrap_or_else(|| CLAUDE.into()),
+            .unwrap_or_else(implied_agent),
         base: row.get("base")?,
         pr_base: row.get("pr_base")?,
         worktree: PathBuf::from(row.get::<_, String>("worktree")?),
