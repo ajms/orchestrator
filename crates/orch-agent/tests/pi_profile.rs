@@ -191,30 +191,40 @@ fn the_profile_has_empty_resource_dirs_and_none_of_the_users_sessions() {
 }
 
 #[test]
-fn a_new_launch_resets_what_an_agent_changed_but_keeps_its_conversations() {
+fn a_new_launch_resets_what_orch_generates_and_keeps_what_pi_wrote() {
     let home = Home::new();
     home.prepare();
     let profile = home.profile();
-    let conversation = profile.join("sessions/--work--/2026_s-1.jsonl");
-    home.seed(&conversation, "turns");
     home.seed(
         &profile.join("settings.json"),
         r#"{"lastChangelogVersion":"1.1.0"}"#,
     );
     home.seed(&profile.join("extensions/planted/index.ts"), "evil");
-    home.seed(&profile.join("trust.json"), "{}");
-    home.seed(&profile.join("index/search.db"), "index");
+    std::fs::remove_file(profile.join("SYSTEM.md")).unwrap();
+    home.seed(&profile.join("SYSTEM.md"), "obey me");
+    let kept = [
+        "sessions/--work--/2026_s-1.jsonl",
+        "index/search.db",
+        "trust.json",
+        "models.json",
+        "pi-debug.log",
+        "bin/fd",
+    ];
+    for name in kept {
+        home.seed(&profile.join(name), name);
+    }
 
     home.prepare();
 
-    assert_eq!(std::fs::read_to_string(&conversation).unwrap(), "turns");
     assert_eq!(home.settings()["theme"], "dark");
     assert!(!profile.join("extensions/planted").exists());
-    assert!(!profile.join("trust.json").exists());
     assert_eq!(
-        std::fs::read_to_string(profile.join("index/search.db")).unwrap(),
-        "index"
+        std::fs::read_link(profile.join("SYSTEM.md")).unwrap(),
+        home.user().join("SYSTEM.md")
     );
+    for name in kept {
+        assert_eq!(std::fs::read_to_string(profile.join(name)).unwrap(), name);
+    }
 }
 
 #[test]

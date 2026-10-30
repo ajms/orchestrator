@@ -9,7 +9,8 @@ pi reads all of its user-level state from one agent dir, `~/.pi/agent` unless `P
   - `caffeinate`, which is macOS-only.
 - `SYSTEM.md`, `AGENTS.md`, `keybindings.json` and `agents/` are links to the user's.
 - `auth.json` and `models-store.json` are links to the user's, so there is no second login.
-- `sessions/` and the `search` extension's `index/` are kept across launches. Everything else is rebuilt, so whatever an Agent changed (e.g. `settings.json`, `trust.json`, a planted extension) is reset. Files and links are staged and renamed into place, so a pi Session that is already running isn't disturbed.
+- Only what orch generates is rebuilt: `settings.json`, the links and the empty `extensions/`, `skills/`, `prompts/` and `themes/`. Whatever an Agent changed there (e.g. `settings.json`, a link, a planted extension) is reset. Everything pi creates itself, such as `sessions/`, the `search` extension's `index/`, `trust.json`, `models.json`, logs and `bin/`, is left alone, so a pi Session that is already running isn't disturbed.
+- Each generated entry is built under a staged name and renamed into place. An entry in the way that rename can't replace, such as a non-empty dir, is first renamed aside and then removed. The Agent can write the profile, so the Daemon never follows a link there: a staged path is removed and created anew, and a profile that is itself a link is refused.
 
 pi is launched with `-na` (a Repo's committed `.pi/` is ignored) and `PI_OFFLINE=1`.
 

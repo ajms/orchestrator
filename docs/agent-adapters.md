@@ -67,7 +67,7 @@ pi (`@earendil-works/pi-coding-agent` 1.1) is registered as `pi`. So far it only
 - **Agent profile** (ADR 0014). `prepare` rebuilds `$XDG_STATE_HOME/orchestrator/agent-profiles/pi` from `~/.pi/agent` before every launch, and never writes to `~/.pi`:
   - `settings.json` is the user's without `sessionDir`. It lists `~/.pi/agent/{extensions,skills,prompts,themes}` by absolute path, with the user's relative entries resolved against `~/.pi/agent`, and excludes `git-worktree-isolation`, `sandbox`, `notify` and `caffeinate` by their exact `index.ts`.
   - `SYSTEM.md`, `AGENTS.md`, `keybindings.json`, `agents/`, `auth.json` and `models-store.json` link to the user's, if the user has them.
-  - `sessions/`, `index/` and lock files are kept. Everything else is removed, and the four resource dirs are emptied. Files and links are staged and renamed into place.
+  - Only these generated entries and the four empty resource dirs are rebuilt. Everything pi writes itself (`sessions/`, `index/`, `trust.json`, logs, …) is left alone. Each entry is staged and renamed into place, and an entry in the way is renamed aside and removed. No write follows a link the Agent may have planted, and a profile that is a link is refused.
 - **`sandbox_needs`**:
   - `writable`: the profile, `~/.pi/agent/auth.json` and `~/.pi/agent/models-store.json`.
   - `read_only`: `~/.pi/agent/{install,bin,extensions,skills,prompts,themes,agents,SYSTEM.md,AGENTS.md,keybindings.json,settings.json,sandbox.json}`, `~/.local/share/pi-node` and `~/.local/bin` (the `pi` launcher). The user's own `sessions/` stay hidden.

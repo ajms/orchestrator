@@ -9,7 +9,6 @@ pub(super) const RESOURCES: [&str; 4] = ["extensions", "skills", "prompts", "the
 pub(super) const CREDENTIALS: [&str; 2] = ["auth.json", "models-store.json"];
 const LEFT_OUT: [&str; 4] = ["git-worktree-isolation", "sandbox", "notify", "caffeinate"];
 const LINKED: [&str; 4] = ["SYSTEM.md", "AGENTS.md", "keybindings.json", "agents"];
-const KEPT: [&str; 2] = ["sessions", "index"];
 const SETTINGS: &str = "settings.json";
 const STAGED: &str = ".orch-new";
 const RETIRED: &str = ".orch-old";
@@ -64,19 +63,6 @@ pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
         swap(profile, kind, &staged)?;
     }
 
-    let built = [SETTINGS]
-        .into_iter()
-        .chain(LINKED)
-        .chain(CREDENTIALS)
-        .chain(RESOURCES)
-        .chain(KEPT);
-    let built: Vec<&str> = built.collect();
-    for entry in std::fs::read_dir(profile)?.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !built.contains(&name.as_str()) && !name.ends_with(".lock") {
-            remove(&entry.path())?;
-        }
-    }
     Ok(())
 }
 
