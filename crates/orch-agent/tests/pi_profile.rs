@@ -197,9 +197,9 @@ fn assert_only_orchs_resources(profile: &Path) {
     assert_eq!(entries(&profile.join("extensions")), ["orch"]);
     assert_eq!(
         entries(&extension),
-        ["forward.ts", "index.ts", "transcripts.ts"]
+        ["forward.ts", "index.ts", "prompt.ts", "transcripts.ts"]
     );
-    for name in ["index.ts", "forward.ts", "transcripts.ts"] {
+    for name in ["index.ts", "forward.ts", "prompt.ts", "transcripts.ts"] {
         let written = std::fs::read_to_string(extension.join(name)).unwrap();
         assert_eq!(written, shipped(name), "{name}");
     }
