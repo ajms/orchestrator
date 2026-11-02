@@ -180,6 +180,12 @@ impl AgentAdapter for Pi {
             return SandboxNeeds::default();
         };
         let installed = [".local/share/pi-node", ".local/bin"].map(|path| home.join(path));
+        let linked_skills: Vec<PathBuf> = profile::skills(&user)
+            .links
+            .into_iter()
+            .map(|(_, target)| target)
+            .filter(|target| !target.starts_with(&user))
+            .collect();
         SandboxNeeds {
             writable: std::iter::once(profile.clone())
                 .chain(CREDENTIALS.map(|name| user.join(name)))
@@ -188,6 +194,7 @@ impl AgentAdapter for Pi {
                 .map(|name| user.join(name))
                 .into_iter()
                 .chain(installed)
+                .chain(linked_skills)
                 .collect(),
             carve_outs: RESOURCES.map(|name| profile.join(name)).into(),
             env: self.env(lookup),
