@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{Adapter, adapter_for};
+use crate::agents::{Adapter, adapter_for, resolve_env};
 use crate::branch::{BranchRequest, BranchTarget};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message, store_conversations};
@@ -530,15 +531,22 @@ impl Daemon {
                     }
                     (Ok(()), None) => Ok(None),
                 };
-                let env = launch.adapter.env(&xdg::process_env);
+                let configured = match sandbox {
+                    Ok(sandbox) => resolve_env(&launch.env_commands, &record.worktree)
+                        .await
+                        .map(|env| (sandbox, env)),
+                    Err(message) => Err(message),
+                };
+                let mut env = launch.adapter.env(&xdg::process_env);
                 let _ = self.update(id, |live| {
                     live.adapter = Some(launch.adapter);
                     live.preset_sandboxed = launch.sandbox.is_some();
                     live.record.holder_seq = 0;
                     Ok(())
                 });
-                match sandbox {
-                    Ok(sandbox) => {
+                match configured {
+                    Ok((sandbox, configured)) => {
+                        env.extend(configured);
                         self.opened_conversation(id, launch.conversation).await;
                         self.spawn_holder(&record, launch.argv, env, sandbox).await
                     }
@@ -648,6 +656,7 @@ impl Daemon {
             argv,
             sandbox,
             conversation,
+            env_commands: agent.env,
         })
     }
 
@@ -815,6 +824,7 @@ struct AgentLaunch {
     argv: Vec<String>,
     sandbox: Option<SandboxPaths>,
     conversation: Option<ConversationId>,
+    env_commands: BTreeMap<String, String>,
 }
 
 async fn prepare(adapter: &Adapter) -> Result<(), String> {

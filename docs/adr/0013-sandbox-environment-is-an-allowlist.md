@@ -15,5 +15,5 @@ Tokens in the Daemon's environment (`GH_TOKEN`, `AWS_*`, `GOOGLE_APPLICATION_CRE
 ## Consequences
 
 - The Agent keeps its own login (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`) and config (`CLAUDE_CONFIG_DIR`). That exposes nothing new, because its credentials in `~/.claude` are already inside.
-- A tool that relies on a variable outside the list sees it unset in the Sandbox. The user can set it in the Repo's own config files, or run the tool from a Shell (0012).
+- A tool that relies on a variable outside the list sees it unset in the Sandbox. The user can set it in the Repo's own config files, or run the tool from a Shell (0012), or give the Agent the variable from a personal command (0015).
 - The holder passes its own variables to `bwrap` as `--setenv`, after the clear. The Sandbox now needs bubblewrap 0.5.0 or later.

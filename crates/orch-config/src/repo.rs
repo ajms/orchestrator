@@ -57,6 +57,14 @@ struct AgentLayer {
 struct AgentProgramLayer {
     binary: Option<String>,
     args: Option<Vec<String>>,
+    #[serde(default)]
+    env: BTreeMap<String, EnvCommand>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnvCommand {
+    command: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -97,12 +105,14 @@ pub struct AgentConfig {
     pub name: String,
     pub binary: Option<String>,
     pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct AgentProgram {
     binary: Option<Sourced<String>>,
     args: Option<Sourced<Vec<String>>>,
+    env: BTreeMap<String, String>,
 }
 
 impl AgentProgram {
@@ -120,6 +130,7 @@ impl AgentProgram {
                 .as_ref()
                 .map(|args| args.value.clone())
                 .unwrap_or_default(),
+            env: self.env.clone(),
         }
     }
 }
@@ -168,7 +179,15 @@ impl RepoConfig {
                         .is_some_and(|setting| setting.switch().is_some()),
                 ),
             ];
-            if let Some((key, _)) = misplaced.into_iter().find(|(_, set)| *set) {
+            let agent_env = (
+                "agents.env",
+                layer.agents.values().any(|agent| !agent.env.is_empty()),
+            );
+            if let Some((key, _)) = misplaced
+                .into_iter()
+                .chain([agent_env])
+                .find(|(_, set)| *set)
+            {
                 return Err((*source, ConfigProblem::Misplaced { key }));
             }
         }
@@ -197,6 +216,9 @@ impl RepoConfig {
                         value: args.clone(),
                         source: *source,
                     });
+                }
+                for (key, value) in &program.env {
+                    agent.env.insert(key.clone(), value.command.clone());
                 }
             }
         }
@@ -274,7 +296,9 @@ impl RepoConfig {
                 .iter()
                 .filter(|(_, program)| program.committed())
                 .map(|(name, program)| {
-                    let AgentConfig { name, binary, args } = program.config(name);
+                    let AgentConfig {
+                        name, binary, args, ..
+                    } = program.config(name);
                     TrustItem::Agent { name, binary, args }
                 }),
         );

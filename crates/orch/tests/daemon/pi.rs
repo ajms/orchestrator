@@ -65,6 +65,61 @@ async fn a_pi_session_runs_pi_from_its_agent_profile() {
     assert_eq!(settings.metadata().unwrap().modified().unwrap(), modified);
 }
 
+fn pi_env_with(agent_env: &str) -> Env {
+    let env = pi_env();
+    let orch = env!("CARGO_BIN_EXE_orch");
+    env.write_config(&format!(
+        "{PI}[defaults.agents.pi]\nbinary = {orch:?}\nargs = [\"fake-agent\", \"--\"]\n\n[defaults.agents.pi.env]\n{agent_env}"
+    ));
+    env
+}
+
+async fn pi_pane_shows_env(env: &Env, name: &str, expected: &str) {
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let repo = env.repo("app");
+    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    client
+        .until(&id, "running", |view| view.agent_state.is_some())
+        .await;
+    let mut pane = env.pane(&id, PANE).await;
+    pane.type_line(&format!("env {name}")).await;
+    pane.wait_for_text(&format!("{name}={expected}")).await;
+}
+
+#[tokio::test]
+async fn a_pi_session_gets_its_env_from_the_configured_command() {
+    let env = pi_env_with("ORCH_TEST_VALUE = { command = \"printf 'from command\\\\n'\" }\n");
+    pi_pane_shows_env(&env, "ORCH_TEST_VALUE", "from command").await;
+}
+
+#[tokio::test]
+async fn a_sandboxed_pi_session_gets_its_env_past_the_cleared_environment() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = pi_env_with("ORCH_TEST_VALUE = { command = \"echo boxed\" }\n");
+    env.real_bwrap();
+    pi_pane_shows_env(&env, "ORCH_TEST_VALUE", "boxed").await;
+}
+
+#[tokio::test]
+async fn a_failing_env_command_errors_the_session_naming_the_variable() {
+    let env = pi_env_with("ORCH_TEST_VALUE = { command = \"echo leaked; exit 3\" }\n");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let repo = env.repo("app");
+    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+
+    let view = client
+        .until(&id, "a failed launch", |view| view.error.is_some())
+        .await;
+    assert_eq!(view.agent_state, Some(State::Errored));
+    let error = view.error.unwrap_or_default();
+    assert!(error.contains("ORCH_TEST_VALUE"), "{error}");
+    assert!(!error.contains("leaked"), "{error}");
+}
+
 #[tokio::test]
 async fn a_pi_session_resumes_the_same_conversation_after_a_reboot() {
     let env = pi_env();
