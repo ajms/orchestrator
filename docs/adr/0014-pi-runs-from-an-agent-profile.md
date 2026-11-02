@@ -3,13 +3,14 @@
 pi reads all of its user-level state from one agent dir, `~/.pi/agent` unless `PI_CODING_AGENT_DIR` moves it. orch's pi Sessions run from an **Agent profile** instead: one shared agent dir in orch's state dir (`$XDG_STATE_HOME/orchestrator/agent-profiles/pi`), which orch rebuilds from `~/.pi/agent` before every launch. orch only reads `~/.pi`, and never writes to it.
 
 - `settings.json` is the user's, without `sessionDir`. It lists `~/.pi/agent/{extensions,skills,prompts,themes}` by absolute path, so the user's resources load without being copied. The user's own relative entries are resolved against `~/.pi/agent`.
+- `skills/` holds one link per user skill (a directory with a `SKILL.md`), named by its directory and pointing at it, from `~/.pi/agent/skills` and then the user's `skills` settings entries; the first source wins a name. Tools that resolve a skill as `<PI_CODING_AGENT_DIR>/skills/<name>`, like the user's `subagent` extension, then find it. A source wholly represented by links is dropped from `settings.json` so pi doesn't load its skills twice; anything else (a single file, a source with root `*.md` files or nested skills) stays listed.
 - Four extensions are left out with exact `-<abs>/extensions/<name>/index.ts` entries, because pi ignores directory and glob exclusions there:
   - `git-worktree-isolation` and `sandbox`, because orch owns the Worktree and the Sandbox;
   - `notify`, because orch owns notifications;
   - `caffeinate`, which is macOS-only.
 - `SYSTEM.md`, `AGENTS.md`, `keybindings.json` and `agents/` are links to the user's.
 - `auth.json` and `models-store.json` are links to the user's, so there is no second login.
-- Only what orch generates is rebuilt: `settings.json`, the links, `extensions/` holding only orch's own extension, and the empty `skills/`, `prompts/` and `themes/`. Whatever an Agent changed there (e.g. `settings.json`, a link, a planted extension) is reset. Everything pi creates itself, such as `sessions/`, the `search` extension's `index/`, `trust.json`, `models.json`, logs and `bin/`, is left alone, so a pi Session that is already running isn't disturbed.
+- Only what orch generates is rebuilt: `settings.json`, the links, `extensions/` holding only orch's own extension, `skills/` holding only the skill links, and the empty `prompts/` and `themes/`. Whatever an Agent changed there (e.g. `settings.json`, a link, a planted extension) is reset. Everything pi creates itself, such as `sessions/`, the `search` extension's `index/`, `trust.json`, `models.json`, logs and `bin/`, is left alone, so a pi Session that is already running isn't disturbed.
 - Each generated entry is built under a staged name and renamed into place. An entry in the way that rename can't replace, such as a non-empty dir, is first renamed aside and then removed. The Agent can write the profile, so the Daemon never follows a link there: a staged path is removed and created anew, and a profile that is itself a link is refused.
 
 pi is launched with `-na` (a Repo's committed `.pi/` is ignored) and `PI_OFFLINE=1`.
@@ -24,6 +25,7 @@ pi is launched with `-na` (a Repo's committed `.pi/` is ignored) and `PI_OFFLINE
 ## Consequences
 
 - pi locks `auth.json` next to the profile's link, not next to the real file. The user's own pi and orch's pi can therefore refresh an Anthropic OAuth token at the same time, and the loser has to log in again. This is accepted.
-- The Sandbox (0009, 0013) binds the profile and the two credential files writable, and `~/.pi/agent`'s installation and resources read-only. The user's own `sessions/` stay hidden. The profile's `extensions/`, `skills/`, `prompts/` and `themes/` are read-only, so an Agent can't plant a resource that loads in later Sessions.
+- The Sandbox (0009, 0013) binds the profile and the two credential files writable, and `~/.pi/agent`'s installation and resources read-only, as well as linked skill directories outside `~/.pi/agent`. The user's own `sessions/` stay hidden. The profile's `extensions/`, `skills/`, `prompts/` and `themes/` are read-only, so an Agent can't plant a resource that loads in later Sessions.
 - The Agent can read the user's pi credentials, as Claude can read its own in `~/.claude`.
 - Extensions that hard-code `~/.pi/agent` (the user's `sandbox` hook, `statusline`) see the user's files, not the profile. Their stand-down under `ORCH_SESSION` is dotfiles work.
+- Instructions pi needs only under orch (that orch owns the Worktree, Branch and Landing, the Sandbox's limits, what the Broker allows) are not put in the user's `SYSTEM.md`, which the profile only links. orch's own extension appends an "Under orch" section to the system prompt in `before_agent_start`, only when it runs as an orch Session, so the user's `SYSTEM.md` stays orch-agnostic and `~/.pi` is still never written.

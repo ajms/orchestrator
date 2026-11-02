@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import orch from "./index.ts";
+import { UNDER_ORCH } from "./prompt.ts";
 import type { Spawn } from "./forward.ts";
 
 type Handler = (event: object, ctx: object) => unknown;
@@ -481,4 +482,22 @@ test("a subagent call without a task name forwards its task instead", async () =
 		agent: "scout",
 		task: "Find where login redirects",
 	});
+});
+
+test("an orch Session appends the Under orch section to pi's system prompt", () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	const [result] = pi.emit("before_agent_start", { prompt: "hi", systemPrompt: "You are pi." });
+	assert.deepEqual(result, { systemPrompt: `You are pi.\n\n${UNDER_ORCH}` });
+	assert.match(UNDER_ORCH, /^# Under orch/);
+	assert.ok(UNDER_ORCH.split("\n").length <= 25);
+});
+
+test("without an orch Session the system prompt is left alone", () => {
+	for (const pi of [new FakePi({}), new FakePi()]) {
+		if (pi.flags.has("orch-session")) {
+			// before the first session_start there is no Session yet
+		} else pi.emit("session_start", { reason: "startup" });
+		assert.deepEqual(pi.emit("before_agent_start", { prompt: "hi", systemPrompt: "You are pi." }), [undefined]);
+	}
 });

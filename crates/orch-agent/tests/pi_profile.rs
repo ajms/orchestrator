@@ -197,9 +197,9 @@ fn assert_only_orchs_resources(profile: &Path) {
     assert_eq!(entries(&profile.join("extensions")), ["orch"]);
     assert_eq!(
         entries(&extension),
-        ["forward.ts", "index.ts", "transcripts.ts"]
+        ["forward.ts", "index.ts", "prompt.ts", "transcripts.ts"]
     );
-    for name in ["index.ts", "forward.ts", "transcripts.ts"] {
+    for name in ["index.ts", "forward.ts", "prompt.ts", "transcripts.ts"] {
         let written = std::fs::read_to_string(extension.join(name)).unwrap();
         assert_eq!(written, shipped(name), "{name}");
     }
@@ -355,4 +355,137 @@ fn a_profile_that_is_a_link_is_refused() {
 
     assert!(home.try_prepare().is_err());
     untouched(&victim);
+}
+
+impl Home {
+    fn skill(&self, dir: &Path) {
+        self.seed(&dir.join("SKILL.md"), "---\nname: x\n---\n");
+    }
+
+    fn skill_links(&self) -> BTreeMap<String, PathBuf> {
+        std::fs::read_dir(self.profile().join("skills"))
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                (name, std::fs::read_link(entry.path()).unwrap())
+            })
+            .collect()
+    }
+
+    fn set_skill_settings(&self, skills: Value) {
+        let text = json!({"theme": "dark", "skills": skills}).to_string();
+        self.seed(&self.user().join("settings.json"), &text);
+    }
+}
+
+#[test]
+fn the_users_skills_are_linked_by_name_and_not_listed_again() {
+    let home = Home::new();
+    home.skill(&home.user().join("skills/tdd"));
+    home.skill(&home.user().join("skills/commit"));
+    home.seed(&home.user().join("skills/.hidden/SKILL.md"), "");
+    std::fs::create_dir_all(home.user().join("skills/node_modules")).unwrap();
+    home.prepare();
+
+    assert_eq!(
+        home.skill_links(),
+        BTreeMap::from([
+            ("commit".into(), home.user().join("skills/commit")),
+            ("tdd".into(), home.user().join("skills/tdd")),
+        ])
+    );
+    assert!(home.profile().join("skills/tdd/SKILL.md").is_file());
+    assert_eq!(home.settings()["skills"], json!([]));
+}
+
+#[test]
+fn skills_from_settings_entries_are_linked_and_the_first_source_wins() {
+    let home = Home::new();
+    let elsewhere = home.path().join("elsewhere");
+    home.skill(&home.user().join("skills/tdd"));
+    home.skill(&home.user().join("mine/tdd"));
+    home.skill(&home.user().join("mine/review"));
+    home.skill(&elsewhere.join("solo"));
+    home.skill(&elsewhere.join("review"));
+    home.seed(&home.path().join("single/SKILL.md"), "");
+    let single = home.path().join("single/SKILL.md");
+    let lone = elsewhere.join("solo");
+    home.set_skill_settings(json!(["mine", elsewhere, lone, single]));
+    home.prepare();
+
+    let user = home.user();
+    assert_eq!(
+        home.skill_links(),
+        BTreeMap::from([
+            ("tdd".into(), user.join("skills/tdd")),
+            ("review".into(), user.join("mine/review")),
+            ("solo".into(), elsewhere.join("solo")),
+        ])
+    );
+    assert_eq!(home.settings()["skills"], json!([single]));
+}
+
+#[test]
+fn a_source_with_skills_links_cannot_represent_stays_listed() {
+    let home = Home::new();
+    home.skill(&home.user().join("skills/tdd"));
+    home.seed(&home.user().join("skills/loose.md"), "");
+    home.prepare();
+
+    let user = home.user().to_string_lossy().into_owned();
+    assert_eq!(home.settings()["skills"], json!([format!("{user}/skills")]));
+    assert!(home.skill_links().contains_key("tdd"));
+}
+
+#[test]
+fn stale_skill_links_are_removed_on_rebuild() {
+    let home = Home::new();
+    home.skill(&home.user().join("skills/tdd"));
+    home.skill(&home.user().join("skills/gone"));
+    home.prepare();
+    std::fs::remove_dir_all(home.user().join("skills/gone")).unwrap();
+
+    home.prepare();
+
+    assert_eq!(
+        home.skill_links(),
+        BTreeMap::from([("tdd".into(), home.user().join("skills/tdd"))])
+    );
+}
+
+#[test]
+fn a_planted_link_in_the_skills_dir_is_replaced_without_following_it() {
+    let home = Home::new();
+    home.skill(&home.user().join("skills/tdd"));
+    home.prepare();
+    let victim = home.victim();
+    std::fs::remove_file(home.profile().join("skills/tdd")).unwrap();
+    home.plant_link("skills/tdd", &victim);
+    home.plant_link("skills/evil", &victim);
+    home.plant_link("skills.orch-new", &victim);
+
+    home.prepare();
+
+    untouched(&victim);
+    assert_eq!(
+        home.skill_links(),
+        BTreeMap::from([("tdd".into(), home.user().join("skills/tdd"))])
+    );
+}
+
+#[test]
+fn skill_dirs_outside_the_users_pi_dir_are_readable_in_the_sandbox() {
+    let home = Home::new();
+    let elsewhere = home.path().join("elsewhere");
+    home.skill(&elsewhere.join("solo"));
+    home.skill(&home.user().join("skills/tdd"));
+    home.set_skill_settings(json!([elsewhere]));
+    let path = home.path().to_string_lossy().into_owned();
+    let needs =
+        Pi::default().sandbox_needs(&move |key: &str| (key == "HOME").then(|| path.clone()));
+
+    assert!(needs.read_only.contains(&elsewhere.join("solo")));
+    assert!(!needs.read_only.contains(&home.user().join("skills/tdd")));
+    assert!(needs.carve_outs.contains(&home.profile().join("skills")));
 }

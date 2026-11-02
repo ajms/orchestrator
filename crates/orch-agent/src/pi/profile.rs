@@ -12,9 +12,10 @@ const LINKED: [&str; 4] = ["SYSTEM.md", "AGENTS.md", "keybindings.json", "agents
 const SETTINGS: &str = "settings.json";
 const EXTENSION_DIR: &str = "orch/extension";
 const EXTENSION_ENTRY: &str = "index.ts";
-const EXTENSION_FILES: [(&str, &str); 3] = [
+const EXTENSION_FILES: [(&str, &str); 4] = [
     (EXTENSION_ENTRY, include_str!("extension/index.ts")),
     ("forward.ts", include_str!("extension/forward.ts")),
+    ("prompt.ts", include_str!("extension/prompt.ts")),
     ("transcripts.ts", include_str!("extension/transcripts.ts")),
 ];
 const STAGED: &str = ".orch-new";
@@ -62,7 +63,8 @@ pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
     }
     std::fs::set_permissions(profile, std::fs::Permissions::from_mode(0o700))?;
 
-    let settings = serde_json::to_vec_pretty(&settings(user)?)?;
+    let skills = skills(user);
+    let settings = serde_json::to_vec_pretty(&settings(user, &skills.linked_sources)?)?;
     write_file(profile, SETTINGS, &settings)?;
 
     for name in LINKED.into_iter().chain(CREDENTIALS) {
@@ -78,6 +80,10 @@ pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
         std::fs::create_dir(&staged)?;
         if kind == "extensions" {
             write_extension(&staged)?;
+        } else if kind == "skills" {
+            for (name, target) in &skills.links {
+                std::os::unix::fs::symlink(target, staged.join(name))?;
+            }
         }
         swap(profile, kind, &staged)?;
     }
@@ -85,7 +91,87 @@ pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn settings(user: &Path) -> io::Result<Map<String, Value>> {
+/// The user's skills as orch links them into the profile's `skills/`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct Skills {
+    /// Link name (the skill directory's name) and target, first source winning.
+    pub(super) links: Vec<(String, PathBuf)>,
+    /// Sources wholly represented by `links`, left out of `settings.json`.
+    linked_sources: Vec<PathBuf>,
+}
+
+/// Plans the profile's skill links: `~/.pi/agent/skills`, then the user's
+/// `settings.json` `skills` entries. A skill is a directory holding a
+/// `SKILL.md`, as pi discovers them; a source that is itself one is linked
+/// by its own name. A source with anything else pi would discover (root
+/// `*.md` files, nested dirs without `SKILL.md`) stays in `settings.json`.
+pub(super) fn skills(user: &Path) -> Skills {
+    let mut sources = vec![user.join("skills")];
+    let configured = std::fs::read_to_string(user.join(SETTINGS))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Map<String, Value>>(&text).ok())
+        .and_then(|settings| settings.get("skills").and_then(Value::as_array).cloned())
+        .unwrap_or_default();
+    for entry in configured.iter().filter_map(Value::as_str) {
+        if entry.starts_with(['+', '-', '!', '~']) || entry.contains(':') {
+            continue;
+        }
+        sources.push(PathBuf::from(resolve(user, entry)));
+    }
+
+    let mut plan = Skills::default();
+    let add = |plan: &mut Skills, name: String, target: PathBuf| {
+        if !plan.links.iter().any(|(taken, _)| *taken == name) {
+            plan.links.push((name, target));
+        }
+    };
+    for source in sources {
+        if !source.is_dir() || plan.linked_sources.contains(&source) {
+            continue;
+        }
+        if is_skill(&source) {
+            if let Some(name) = source.file_name().and_then(|name| name.to_str()) {
+                add(&mut plan, name.into(), source.clone());
+                plan.linked_sources.push(source);
+            }
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&source) else {
+            continue;
+        };
+        let mut found: Vec<(String, PathBuf)> = Vec::new();
+        let mut whole = true;
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(String::from) else {
+                whole = false;
+                continue;
+            };
+            if name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() && is_skill(&path) {
+                found.push((name, path));
+            } else if path.is_dir() || name.ends_with(".md") {
+                whole = false;
+            }
+        }
+        found.sort();
+        for (name, path) in found {
+            add(&mut plan, name, path);
+        }
+        if whole {
+            plan.linked_sources.push(source);
+        }
+    }
+    plan
+}
+
+fn is_skill(dir: &Path) -> bool {
+    dir.join("SKILL.md").is_file()
+}
+
+fn settings(user: &Path, linked: &[PathBuf]) -> io::Result<Map<String, Value>> {
     let path = user.join(SETTINGS);
     let mut settings = match std::fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str::<Map<String, Value>>(&text).map_err(|err| {
@@ -112,6 +198,13 @@ fn settings(user: &Path) -> io::Result<Map<String, Value>> {
         let mut entries: Vec<Value> = std::iter::once(path_text(&user.join(kind)).into())
             .chain(own)
             .collect();
+        if kind == "skills" {
+            entries.retain(|entry| {
+                entry
+                    .as_str()
+                    .is_none_or(|text| !linked.iter().any(|dir| path_text(dir) == text))
+            });
+        }
         if kind == "extensions" {
             entries.extend(LEFT_OUT.map(|name| {
                 let entry = user.join(kind).join(name).join("index.ts");
