@@ -74,16 +74,12 @@ A name given to the Session through its Agent, by the user (e.g. Claude Code's `
 _Avoid_: Session name, label, alias
 
 **Agent**:
-A coding-agent program (e.g. Claude Code or Antigravity) that the Orchestrator drives inside a Session. A Session's Agent is chosen when the Session is created, defaulting to its Repo's, and never changes.
+A coding-agent program (e.g. Claude Code or pi) that the Orchestrator drives inside a Session. A Session's Agent is its Repo's default when the Session is created, and never changes.
 _Avoid_: Bot, assistant, model
 
 **Agent adapter**:
 What teaches the Orchestrator to launch, resume and observe one kind of Agent, and which capabilities that Agent has.
 _Avoid_: Driver, plugin, integration
-
-**Agent hookup**:
-The Orchestrator's hooks and statusline installed into an Agent's own global configuration, for Agents that cannot take them per Session; that Agent's Sessions cannot start without it.
-_Avoid_: Integration, setup, plugin
 
 **Agent profile**:
 A configuration of an Agent that the Orchestrator builds from the user's own setup of that Agent, and that the Agent's Sessions run with instead of it. The user's own configuration is never changed, and it is kept current with the user's setup.

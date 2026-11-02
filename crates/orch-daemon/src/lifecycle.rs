@@ -3,8 +3,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset, SandboxPaths};
-use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted};
+use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset, SandboxPaths, adapter_named};
+use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted, xdg};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
 };
@@ -13,10 +13,10 @@ use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
 
-use crate::agents::{Adapter, adapter_for, default_adapter, default_program};
+use crate::agents::{Adapter, adapter_for};
 use crate::branch::{BranchRequest, BranchTarget};
 use crate::holder::Attach;
-use crate::state::{Daemon, Live, gate_message};
+use crate::state::{Daemon, Live, gate_message, store_conversations};
 
 pub(crate) const HOLDER_EXIT_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const PROMPT_FILE: &str = "prompt";
@@ -79,10 +79,10 @@ fn describe(item: &TrustItem) -> String {
     match item {
         TrustItem::SetupScript(script) => format!("Setup script: {script}"),
         TrustItem::TeardownScript(script) => format!("Teardown script: {script}"),
-        TrustItem::Agent { binary, args } => {
-            let program = binary.clone().unwrap_or_else(default_program);
-            format!("Agent: {program} {}", args.join(" "))
-        }
+        TrustItem::Agent { name, binary, args } => match binary {
+            Some(binary) => format!("Agent {name}: {binary} {}", args.join(" ")),
+            None => format!("Agent {name} args: {}", args.join(" ")),
+        },
         TrustItem::Preset(preset) => format!("Preset {}", preset.name),
         TrustItem::DefaultPreset(preset) => format!("default Preset {}", preset.name),
         TrustItem::SandboxPath { list, path } => format!("Sandbox {}: {path}", list.name()),
@@ -233,10 +233,10 @@ impl Daemon {
             return Err(untrusted(root.path(), &config));
         }
         let agent = config
-            .agent()
+            .agent(config.default_agent())
             .map_err(|_| untrusted(root.path(), &config))?;
-        let adapter = adapter_for(agent).map_err(refused)?;
-        if preset.sandboxed() {
+        let adapter = adapter_for(&agent).ok();
+        if let Some(adapter) = adapter.as_ref().filter(|_| preset.sandboxed()) {
             let configured = sandbox_paths(root.path(), &config)?;
             self.probe_sandbox(None, root.path(), adapter.as_ref(), &configured)
                 .map_err(refused)?;
@@ -292,6 +292,7 @@ impl Daemon {
             phase: Phase::SettingUp,
             preset: preset.name,
             existing_branch,
+            agent: agent.name,
         };
         let ports = global.ports;
         let stored = self.store.call_blocking(move |store| {
@@ -339,11 +340,13 @@ impl Daemon {
         repo: &Path,
     ) -> Result<(), RequestError> {
         let config = self.repo_config(repo).await?;
-        let agent = config.agent().map_err(|_| untrusted(repo, &config))?;
+        let agent = config
+            .agent(&record.agent)
+            .map_err(|_| untrusted(repo, &config))?;
         let preset = select_preset(repo, &config, Some(&record.preset))?;
         if preset.sandboxed() {
             let configured = sandbox_paths(repo, &config)?;
-            let adapter = adapter_for(agent).map_err(refused)?;
+            let adapter = adapter_for(&agent).map_err(refused)?;
             let daemon = self.clone();
             let (record, repo) = (record.clone(), repo.to_path_buf());
             tokio::task::spawn_blocking(move || {
@@ -442,14 +445,16 @@ impl Daemon {
         name: String,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
-        let (_claim, _, repo) = self.claim(id, |live| {
+        let (_claim, record, repo) = self.claim(id, |live| {
             live.status
                 .check_preset_change()
                 .map_err(|refusal| gate_message("Changing the Preset", refusal))
         })?;
         let config = self.repo_config(&repo).await?;
         let preset = select_preset(&repo, &config, Some(&name))?;
-        config.agent().map_err(|_| untrusted(&repo, &config))?;
+        config
+            .agent(&record.agent)
+            .map_err(|_| untrusted(&repo, &config))?;
         let mut restart = false;
         let mut replaced = None;
         self.update(id, |live| {
@@ -513,21 +518,26 @@ impl Daemon {
         };
         let spawned = match launch {
             Ok(launch) => {
-                let sandbox = match &launch.sandbox {
-                    Some(configured) => {
+                let sandbox = match (prepare(&launch.adapter).await, &launch.sandbox) {
+                    (Err(message), _) => Err(message),
+                    (Ok(()), Some(configured)) => {
                         self.blocking_sandbox(&record, &repo, &launch.adapter, configured)
                             .await
                     }
-                    None => Ok(None),
+                    (Ok(()), None) => Ok(None),
                 };
+                let env = launch.adapter.env(&xdg::process_env);
                 let _ = self.update(id, |live| {
-                    live.adapter = launch.adapter;
+                    live.adapter = Some(launch.adapter);
                     live.preset_sandboxed = launch.sandbox.is_some();
                     live.record.holder_seq = 0;
                     Ok(())
                 });
                 match sandbox {
-                    Ok(sandbox) => self.spawn_holder(&record, launch.argv, sandbox).await,
+                    Ok(sandbox) => {
+                        self.opened_conversation(id, launch.conversation).await;
+                        self.spawn_holder(&record, launch.argv, env, sandbox).await
+                    }
                     Err(message) => Err(message),
                 }
             }
@@ -543,6 +553,22 @@ impl Daemon {
         if let Err(message) = attached {
             self.agent_failed(id, message);
         }
+    }
+
+    async fn opened_conversation(&self, id: &SessionId, conversation: Option<ConversationId>) {
+        let Some(conversation) = conversation else {
+            return;
+        };
+        let conversations = vec![conversation];
+        let _ = self.update(id, |live| {
+            live.note_conversations(&conversations);
+            Ok(())
+        });
+        let session = id.clone();
+        let _ = self
+            .store
+            .call(move |store| store_conversations(store, &session, conversations))
+            .await;
     }
 
     fn agent_failed(&self, id: &SessionId, message: String) {
@@ -584,8 +610,8 @@ impl Daemon {
         prompt: Option<String>,
         resume: bool,
     ) -> Result<AgentLaunch, String> {
-        let agent = config.agent().map_err(|err| err.to_string())?;
-        let adapter = adapter_for(agent)?;
+        let agent = config.agent(&record.agent).map_err(|err| err.to_string())?;
+        let adapter = adapter_for(&agent)?;
         let preset =
             select_preset(repo, config, Some(&record.preset)).map_err(|err| err.to_string())?;
         let sandbox = match preset.sandboxed() {
@@ -598,6 +624,9 @@ impl Daemon {
             preset,
         )
         .with_worktree(&record.worktree);
+        if let Some(profile) = adapter.agent_profile(&xdg::process_env)? {
+            spec = spec.with_agent_profile(profile);
+        }
         if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
             spec = spec.with_prompt(prompt);
         }
@@ -605,11 +634,16 @@ impl Daemon {
             (true, Some(conversation)) => Some((conversation, record.last_mode)),
             _ => None,
         };
+        let conversation = match resume {
+            Some(_) => None,
+            None => adapter.launch_conversation(&spec),
+        };
         let argv = agent_command(adapter.as_ref(), &agent.args, spec, resume);
         Ok(AgentLaunch {
             adapter,
             argv,
             sandbox,
+            conversation,
         })
     }
 
@@ -617,6 +651,7 @@ impl Daemon {
         &self,
         record: &SessionRecord,
         argv: Vec<String>,
+        agent_env: Vec<(String, String)>,
         sandbox: Option<SandboxLaunch>,
     ) -> Result<(), String> {
         let mut command = crate::subprocess::command(&self.config.orch_program);
@@ -629,7 +664,9 @@ impl Daemon {
             .arg("--cwd")
             .arg(&record.worktree)
             .arg("--base")
-            .arg(&record.base);
+            .arg(&record.base)
+            .arg("--agent")
+            .arg(&record.agent);
         if let Some(block) = record.port_block {
             command
                 .arg("--port-base")
@@ -651,6 +688,7 @@ impl Daemon {
         let env = session_env(record)
             .into_iter()
             .chain(display)
+            .chain(agent_env)
             .chain(broker_env);
         for (key, value) in env {
             command.arg("--env").arg(format!("{key}={value}"));
@@ -731,17 +769,6 @@ impl Daemon {
         })
     }
 
-    pub(crate) async fn repo_adapter(&self, repo: &Path) -> Adapter {
-        match self.repo_config(repo).await {
-            Ok(config) => config
-                .agent()
-                .ok()
-                .and_then(|agent| adapter_for(agent).ok())
-                .unwrap_or_else(default_adapter),
-            Err(_) => default_adapter(),
-        }
-    }
-
     async fn load_sessions(&self) -> Vec<(SessionId, Phase)> {
         let listed = self
             .store
@@ -760,7 +787,7 @@ impl Daemon {
             let Some(repo) = repos.iter().find(|repo| repo.id == record.repo) else {
                 continue;
             };
-            let adapter = self.repo_adapter(&repo.path).await;
+            let adapter = adapter_named(&record.agent, None);
             let id = record.id.clone();
             let preset_sandboxed = self.preset_sandboxed(&repo.path, &record.preset).await;
             let mut live = Live::new(record, repo.path.clone(), adapter);
@@ -783,6 +810,14 @@ struct AgentLaunch {
     adapter: Adapter,
     argv: Vec<String>,
     sandbox: Option<SandboxPaths>,
+    conversation: Option<ConversationId>,
+}
+
+async fn prepare(adapter: &Adapter) -> Result<(), String> {
+    let adapter = adapter.clone();
+    tokio::task::spawn_blocking(move || adapter.prepare(&xdg::process_env))
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 pub(crate) fn select_preset(

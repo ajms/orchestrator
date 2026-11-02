@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Args;
+use orch_agent::CLAUDE;
 use orch_config::PortBlock;
 use orch_core::SessionId;
 use orch_holder::{HoldConfig, HoldSandbox, Size, default_runtime_dir, socket_path};
@@ -23,6 +24,8 @@ pub struct HoldArgs {
     env: Vec<(String, String)>,
     #[arg(long)]
     base: Option<String>,
+    #[arg(long, default_value = CLAUDE)]
+    agent: String,
     #[arg(long, requires = "port_size")]
     port_base: Option<u16>,
     #[arg(long, requires = "port_base")]
@@ -77,6 +80,7 @@ pub fn run(args: HoldArgs) -> ExitCode {
     });
     config.env = args.env;
     config.base = args.base;
+    config.agent = args.agent;
     config.port_block = args
         .port_base
         .zip(args.port_size)

@@ -14,7 +14,9 @@ pub struct SessionView {
     pub base: String,
     pub worktree: PathBuf,
     pub phase: PhaseView,
-    pub agent: Option<AgentStateView>,
+    pub agent_state: Option<AgentStateView>,
+    #[serde(default = "orch_agent::implied_agent")]
+    pub agent: String,
     pub flags: FlagsView,
     pub preset: String,
     pub mode: Option<String>,

@@ -1,0 +1,6 @@
+{
+  "event": "agent_settled",
+  "aborted": false,
+  "stopReason": "error",
+  "errorMessage": "fetch failed"
+}

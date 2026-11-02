@@ -11,12 +11,14 @@ fn hook(payload: &str) -> HolderEvent {
     HolderEvent::Hook {
         payload: payload.into(),
         guard: None,
+        agent: "claude".into(),
     }
 }
 
 fn tap(payload: &str) -> HolderEvent {
     HolderEvent::Tap {
         payload: payload.into(),
+        agent: "claude".into(),
     }
 }
 

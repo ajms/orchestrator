@@ -30,6 +30,10 @@ impl Repo {
     }
 }
 
+pub fn worktree_status(worktree: &Path) -> Result<String, Error> {
+    git(worktree, ["status", "--short", "--untracked-files=all"]).run()
+}
+
 pub(crate) fn snapshot_commit(worktree: &Path) -> Result<String, Error> {
     let scratch =
         tempfile::tempdir().map_err(|error| Error::io("create temporary index", error))?;

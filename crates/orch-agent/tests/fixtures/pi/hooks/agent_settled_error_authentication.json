@@ -1,0 +1,6 @@
+{
+  "event": "agent_settled",
+  "aborted": false,
+  "stopReason": "error",
+  "errorMessage": "401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"}}"
+}

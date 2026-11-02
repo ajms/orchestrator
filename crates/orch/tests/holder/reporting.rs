@@ -103,10 +103,38 @@ async fn tap_forwards_the_statusline_payload_to_the_holder() {
     assert_eq!(
         next_hook_or_tap(&mut client).await,
         HolderEvent::Tap {
-            payload: STATUS.into()
+            payload: STATUS.into(),
+            agent: "claude".into(),
         }
     );
     wait_for_screen(&mut client, |text| text.contains("tap> Opus · 42%")).await;
+}
+
+#[tokio::test]
+async fn hook_and_tap_forward_the_agent_they_were_run_for() {
+    let sandbox = Sandbox::new();
+    let held = sandbox.hold("s1", "");
+    let (mut client, _) = held.attach().await;
+
+    type_line(&mut client, &format!("hook --agent pi {PRE_TOOL_USE}")).await;
+    assert_eq!(
+        next_hook_or_tap(&mut client).await,
+        HolderEvent::Hook {
+            payload: PRE_TOOL_USE.into(),
+            guard: None,
+            agent: "pi".into(),
+        }
+    );
+
+    type_line(&mut client, &format!("tap --agent pi {STATUS}")).await;
+    assert_eq!(
+        next_hook_or_tap(&mut client).await,
+        HolderEvent::Tap {
+            payload: STATUS.into(),
+            agent: "pi".into(),
+        }
+    );
+    wait_for_screen(&mut client, |text| text.contains("tap> ")).await;
 }
 
 #[test]

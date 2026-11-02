@@ -25,7 +25,7 @@ async fn a_failed_setup_shows_its_output_and_can_be_retried() {
         })
         .await;
     assert!(failed.setup_output.unwrap().contains("missing dependency"));
-    assert_eq!(failed.agent, None);
+    assert_eq!(failed.agent_state, None);
     assert_eq!(failed.holder_pid, None);
 
     std::fs::write(failed.worktree.join("ready.txt"), "").unwrap();
@@ -37,7 +37,7 @@ async fn a_failed_setup_shows_its_output_and_can_be_retried() {
     assert_eq!(retried, Ok(Reply::Done));
     client
         .until(&id, "Active with an Agent", |view| {
-            view.phase == PhaseView::Active && view.agent.is_some()
+            view.phase == PhaseView::Active && view.agent_state.is_some()
         })
         .await;
 }
@@ -66,7 +66,7 @@ async fn a_failed_setup_can_be_skipped_to_start_the_agent_anyway() {
     assert_eq!(skipped, Ok(Reply::Done));
     client
         .until(&id, "Active with an Agent", |view| {
-            view.phase == PhaseView::Active && view.agent.is_some()
+            view.phase == PhaseView::Active && view.agent_state.is_some()
         })
         .await;
     let mut pane = env.pane(&id, PANE).await;

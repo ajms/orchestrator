@@ -48,7 +48,7 @@ fn line(app: &App, row: &Row, width: usize) -> Line<'static> {
             missing,
             folded: Some(folded),
         } => highlighted(folded_heading(repo, *missing, folded), selected),
-        Row::Session(view) => highlighted(first_line(view), selected),
+        Row::Session(view) => highlighted(first_line(view, width), selected),
         Row::Flags(_, flags) => flag_line(flags),
         Row::Subagent(_, subagent) => highlighted(subagent_line(subagent, width), selected),
         Row::SubagentsDone(_, done) => highlighted(
@@ -95,7 +95,7 @@ fn urgency(urgency: Urgency) -> Span<'static> {
     }
 }
 
-fn first_line(view: &SessionView) -> Line<'static> {
+fn first_line(view: &SessionView, width: usize) -> Line<'static> {
     let marker = match view.flags.unseen {
         true => Span::styled("● ", UNSEEN),
         false => Span::raw("  "),
@@ -105,24 +105,29 @@ fn first_line(view: &SessionView) -> Line<'static> {
         true => (Style::new().fg(Color::DarkGray), Color::DarkGray),
         false => (Style::new(), colour),
     };
-    let mut first = vec![
-        marker,
-        Span::styled(
-            format!(
-                "{:<LABEL_WIDTH$} ",
-                truncate(view.title_or_slug(), LABEL_WIDTH)
-            ),
-            name,
-        ),
-        Span::styled(label, Style::new().fg(colour)),
-    ];
+    let mut tail = vec![Span::styled(label, Style::new().fg(colour))];
     if let Some(percent) = view.context_used_percent {
-        first.push(Span::raw(" "));
-        first.push(Span::styled(
+        tail.push(Span::raw(" "));
+        tail.push(Span::styled(
             format!("{percent:.0}%"),
             Style::new().fg(style::context(percent)),
         ));
     }
+    tail.push(Span::raw(format!(" {}", view.agent)).dark_gray());
+    let used: usize = tail.iter().map(|span| span.content.chars().count()).sum();
+    let room = width.saturating_sub(marker.content.chars().count() + 1 + used);
+    let label_width = LABEL_WIDTH.min(room).max(1);
+    let mut first = vec![
+        marker,
+        Span::styled(
+            format!(
+                "{:<label_width$} ",
+                truncate(view.title_or_slug(), label_width)
+            ),
+            name,
+        ),
+    ];
+    first.extend(tail);
     Line::from(first)
 }
 

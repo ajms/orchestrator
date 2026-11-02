@@ -53,7 +53,7 @@ async fn usage_is_totalled_per_repo_and_for_today_across_conversations_and_agent
         .create(CreateSession::new(&lib_repo, "Lib work"))
         .await;
     client
-        .until(&lib, "running", |view| view.agent.is_some())
+        .until(&lib, "running", |view| view.agent_state.is_some())
         .await;
     let mut lib_pane = env.pane(&lib, PANE).await;
     tap(&mut client, &mut lib_pane, &lib, ("conv-9", 1000, 100, 2.0)).await;

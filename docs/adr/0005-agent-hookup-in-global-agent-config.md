@@ -1,5 +1,7 @@
 # An Agent hookup in the Agent's global config, for Agents that cannot take it per Session
 
+**Status: Superseded.** Antigravity, the only Agent that needed an Agent hookup, was removed in #113, and orch installs no Agent hookup today. The decision below is kept as a record.
+
 For Claude Code, the Orchestrator injects its hooks, statusline and Preset rules per launch through `--settings`, and never touches `~/.claude`. Antigravity (`agy`) has no settings flag and no config-dir variable, so for Agents like it the Orchestrator installs an **Agent hookup** into the Agent's own global configuration: one named `orch` hook entry (`~/.gemini/config/hooks.json`) and a statusline tap (`~/.gemini/antigravity-cli/settings.json`). An explicit `orch agent install <agent>` writes it after showing the diff and asking. The hook works out its Session from the `ORCH_SESSION` variable the Holder already exports, and does nothing without it. The tap runs the user's previous statusline command as a passthrough. Per-Session autonomy travels through launch flags and the hook's decision, because global settings can't hold rules for one Session.
 
 ## Considered options

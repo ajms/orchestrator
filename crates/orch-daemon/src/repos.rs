@@ -43,6 +43,7 @@ impl Daemon {
             default_base,
             review_command: config.review_command().map(String::from),
             branch_prefix: self.branch_prefix().await,
+            agent: config.default_agent().into(),
             trust,
             repo,
         }))

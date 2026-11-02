@@ -82,7 +82,7 @@ impl Env {
 
     pub fn write_config_with_agent(&self, extra: &str, binary: &str) {
         let config = format!(
-            "{extra}\n[defaults.agent]\nbinary = {binary:?}\nargs = [\"fake-agent\", \"--\"]\n"
+            "{extra}\n[defaults.agents.claude]\nbinary = {binary:?}\nargs = [\"fake-agent\", \"--\"]\n"
         );
         std::fs::write(self.path("config/orchestrator/config.toml"), config).unwrap();
     }
@@ -824,7 +824,7 @@ pub async fn running_session(env: &Env, client: &mut TestClient, prompt: &str) -
     }
     let id = client.create(CreateSession::new(&repo, prompt)).await;
     client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     id
 }
@@ -840,7 +840,7 @@ pub async fn idle_session(
         .await;
     client
         .until(&id, "Idle", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::Idle)
+            view.agent_state == Some(orch_protocol::AgentStateView::Idle)
         })
         .await;
     (id, pane)
@@ -870,7 +870,7 @@ pub fn feature_branch(repo: &Path) -> String {
 pub async fn running_on(client: &mut TestClient, create: CreateSession) -> SessionId {
     let id = client.create(create).await;
     client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     id
 }
@@ -882,7 +882,7 @@ pub async fn idle_on(env: &Env, client: &mut TestClient, create: CreateSession) 
         .await;
     client
         .until(&id, "Idle", |view| {
-            view.agent == Some(orch_protocol::AgentStateView::Idle)
+            view.agent_state == Some(orch_protocol::AgentStateView::Idle)
         })
         .await;
     id

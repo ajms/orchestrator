@@ -27,7 +27,7 @@ async fn changing_the_preset_resumes_the_conversation_with_the_new_flags() {
     pane.hook(&hook("Stop", "")).await;
     client
         .until(&id, "Idle in default mode", |view| {
-            view.agent == Some(State::Idle) && view.mode.as_deref() == Some("default")
+            view.agent_state == Some(State::Idle) && view.mode.as_deref() == Some("default")
         })
         .await;
     let before = client.sessions[&id].clone();
@@ -37,7 +37,8 @@ async fn changing_the_preset_resumes_the_conversation_with_the_new_flags() {
 
     let after = client
         .until(&id, "restarted", |view| {
-            view.holder_pid.is_some_and(|pid| pid as i32 != old_holder) && view.agent.is_some()
+            view.holder_pid.is_some_and(|pid| pid as i32 != old_holder)
+                && view.agent_state.is_some()
         })
         .await;
     assert_eq!(after.preset, "plan");
@@ -63,7 +64,9 @@ async fn the_preset_cannot_change_while_the_agent_works_or_to_an_unknown_preset(
 
     pane.hook(&hook("UserPromptSubmit", "")).await;
     client
-        .until(&id, "Working", |view| view.agent == Some(State::Working))
+        .until(&id, "Working", |view| {
+            view.agent_state == Some(State::Working)
+        })
         .await;
     assert!(matches!(
         set_preset(&mut client, &id, "plan").await,

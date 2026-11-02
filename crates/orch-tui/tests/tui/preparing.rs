@@ -148,6 +148,7 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
         default_base: None,
         review_command: None,
         branch_prefix: "orch/".into(),
+        agent: "claude".into(),
         trust: None,
     }];
     let message = "branch orch/fix-login-timeout-v2 already exists".to_string();

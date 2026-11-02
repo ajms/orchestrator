@@ -1,0 +1,6 @@
+{
+  "event": "agent_settled",
+  "aborted": false,
+  "stopReason": "error",
+  "errorMessage": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your rate limit.\"}}"
+}

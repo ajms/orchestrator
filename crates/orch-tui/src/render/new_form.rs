@@ -79,6 +79,12 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
                 }
                 lines.push(Line::default());
             }
+            lines.push(Line::from(tag(
+                "Agent",
+                false,
+                usize::from(fields.width) - 2,
+            )));
+            lines.push(agent(form));
             lines.extend(error(form));
             frame.render_widget(Paragraph::new(lines), fields);
             cursor
@@ -92,7 +98,7 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
 fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -> Option<Position> {
     let rows = match form.repo.picker() {
         Some(_) => body.height / 2,
-        None => 5 + u16::from(form.error.is_some()) + 1,
+        None => 6 + u16::from(form.error.is_some()) + 1,
     };
     let [fields, head, text] = Layout::vertical([
         Constraint::Length(rows),
@@ -123,6 +129,9 @@ fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
                     lines.push(Line::styled(format!("{indent}{text}"), style));
                 }
             }
+            let mut line = Line::from(vec![tag("Agent", false, ROW_LABEL), Span::raw(" ")]);
+            line.spans.extend(agent(form).spans);
+            lines.push(line);
             lines.extend(error(form));
             frame.render_widget(Paragraph::new(lines), fields);
             cursor
@@ -201,11 +210,26 @@ fn label(form: &NewForm, field: Field, width: usize) -> Span<'static> {
         Field::Base => "Base",
         Field::Preset => "Preset",
     };
-    let style = match form.field == field && form.repo.picker().is_none() {
+    tag(
+        name,
+        form.field == field && form.repo.picker().is_none(),
+        width,
+    )
+}
+
+fn tag(name: &str, focused: bool, width: usize) -> Span<'static> {
+    let style = match focused {
         true => Style::new().fg(Color::Black).bg(Color::Cyan),
         false => Style::new().fg(Color::DarkGray),
     };
     Span::styled(format!(" {name:<width$} "), style)
+}
+
+fn agent(form: &NewForm) -> Line<'static> {
+    match &form.agent {
+        Some(agent) => Line::from(format!(" {agent} (Repo default)")).dark_gray(),
+        None => Line::from(" (Repo default)").dark_gray(),
+    }
 }
 
 fn value(

@@ -43,7 +43,7 @@ async fn a_restarted_daemon_adopts_live_holders_and_their_buffered_events() {
     let mut client = env.client().await;
     let adopted = client
         .until(&id, "Needs input", |view| {
-            view.agent == Some(State::NeedsInput)
+            view.agent_state == Some(State::NeedsInput)
         })
         .await;
     assert_eq!(adopted.phase, PhaseView::Active);
@@ -53,7 +53,7 @@ async fn a_restarted_daemon_adopts_live_holders_and_their_buffered_events() {
     pane.wait_for_text("before the restart").await;
     pane.hook(&hook("Stop", "")).await;
     client
-        .until(&id, "Idle", |view| view.agent == Some(State::Idle))
+        .until(&id, "Idle", |view| view.agent_state == Some(State::Idle))
         .await;
 }
 
@@ -67,7 +67,7 @@ async fn a_session_whose_holder_died_is_suspended_and_resumes_its_conversation()
     create.preset = Some("edits".into());
     let id = client.create(create).await;
     client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     let mut pane = env.pane(&id, PANE).await;
     pane.wait_for_text("permission-mode> acceptEdits").await;
@@ -75,7 +75,7 @@ async fn a_session_whose_holder_died_is_suspended_and_resumes_its_conversation()
         .await;
     client
         .until(&id, "Idle in plan mode", |view| {
-            view.agent == Some(State::Idle) && view.mode.as_deref() == Some("plan")
+            view.agent_state == Some(State::Idle) && view.mode.as_deref() == Some("plan")
         })
         .await;
 
@@ -83,7 +83,7 @@ async fn a_session_whose_holder_died_is_suspended_and_resumes_its_conversation()
     let suspended = client
         .until(&id, "Suspended", |view| view.phase == PhaseView::Suspended)
         .await;
-    assert_eq!(suspended.agent, None);
+    assert_eq!(suspended.agent_state, None);
     assert_eq!(suspended.port_base, Some(20000));
 
     let resumed = client
@@ -94,7 +94,7 @@ async fn a_session_whose_holder_died_is_suspended_and_resumes_its_conversation()
     assert_eq!(resumed, Ok(Reply::Done));
     let active = client
         .until(&id, "Active again", |view| {
-            view.phase == PhaseView::Active && view.agent.is_some()
+            view.phase == PhaseView::Active && view.agent_state.is_some()
         })
         .await;
     assert_eq!(active.port_base, Some(20000));
@@ -144,7 +144,9 @@ async fn an_exited_agent_keeps_its_holder_until_resumed_into_a_fresh_one() {
     pane.hook(&hook("SessionStart", "")).await;
     pane.type_line("exit 0").await;
     client
-        .until(&id, "Exited", |view| view.agent == Some(State::Exited))
+        .until(&id, "Exited", |view| {
+            view.agent_state == Some(State::Exited)
+        })
         .await;
     let old_holder = client.holder_pid(&id).unwrap() as u32;
     client.history.clear();
@@ -158,7 +160,7 @@ async fn an_exited_agent_keeps_its_holder_until_resumed_into_a_fresh_one() {
     client
         .until(&id, "running in a fresh Holder", |view| {
             view.holder_pid.is_some_and(|pid| pid != old_holder)
-                && matches!(view.agent, Some(State::Starting | State::Working))
+                && matches!(view.agent_state, Some(State::Starting | State::Working))
         })
         .await;
     let mut pane = env.pane(&id, PANE).await;
@@ -183,7 +185,7 @@ async fn an_idle_agent_is_still_idle_after_a_daemon_restart_without_new_events()
         .await;
     client
         .until(&id, "Idle in plan mode", |view| {
-            view.agent == Some(State::Idle) && view.mode.as_deref() == Some("plan")
+            view.agent_state == Some(State::Idle) && view.mode.as_deref() == Some("plan")
         })
         .await;
     settled(&mut client).await;
@@ -192,7 +194,7 @@ async fn an_idle_agent_is_still_idle_after_a_daemon_restart_without_new_events()
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let listed = client.session_list().await;
-    assert_eq!(listed[0].agent, Some(State::Idle));
+    assert_eq!(listed[0].agent_state, Some(State::Idle));
     assert_eq!(listed[0].mode.as_deref(), Some("plan"));
     assert_eq!(listed[0].phase, PhaseView::Active);
 }
@@ -208,7 +210,7 @@ async fn resuming_after_a_failed_launch_starts_fresh_with_the_initial_prompt() {
     let failed = client
         .until(&id, "a failed launch", |view| view.error.is_some())
         .await;
-    assert_eq!(failed.agent, Some(State::Errored));
+    assert_eq!(failed.agent_state, Some(State::Errored));
     assert_eq!(failed.holder_pid, None);
 
     env.write_config(UNSANDBOXED);
@@ -253,7 +255,7 @@ async fn a_holder_connection_taken_over_transiently_is_reattached_not_suspended(
     let mut pane = env.pane(&id, PANE).await;
     pane.hook(&hook("SessionStart", "")).await;
     client
-        .until(&id, "Idle", |view| view.agent == Some(State::Idle))
+        .until(&id, "Idle", |view| view.agent_state == Some(State::Idle))
         .await;
     assert!(
         client

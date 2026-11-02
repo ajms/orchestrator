@@ -1,0 +1,6 @@
+{
+  "event": "agent_settled",
+  "aborted": true,
+  "stopReason": "aborted",
+  "errorMessage": "Request was aborted"
+}

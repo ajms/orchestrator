@@ -122,14 +122,32 @@ fn personal_loosening_presets_are_always_trusted() {
 fn committed_agent_binary_and_args_need_trust() {
     let fx = Fixture::new();
     fx.repo_file(
-        "[agent]\nbinary = \"./bin/claude\"\nargs = [\"--dangerously-skip-permissions\"]\n",
+        "[agents.claude]\nbinary = \"./bin/claude\"\nargs = [\"--dangerously-skip-permissions\"]\n",
     );
-    assert_eq!(fx.untrusted().agent(), Err(Untrusted));
+    let untrusted = fx.untrusted();
+    assert_eq!(untrusted.agent("claude"), Err(Untrusted));
+    assert_eq!(
+        untrusted.trust_request().unwrap().items,
+        vec![TrustItem::Agent {
+            name: "claude".into(),
+            binary: Some("./bin/claude".into()),
+            args: vec!["--dangerously-skip-permissions".into()],
+        }]
+    );
     let approved = fx.approved();
     assert_eq!(
-        approved.agent().unwrap().binary.as_deref(),
+        approved.agent("claude").unwrap().binary.as_deref(),
         Some("./bin/claude")
     );
+}
+
+#[test]
+fn a_committed_binary_for_one_agent_leaves_the_others_usable() {
+    let fx = Fixture::new();
+    fx.repo_file("[agents.pi]\nbinary = \"./bin/pi\"\n");
+    let untrusted = fx.untrusted();
+    assert_eq!(untrusted.agent("pi"), Err(Untrusted));
+    assert_eq!(untrusted.agent("claude").unwrap().binary, None);
 }
 
 #[test]
@@ -188,7 +206,7 @@ fn personal_default_preset_that_loosens_is_trusted() {
 #[test]
 fn committed_agent_name_alone_needs_no_trust() {
     let fx = Fixture::new();
-    fx.repo_file("[agent]\nname = \"claude\"\n");
+    fx.repo_file("[agent]\nname = \"pi\"\n");
     assert_eq!(fx.untrusted().trust_request(), None);
-    assert_eq!(fx.untrusted().agent().unwrap().name, "claude");
+    assert_eq!(fx.untrusted().default_agent(), "pi");
 }

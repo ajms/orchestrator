@@ -27,7 +27,8 @@ impl SessionId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(transparent)]
 pub struct ConversationId(pub String);
 
 impl ConversationId {

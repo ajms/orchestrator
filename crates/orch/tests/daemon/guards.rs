@@ -35,7 +35,7 @@ async fn settle(client: &mut TestClient, pane: &mut PaneView, id: &SessionId, ma
     pane.wait_for_text(marker).await;
     pane.hook(&hook("Stop", "")).await;
     client
-        .until(id, "Idle", |view| view.agent == Some(State::Idle))
+        .until(id, "Idle", |view| view.agent_state == Some(State::Idle))
         .await;
 }
 
@@ -51,7 +51,7 @@ async fn a_guard_hit_asks_the_user_and_relays_a_denial_to_the_agent() {
 
     pane.hook(&write_outside(&view, "/etc/hosts")).await;
     let asking = prompted(&mut client, &id).await;
-    assert_eq!(asking.agent, Some(State::NeedsInput));
+    assert_eq!(asking.agent_state, Some(State::NeedsInput));
     let prompt = &asking.guard_prompts[0];
     assert_eq!(prompt.tool, "Write");
     assert_eq!(

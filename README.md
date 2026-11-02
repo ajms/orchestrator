@@ -62,7 +62,9 @@ In the TUI, type `:new`, write a prompt (`Ctrl+g` opens `$EDITOR`, `Ctrl+r` pick
 
 1. creates `.orchestrator/worktrees/<slug>` on Branch `orch/<slug>`;
 2. runs the Repo's Setup script;
-3. starts Claude in the pane.
+3. starts the Session's Agent in the pane.
+
+The Agent is the Repo's `[agent] name` (Claude unless set), which the form shows under the Preset. The Session keeps that Agent for good, and its sidebar row names it.
 
 Type a Branch name into the form's Branch field to pick it yourself: the first character replaces the name derived from the prompt, and an empty field falls back to the derived name. A name that exists nowhere creates that Branch from the Base branch. A name that already exists, locally or on origin, starts the Session on that **Existing Branch** under its own name, with or without the `orch/` prefix, so the Agent's pushes update its PR. The Worktree's slug is the name without the prefix. A Branch only on origin is fetched, and a local one behind origin is fast-forwarded; one ahead of origin starts as it is. `orch` refuses the Branch if it has diverged from origin, origin can't be reached, it is checked out in the main checkout or any other worktree (Subagent worktrees included), another Session owns it, or it is origin's default branch, the configured `base` (without an origin, the Repo's current branch) or the new Session's own Base branch. Another Session's Base branch is fine.
 
@@ -206,7 +208,8 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `review_command` | Command shown when reviewing a Session; not allowed in `.orchestrator.toml` |
 | `sandbox` | The global switch: whether Presets that don't set `sandbox` themselves run in the Sandbox (default `true`); not allowed in `.orchestrator.toml` |
 | `[sandbox]` | `readable`, `writable` and `hidden` path lists for the [Sandbox](#sandbox); they append across layers, and a layer can't hold both this table and the `sandbox` switch |
-| `[agent]` | `name` (default `claude`), `binary`, `args` |
+| `[agent]` | `name`: the Agent of new Sessions (default `claude`); a Session keeps its Agent when this changes |
+| `[agents.<name>]` | `binary`, `args` for that Agent, e.g. `[agents.claude]`; read at every launch |
 | `[presets.<name>]` | `mode`, `allow`, `deny`, `sandbox` (run the Agent in the Sandbox; default `true`) |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
 

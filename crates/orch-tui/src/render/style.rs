@@ -2,7 +2,7 @@ use orch_protocol::{AgentStateView, PhaseView, SessionView};
 use ratatui::style::Color;
 
 pub fn status(view: &SessionView) -> (&'static str, Color) {
-    match (view.phase, view.agent) {
+    match (view.phase, view.agent_state) {
         (PhaseView::Active | PhaseView::PrOpen, Some(agent)) => agent_state(agent),
         (phase, _) => phase_label(phase),
     }

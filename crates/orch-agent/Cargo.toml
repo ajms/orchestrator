@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+nix = { version = "0.30", features = ["fs"] }
 orch-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

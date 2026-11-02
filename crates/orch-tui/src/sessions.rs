@@ -80,7 +80,7 @@ impl Sessions {
 }
 
 pub fn agent_is(view: &SessionView, state: AgentStateView) -> bool {
-    view.phase.is_live() && view.agent == Some(state)
+    view.phase.is_live() && view.agent_state == Some(state)
 }
 
 pub fn needs_input(view: &SessionView) -> bool {
@@ -89,7 +89,7 @@ pub fn needs_input(view: &SessionView) -> bool {
 
 pub fn agent_ended(view: &SessionView) -> bool {
     matches!(
-        view.agent,
+        view.agent_state,
         Some(AgentStateView::Exited | AgentStateView::Errored)
     )
 }

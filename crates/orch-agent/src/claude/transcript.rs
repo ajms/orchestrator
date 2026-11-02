@@ -4,8 +4,8 @@ use orch_core::AgentEvent;
 use serde::Deserialize;
 
 use super::hooks::HookEvent;
-use super::lines::FollowedLines;
 use crate::TitleWatch;
+use crate::lines::FollowedLines;
 
 const CUSTOM_TITLE: &str = "custom-title";
 

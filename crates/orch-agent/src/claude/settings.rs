@@ -2,21 +2,16 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::ClaudeCode;
-
 const MANAGED_SETTINGS: &str = "/etc/claude-code/managed-settings.json";
 const MANAGED_SETTINGS_ENV: &str = "ORCH_CLAUDE_MANAGED_SETTINGS";
 
-impl ClaudeCode {
-    pub fn user_statusline_command(
-        &self,
-        cwd: &Path,
-        lookup: impl Fn(&str) -> Option<String>,
-    ) -> Option<String> {
-        settings_files(cwd, lookup)
-            .iter()
-            .find_map(|path| statusline_command(path))
-    }
+pub(super) fn user_statusline_command(
+    cwd: &Path,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    settings_files(cwd, lookup)
+        .iter()
+        .find_map(|path| statusline_command(path))
 }
 
 pub(super) fn config_dir(lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {

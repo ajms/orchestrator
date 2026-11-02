@@ -5,21 +5,11 @@ use orch_core::{SubagentId, TranscriptEntry};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::lines::FollowedLines;
+use crate::key_argument::key_argument;
+use crate::lines::FollowedLines;
 use crate::{SubagentTranscripts, TranscriptRead, TranscriptReader};
 
 const HAND_BACK: &str = "SubagentHandback";
-const KEY_ARGUMENTS: [&str; 9] = [
-    "command",
-    "file_path",
-    "notebook_path",
-    "pattern",
-    "url",
-    "query",
-    "skill",
-    "description",
-    "prompt",
-];
 
 #[derive(Debug, Default)]
 pub(super) struct ClaudeSubagentTranscripts {
@@ -208,11 +198,4 @@ impl Content {
                 .join("\n"),
         }
     }
-}
-
-fn key_argument(input: &Value) -> Option<String> {
-    KEY_ARGUMENTS
-        .iter()
-        .find_map(|key| input.get(key)?.as_str())
-        .map(String::from)
 }

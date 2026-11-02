@@ -55,6 +55,7 @@ pub struct DaemonConfig {
     pub idle_timeout: Option<Duration>,
     pub pr_poll_interval: Duration,
     pub reconcile_interval: Duration,
+    pub draft_timeout: Duration,
     pub notifications: NotificationTarget,
 }
 
@@ -68,6 +69,7 @@ impl DaemonConfig {
     pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
     pub const DEFAULT_PR_POLL: Duration = Duration::from_secs(60);
     pub const DEFAULT_RECONCILE: Duration = Duration::from_secs(3 * 60);
+    pub const DEFAULT_DRAFT_TIMEOUT: Duration = Duration::from_secs(180);
 }
 
 pub(crate) fn private_dir(dir: &Path) -> io::Result<()> {

@@ -1,0 +1,8 @@
+{
+  "event": "tool_call",
+  "toolName": "subagent",
+  "toolCallId": "call_subagent",
+  "sessionId": "4c7f99b3-90ed-4ada-87e9-793165b1a364",
+  "agent": "scout",
+  "taskName": "find the redirect"
+}

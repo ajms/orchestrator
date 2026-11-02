@@ -44,7 +44,7 @@ async fn a_new_session_runs_its_setup_script_then_starts_the_agent_with_its_prom
     );
 
     client
-        .until(&id, "running", |view| view.agent.is_some())
+        .until(&id, "running", |view| view.agent_state.is_some())
         .await;
     let mut pane = env.pane(&id, PANE).await;
     pane.wait_for_text("prompt> Fix the login bug").await;

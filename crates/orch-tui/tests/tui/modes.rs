@@ -249,7 +249,7 @@ fn i_on_a_suspended_session_enters_insert_mode_once_its_pane_reopens() {
     assert!(statusline(&mut tui).contains("NORMAL"));
 
     view.phase = PhaseView::Active;
-    view.agent = Some(AgentStateView::Starting);
+    view.agent_state = Some(AgentStateView::Starting);
     view.holder_pid = Some(7);
     tui.changed(view);
     assert!(statusline(&mut tui).contains("INSERT"));
