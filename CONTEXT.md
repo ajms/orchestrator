@@ -70,7 +70,7 @@ One Agent working on one Worktree on one Branch of a Repo, from creation until i
 _Avoid_: Task, job, instance, run
 
 **Session title**:
-A name the user gave the Session through its Agent (e.g. Claude Code's `/rename`). It is shown in place of the slug and outlives the Conversation it was given in.
+A name given to the Session through its Agent, by the user (e.g. Claude Code's `/rename`) or by the Agent itself. It is shown in place of the slug and outlives the Conversation it was given in.
 _Avoid_: Session name, label, alias
 
 **Agent**:
@@ -85,12 +85,16 @@ _Avoid_: Driver, plugin, integration
 The Orchestrator's hooks and statusline installed into an Agent's own global configuration, for Agents that cannot take them per Session; that Agent's Sessions cannot start without it.
 _Avoid_: Integration, setup, plugin
 
+**Agent profile**:
+A configuration of an Agent that the Orchestrator builds from the user's own setup of that Agent, and that the Agent's Sessions run with instead of it. The user's own configuration is never changed, and it is kept current with the user's setup.
+_Avoid_: Profile (alone), config dir, orch config
+
 **Conversation**:
 The Agent's own chat history within a Session; a Session can move through several (e.g. after the Agent's history is cleared), and only the latest is resumed.
 _Avoid_: Chat, thread, transcript
 
 **Subagent**:
-A helper the Agent spawns inside its own Session; it shares the Session's Worktree, or works in a Subagent worktree, and is not a Session itself.
+A helper the Agent spawns inside its own Session; it shares the Session's Worktree or works in a worktree of its own, such as a Subagent worktree, and is not a Session itself.
 _Avoid_: Child session, worker, sub-session
 
 **Subagent worktree**:
