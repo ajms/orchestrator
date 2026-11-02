@@ -4,6 +4,8 @@ use crate::{AgentAdapter, CLAUDE, ClaudeCode, PI, Pi};
 
 pub type Adapter = Arc<dyn AgentAdapter + Send + Sync>;
 
+pub const AGENTS: [&str; 2] = [CLAUDE, PI];
+
 pub fn adapter_named(name: &str, binary: Option<&str>) -> Option<Adapter> {
     let program = |default: String| binary.map_or(default, String::from);
     match name {

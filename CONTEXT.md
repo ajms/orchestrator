@@ -74,7 +74,7 @@ A name given to the Session through its Agent, by the user (e.g. Claude Code's `
 _Avoid_: Session name, label, alias
 
 **Agent**:
-A coding-agent program (e.g. Claude Code or pi) that the Orchestrator drives inside a Session. A Session's Agent is its Repo's default when the Session is created, and never changes.
+A coding-agent program (e.g. Claude Code or pi) that the Orchestrator drives inside a Session. A Session's Agent is picked when the Session is created (its Repo's default unless another is chosen), and never changes.
 _Avoid_: Bot, assistant, model
 
 **Agent adapter**:

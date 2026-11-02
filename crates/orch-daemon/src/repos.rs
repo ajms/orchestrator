@@ -44,6 +44,7 @@ impl Daemon {
             review_command: config.review_command().map(String::from),
             branch_prefix: self.branch_prefix().await,
             agent: config.default_agent().into(),
+            agents: orch_agent::AGENTS.map(String::from).to_vec(),
             trust,
             repo,
         }))

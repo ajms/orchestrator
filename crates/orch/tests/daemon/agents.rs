@@ -26,6 +26,39 @@ async fn a_new_session_stores_the_repos_default_agent() {
 }
 
 #[tokio::test]
+async fn a_new_session_gets_the_agent_picked_for_it() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let repo = env.repo("app");
+
+    let create = CreateSession {
+        agent: Some("pi".into()),
+        ..CreateSession::new(&repo, "Picked agent")
+    };
+    let id = client.create(create).await;
+
+    let view = client.until(&id, "listed", |_| true).await;
+    assert_eq!(view.agent, "pi");
+}
+
+#[tokio::test]
+async fn a_session_for_an_unknown_agent_is_refused() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let repo = env.repo("app");
+
+    let create = CreateSession {
+        agent: Some("nope".into()),
+        ..CreateSession::new(&repo, "Unknown")
+    };
+    let message = refusal(&mut client, create).await;
+
+    assert!(message.contains("unknown Agent \"nope\""), "{message}");
+}
+
+#[tokio::test]
 async fn a_session_keeps_its_agent_after_the_repos_default_changes() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;

@@ -41,6 +41,7 @@ async fn repo_settings_are_resolved_from_the_repo_config_at_request_time() {
     assert_eq!(resolved.default_base.as_deref(), Some("develop"));
     assert_eq!(resolved.review_command.as_deref(), Some("nvim -d"));
     assert_eq!(resolved.branch_prefix, "me/");
+    assert_eq!(resolved.agents, ["claude", "pi"]);
     assert_eq!(resolved.trust, None);
 
     std::fs::write(repo.join(".orchestrator.toml"), "").unwrap();
