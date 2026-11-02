@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0](https://github.com/ajms/orchestrator/compare/v0.9.0...v0.10.0) - 2026-11-02
+
+### Added
+
+- *(agent)* pi reports Agent states, Conversations and Session titles
+- *(daemon)* launch pi from its Agent profile and resume its Conversation
+- store each Session's Agent and route hooks by Agent
+- pi drafts from a fork of its Conversation and the Base diff
+- *(agent)* pi reports Subagents and follows their transcripts
+- *(agent)* a pi subagent call is a Subagent row
+- *(agent)* orch's pi extension writes each subagent call's transcript
+- *(agent)* pi reports usage
+- *(agent)* pi's extension taps orch with its Conversation's usage
+- *(agent)* orch's pi extension forwards pi's coarse events to orch hook
+- *(agent)* build pi's Agent profile from the user's own setup
+- *(agent)* a pi adapter that launches and resumes by session id
+- *(tui)* show each Session's Agent and the Agent :new will use
+
+### Fixed
+
+- *(daemon)* cap the Base diff a Draft reads at 256 KiB
+- *(daemon)* a Draft's time limit covers writing its stdin
+- *(daemon)* adopt an orphaned Holder under the Agent it runs
+- *(agent)* pi's extension caps a Subagent id in bytes, as orch reads it
+- *(agent)* a pi Subagent row without agent or task name still has labels
+- *(agent)* never read a pi Subagent transcript that is hardlinked elsewhere
+- *(agent)* map pi's tap to Claude's token units
+- *(agent)* pi's tap carries the last response's tokens, like Claude's
+- *(agent)* launch pi from the Agent profile prepare builds
+- *(agent)* pi's extension sends only the fields map_hook reads
+- *(agent)* read a pi error's status code only where it is one
+- *(agent)* rebuild only what orch generates in pi's Agent profile
+- *(agent)* never follow an Agent's links when rebuilding pi's profile
+- *(daemon)* store a launch's named Conversation before the Holder starts
+- *(tui)* tag each Session row with its Agent on the first line
+
+### Other
+
+- only a Draft that needs a scratch dir gets one
+- *(daemon)* a pi Draft forks, reads the Base diff and leaves nothing behind
+- *(daemon)* a pi subagent call is a Subagent row with a live transcript
+- *(daemon)* a repeated pi tap adds nothing to the Repo's usage
+- *(daemon)* pi taps add to the Repo's usage, not the rate limits
+- *(daemon)* an opt-in smoke test runs real pi
+- *(daemon)* a pi Session resumes after a suspend or an exit, and its profile is reset
+- *(daemon)* cover a dropped Guard and a lost binary of a Session's Agent
+- *(protocol)* name a Session's Agent `agent`, its state `agent_state`
+- look up every Agent adapter by name in one registry
+- say what pi's Subagent support assumes, and list its id rules
+- *(agent)* path is the last key argument for every Agent
+- *(agent)* key pi's Subagent transcripts by SubagentId and ConversationId
+- *(agent)* one hardened line follower for Claude's and pi's transcripts
+- *(agent)* name the helper that finds a pi subagent call's Subagent
+- *(agent)* subagent_transcripts takes the env lookup, like agent_profile
+- pi usage in Claude's token units, and when pi taps
+- *(agent)* pin pi's siblings so the pinned pi 1.1.0 runs
+- *(agent)* tidy pi's hook payload types and extension files
+- *(agent)* record pi's hook payloads from real pi
+- *(agent)* resolve pi's dirs once and tidy the registry
+- one default for an Agent that isn't named
+- *(daemon)* record a Conversation through one helper
+
 ## [0.9.0](https://github.com/ajms/orchestrator/compare/v0.8.0...v0.9.0) - 2026-10-28
 
 ### Added
