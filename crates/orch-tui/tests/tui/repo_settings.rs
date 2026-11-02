@@ -16,6 +16,7 @@ fn settings(repo: &str, base: &str) -> RepoSettings {
         review_command: None,
         branch_prefix: "me/".into(),
         agent: "claude".into(),
+        agents: vec!["claude".into(), "pi".into()],
         trust: None,
     }
 }
@@ -56,6 +57,7 @@ fn the_new_form_shows_the_repos_resolved_default_base_presets_and_branch_prefix(
     assert!(field(&mut tui, "Preset").contains("careful"));
     assert!(field(&mut tui, "Branch").contains("me/fix-it"));
     tui.press(KeyCode::BackTab);
+    tui.press(KeyCode::BackTab);
     tui.press(KeyCode::Right);
     assert!(field(&mut tui, "Preset").contains("◂ careful ▸"));
 }
@@ -71,6 +73,29 @@ fn the_new_form_names_the_agent_the_session_will_use() {
     tui.keys("Fix it");
 
     assert!(field(&mut tui, "Agent").contains("pi"));
+}
+
+#[test]
+fn the_new_form_picks_another_agent_for_the_session() {
+    let mut tui = Harness::with_config(config());
+    tui.daemon().settings = vec![settings("/home/me/recent", "develop")];
+    tui.command("new");
+    tui.keys("Fix it");
+    tui.press(KeyCode::BackTab);
+    tui.press(KeyCode::Right);
+    assert!(field(&mut tui, "Agent").contains("◂ pi ▸"));
+    tui.ctrl('s');
+
+    let agents: Vec<_> = tui
+        .daemon()
+        .requests()
+        .into_iter()
+        .filter_map(|request| match request {
+            Request::CreateSession(create) => Some(create.agent),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(agents, [Some("pi".to_string())]);
 }
 
 #[test]

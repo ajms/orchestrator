@@ -79,9 +79,9 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
                 }
                 lines.push(Line::default());
             }
-            lines.push(Line::from(tag(
-                "Agent",
-                false,
+            lines.push(Line::from(label(
+                form,
+                Field::Agent,
                 usize::from(fields.width) - 2,
             )));
             lines.push(agent(form));
@@ -129,7 +129,7 @@ fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
                     lines.push(Line::styled(format!("{indent}{text}"), style));
                 }
             }
-            let mut line = Line::from(vec![tag("Agent", false, ROW_LABEL), Span::raw(" ")]);
+            let mut line = Line::from(vec![label(form, Field::Agent, ROW_LABEL), Span::raw(" ")]);
             line.spans.extend(agent(form).spans);
             lines.push(line);
             lines.extend(error(form));
@@ -158,7 +158,9 @@ fn hints(form: &NewForm) -> Line<'static> {
         (None, Field::Repo) => "Enter pick Repo · Tab next · Ctrl+s create · Esc cancel",
         (None, Field::Branch) => "Ctrl+u clear · Enter next · Ctrl+s create · Esc cancel",
         (None, Field::Base) => "↑/↓ other Branches · Enter next · Ctrl+s create · Esc cancel",
-        (None, Field::Preset) => "←/→ choose · Enter next · Ctrl+s create · Esc cancel",
+        (None, Field::Preset | Field::Agent) => {
+            "←/→ choose · Enter next · Ctrl+s create · Esc cancel"
+        }
     };
     let keys = match form.check.refused() {
         true => keys.replace("Ctrl+s create", "Ctrl+s blocked by the Branch"),
@@ -209,6 +211,7 @@ fn label(form: &NewForm, field: Field, width: usize) -> Span<'static> {
         Field::Branch => "Branch",
         Field::Base => "Base",
         Field::Preset => "Preset",
+        Field::Agent => "Agent",
     };
     tag(
         name,
@@ -226,10 +229,12 @@ fn tag(name: &str, focused: bool, width: usize) -> Span<'static> {
 }
 
 fn agent(form: &NewForm) -> Line<'static> {
-    match &form.agent {
-        Some(agent) => Line::from(format!(" {agent} (Repo default)")).dark_gray(),
-        None => Line::from(" (Repo default)").dark_gray(),
-    }
+    let shown = match (form.shown_agent(), &form.default_agent) {
+        (Some(agent), Some(default)) if agent == default => format!("{agent} (Repo default)"),
+        (Some(agent), _) => agent.clone(),
+        (None, _) => "(Repo default)".to_string(),
+    };
+    Line::from(format!(" ◂ {shown} ▸"))
 }
 
 fn value(
@@ -277,6 +282,7 @@ fn value(
                 None => " ◂ (Repo default) ▸".to_string(),
             },
         }),
+        Field::Agent => agent(form),
         Field::Prompt => Line::default(),
     };
     (line, None)

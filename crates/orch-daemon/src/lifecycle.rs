@@ -232,10 +232,14 @@ impl Daemon {
         if config.setup_script().is_err() {
             return Err(untrusted(root.path(), &config));
         }
+        let picked = create.agent.as_deref();
         let agent = config
-            .agent(config.default_agent())
+            .agent(picked.unwrap_or(config.default_agent()))
             .map_err(|_| untrusted(root.path(), &config))?;
-        let adapter = adapter_for(&agent).ok();
+        let adapter = match (adapter_for(&agent), picked) {
+            (Err(err), Some(_)) => return Err(refused(err)),
+            (adapter, _) => adapter.ok(),
+        };
         if let Some(adapter) = adapter.as_ref().filter(|_| preset.sandboxed()) {
             let configured = sandbox_paths(root.path(), &config)?;
             self.probe_sandbox(None, root.path(), adapter.as_ref(), &configured)

@@ -16,14 +16,16 @@ pub enum Field {
     Branch,
     Base,
     Preset,
+    Agent,
 }
 
-const FIELDS: [Field; 5] = [
+const FIELDS: [Field; 6] = [
     Field::Prompt,
     Field::Repo,
     Field::Branch,
     Field::Base,
     Field::Preset,
+    Field::Agent,
 ];
 
 pub enum Outcome {
@@ -44,6 +46,8 @@ pub struct NewForm {
     pub base: Suggested,
     pub default_base: Option<String>,
     pub default_preset: Option<String>,
+    pub default_agent: Option<String>,
+    pub agents: Vec<String>,
     pub agent: Option<String>,
     pub base_candidates: Vec<String>,
     base_choice: usize,
@@ -72,6 +76,8 @@ impl NewForm {
             base: Suggested::default(),
             default_base: None,
             default_preset: None,
+            default_agent: None,
+            agents: Vec::new(),
             agent: None,
             base_candidates: Vec::new(),
             base_choice: 0,
@@ -103,6 +109,7 @@ impl NewForm {
             .as_ref()
             .and_then(|name| self.presets.iter().position(|preset| preset == name));
         self.wanted_preset = create.preset;
+        self.agent = create.agent;
         self.prefill_branch();
     }
 
@@ -113,7 +120,12 @@ impl NewForm {
             wanted.and_then(|name| self.presets.iter().position(|preset| *preset == name));
         self.default_preset = settings.default_preset;
         self.default_base = settings.default_base;
-        self.agent = Some(settings.agent);
+        self.default_agent = Some(settings.agent);
+        self.agents = settings.agents;
+        self.agent = self
+            .agent
+            .take()
+            .filter(|agent| self.agents.contains(agent));
         self.branch_prefix = settings.branch_prefix;
         self.prefill_branch();
     }
@@ -156,6 +168,7 @@ impl NewForm {
                 Field::Branch => self.branch_key(key),
                 Field::Base => self.base_key(key),
                 Field::Preset => self.preset_key(key),
+                Field::Agent => self.agent_key(key),
             },
         }
     }
@@ -209,7 +222,7 @@ impl NewForm {
             Field::Repo => return self.open_picker(line.to_string(), home),
             Field::Branch => self.branch.replace(line),
             Field::Base if self.locking_pr().is_none() => self.base.replace(line),
-            Field::Base | Field::Preset => {}
+            Field::Base | Field::Preset | Field::Agent => {}
         }
         Outcome::Stay
     }
@@ -240,6 +253,27 @@ impl NewForm {
         };
         self.preset = next.checked_sub(1);
         Outcome::Stay
+    }
+
+    fn agent_key(&mut self, key: KeyEvent) -> Outcome {
+        let len = self.agents.len();
+        let at = self
+            .shown_agent()
+            .and_then(|name| self.agents.iter().position(|agent| agent == name))
+            .unwrap_or(0);
+        let next = match key.code {
+            KeyCode::Enter => return self.move_field(1),
+            _ if len == 0 => return Outcome::Stay,
+            KeyCode::Left | KeyCode::Up => (at + len - 1) % len,
+            KeyCode::Right | KeyCode::Down => (at + 1) % len,
+            _ => return Outcome::Stay,
+        };
+        self.agent = Some(self.agents[next].clone());
+        Outcome::Stay
+    }
+
+    pub(crate) fn shown_agent(&self) -> Option<&String> {
+        self.agent.as_ref().or(self.default_agent.as_ref())
     }
 
     fn open_picker(&mut self, query: String, home: Option<&Path>) -> Outcome {
@@ -337,6 +371,7 @@ impl NewForm {
             branch: (!self.branch.suggested() && !branch.is_empty()).then(|| branch.to_string()),
             base: (!base.is_empty()).then(|| base.to_string()),
             preset: self.preset.map(|at| self.presets[at].clone()),
+            agent: self.agent.clone(),
         })
     }
 }

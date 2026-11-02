@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::reconcile::{Fix, LeftoverView, ReconcileReport};
 use crate::view::SessionView;
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -194,6 +194,8 @@ pub struct CreateSession {
     pub branch: Option<String>,
     pub base: Option<String>,
     pub preset: Option<String>,
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 impl CreateSession {
@@ -204,6 +206,7 @@ impl CreateSession {
             branch: None,
             base: None,
             preset: None,
+            agent: None,
         }
     }
 }
@@ -389,6 +392,8 @@ pub struct RepoSettings {
     pub branch_prefix: String,
     #[serde(default = "orch_agent::implied_agent")]
     pub agent: String,
+    #[serde(default)]
+    pub agents: Vec<String>,
     pub trust: Option<TrustNeeded>,
 }
 

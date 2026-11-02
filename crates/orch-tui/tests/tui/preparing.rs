@@ -149,6 +149,7 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
         review_command: None,
         branch_prefix: "orch/".into(),
         agent: "claude".into(),
+        agents: vec!["claude".into(), "pi".into()],
         trust: None,
     }];
     let message = "branch orch/fix-login-timeout-v2 already exists".to_string();
@@ -164,6 +165,8 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Right);
     tui.press(KeyCode::Right);
+    tui.press(KeyCode::Tab);
+    tui.press(KeyCode::Right);
     tui.ctrl('s');
 
     tui.press(KeyCode::Enter);
@@ -175,6 +178,7 @@ fn enter_on_a_failed_row_reopens_the_form_filled_in() {
     assert_eq!(creates.len(), 2);
     assert_eq!(creates[0], creates[1]);
     assert_eq!(creates[0].preset.as_deref(), Some("plan"));
+    assert_eq!(creates[0].agent.as_deref(), Some("pi"));
 }
 
 #[test]
