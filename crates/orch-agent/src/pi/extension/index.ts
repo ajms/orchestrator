@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Forwarder, type Payload, type Spawn, spawnHook, type Tap, type Tokens } from "./forward.ts";
+import { UNDER_ORCH } from "./prompt.ts";
 import { SubagentTranscripts } from "./transcripts.ts";
 
 interface Outcome {
@@ -96,6 +97,10 @@ export default function orch(
 			...(name ? { name } : {}),
 		});
 		if (TAPPED_STARTS.has(event.reason)) tap(ctx);
+	});
+	pi.on("before_agent_start", (event) => {
+		if (!forwarder) return;
+		return { systemPrompt: `${event.systemPrompt}\n\n${UNDER_ORCH}` };
 	});
 	pi.on("session_info_changed", (event) => {
 		send({ event: "session_info_changed", name: event.name ?? "" });
