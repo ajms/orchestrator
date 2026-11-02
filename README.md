@@ -210,6 +210,7 @@ Per-Repo keys (valid in `[defaults]`, `[repos."<path>"]` and `.orchestrator.toml
 | `[sandbox]` | `readable`, `writable` and `hidden` path lists for the [Sandbox](#sandbox); they append across layers, and a layer can't hold both this table and the `sandbox` switch |
 | `[agent]` | `name`: the Agent of new Sessions (default `claude`); a Session keeps its Agent when this changes |
 | `[agents.<name>]` | `binary`, `args` for that Agent, e.g. `[agents.claude]`; read at every launch |
+| `[agents.<name>.env]` | Extra variables for that Agent, each `{ command = "..." }`; the Daemon runs the command at every launch, outside the Sandbox, and passes its output in (see [ADR 0015](docs/adr/0015-agent-env-comes-from-personal-commands.md)); not allowed in `.orchestrator.toml` |
 | `[presets.<name>]` | `mode`, `allow`, `deny`, `sandbox` (run the Agent in the Sandbox; default `true`) |
 | `[notifications.desktop]`, `[notifications.bell]` | Per-attention toggles |
 

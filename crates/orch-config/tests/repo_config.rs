@@ -75,6 +75,46 @@ fn each_agent_has_its_own_binary_and_args() {
 }
 
 #[test]
+fn agent_env_commands_merge_per_variable_and_the_personal_override_wins() {
+    let fx = Fixture::new();
+    fx.global(&format!(
+        "[defaults.agents.pi.env]\nA = {{ command = \"echo a\" }}\nB = {{ command = \"echo b\" }}\n\n[repos.{}.agents.pi.env]\nB = {{ command = \"echo override\" }}\n",
+        fx.repo_key()
+    ));
+
+    let config = fx.approved();
+    let env: Vec<(String, String)> = config.agent("pi").unwrap().env.into_iter().collect();
+    assert_eq!(
+        env,
+        vec![
+            ("A".to_string(), "echo a".to_string()),
+            ("B".to_string(), "echo override".to_string()),
+        ]
+    );
+    assert!(config.agent("claude").unwrap().env.is_empty());
+}
+
+#[test]
+fn agent_env_is_personal_and_rejected_in_the_repo_file() {
+    let fx = Fixture::new();
+    fx.repo_file("[agents.pi.env]\nA = { command = \"echo a\" }\n");
+    assert!(matches!(
+        fx.loader.repo(fx.repo_path(), None),
+        Err(ConfigError::Invalid {
+            problem: ConfigProblem::Misplaced { key: "agents.env" },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn an_agent_env_value_must_be_a_command() {
+    let fx = Fixture::new();
+    fx.global("[defaults.agents.pi.env]\nA = \"plain\"\n");
+    assert!(fx.loader.repo(fx.repo_path(), None).is_err());
+}
+
+#[test]
 fn the_agent_table_no_longer_takes_a_binary() {
     let fx = Fixture::new();
     fx.repo_file("[agent]\nbinary = \"/opt/claude\"\n");
