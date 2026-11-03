@@ -160,6 +160,18 @@ impl AgentAdapter for Pi {
             .map_err(|err| format!("building pi's Agent profile {}: {err}", profile.display()))
     }
 
+    fn render_profile(
+        &self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        env: &[(String, String)],
+    ) -> Result<(), String> {
+        let Some(Dirs { user, profile, .. }) = Dirs::resolve(lookup) else {
+            return Err(NO_HOME.into());
+        };
+        profile::render_mcp(&user, &profile, env)
+            .map_err(|err| format!("rendering pi's mcp.json in {}: {err}", profile.display()))
+    }
+
     fn env(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
         let Some(Dirs { profile, .. }) = Dirs::resolve(lookup) else {
             return Vec::new();
