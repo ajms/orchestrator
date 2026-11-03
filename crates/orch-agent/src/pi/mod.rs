@@ -16,7 +16,7 @@ use crate::{
     SubagentTranscripts,
 };
 
-const USER_READ_ONLY: [&str; 12] = [
+const USER_READ_ONLY: [&str; 13] = [
     "install",
     "bin",
     "extensions",
@@ -27,6 +27,7 @@ const USER_READ_ONLY: [&str; 12] = [
     "SYSTEM.md",
     "AGENTS.md",
     "keybindings.json",
+    "mcp.json",
     "settings.json",
     "sandbox.json",
 ];
