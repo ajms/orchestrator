@@ -8,13 +8,8 @@ use serde_json::{Map, Value};
 pub(super) const RESOURCES: [&str; 4] = ["extensions", "skills", "prompts", "themes"];
 pub(super) const CREDENTIALS: [&str; 2] = ["auth.json", "models-store.json"];
 const LEFT_OUT: [&str; 4] = ["git-worktree-isolation", "sandbox", "notify", "caffeinate"];
-const LINKED: [&str; 5] = [
-    "SYSTEM.md",
-    "AGENTS.md",
-    "keybindings.json",
-    "mcp.json",
-    "agents",
-];
+const LINKED: [&str; 4] = ["SYSTEM.md", "AGENTS.md", "keybindings.json", "agents"];
+const MCP: &str = "mcp.json";
 const SETTINGS: &str = "settings.json";
 const EXTENSION_DIR: &str = "orch/extension";
 const EXTENSION_ENTRY: &str = "index.ts";
@@ -95,6 +90,69 @@ pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Writes the user's `mcp.json` into the profile with `${NAME}` in every
+/// string value replaced from `env` (pi reads it without interpolation).
+/// Unknown variables stay literal; a missing user file removes the profile's.
+pub(super) fn render_mcp(user: &Path, profile: &Path, env: &[(String, String)]) -> io::Result<()> {
+    let _building = BUILDING.lock().unwrap_or_else(PoisonError::into_inner);
+    let path = user.join(MCP);
+    let mut config = match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str::<Value>(&text).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{}: {err}", path_text(&path)),
+            )
+        })?,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return remove(&profile.join(MCP)),
+        Err(err) => return Err(err),
+    };
+    substitute(&mut config, env);
+    write_file(profile, MCP, &serde_json::to_vec_pretty(&config)?)
+}
+
+fn substitute(value: &mut Value, env: &[(String, String)]) {
+    match value {
+        Value::String(text) => *text = expand(text, env),
+        Value::Array(items) => items.iter_mut().for_each(|item| substitute(item, env)),
+        Value::Object(map) => map.values_mut().for_each(|item| substitute(item, env)),
+        _ => {}
+    }
+}
+
+fn expand(text: &str, env: &[(String, String)]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let name = after
+            .find('}')
+            .map(|end| &after[..end])
+            .filter(|name| is_name(name));
+        let value = name.and_then(|name| env.iter().rev().find(|(key, _)| key == name));
+        match (name, value) {
+            (Some(name), Some((_, value))) => {
+                out.push_str(value);
+                rest = &after[name.len() + 1..];
+            }
+            _ => {
+                out.push_str("${");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// The user's skills as orch links them into the profile's `skills/`.

@@ -231,6 +231,16 @@ pub trait AgentAdapter {
         Ok(())
     }
 
+    /// Renders launch-time files into the Agent profile from the Agent's
+    /// resolved env, after env resolution and before the Holder spawns.
+    fn render_profile(
+        &self,
+        _lookup: &dyn Fn(&str) -> Option<String>,
+        _env: &[(String, String)],
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     fn env(&self, _lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
         Vec::new()
     }

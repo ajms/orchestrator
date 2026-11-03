@@ -538,6 +538,7 @@ impl Daemon {
                     Err(message) => Err(message),
                 };
                 let mut env = launch.adapter.env(&xdg::process_env);
+                let launch_adapter = launch.adapter.clone();
                 let _ = self.update(id, |live| {
                     live.adapter = Some(launch.adapter);
                     live.preset_sandboxed = launch.sandbox.is_some();
@@ -547,8 +548,13 @@ impl Daemon {
                 match configured {
                     Ok((sandbox, configured)) => {
                         env.extend(configured);
-                        self.opened_conversation(id, launch.conversation).await;
-                        self.spawn_holder(&record, launch.argv, env, sandbox).await
+                        match render_profile(&launch_adapter, &env).await {
+                            Ok(()) => {
+                                self.opened_conversation(id, launch.conversation).await;
+                                self.spawn_holder(&record, launch.argv, env, sandbox).await
+                            }
+                            Err(message) => Err(message),
+                        }
                     }
                     Err(message) => Err(message),
                 }
@@ -830,6 +836,14 @@ struct AgentLaunch {
 async fn prepare(adapter: &Adapter) -> Result<(), String> {
     let adapter = adapter.clone();
     tokio::task::spawn_blocking(move || adapter.prepare(&xdg::process_env))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+async fn render_profile(adapter: &Adapter, env: &[(String, String)]) -> Result<(), String> {
+    let adapter = adapter.clone();
+    let env = env.to_vec();
+    tokio::task::spawn_blocking(move || adapter.render_profile(&xdg::process_env, &env))
         .await
         .map_err(|err| err.to_string())?
 }
