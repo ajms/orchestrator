@@ -158,7 +158,6 @@ fn the_users_prompts_keys_and_credentials_are_linked_into_the_profile() {
         "SYSTEM.md",
         "AGENTS.md",
         "keybindings.json",
-        "mcp.json",
         "agents",
         CREDENTIALS,
         MODELS,
@@ -490,4 +489,73 @@ fn skill_dirs_outside_the_users_pi_dir_are_readable_in_the_sandbox() {
     assert!(needs.read_only.contains(&elsewhere.join("solo")));
     assert!(!needs.read_only.contains(&home.user().join("skills/tdd")));
     assert!(needs.carve_outs.contains(&home.profile().join("skills")));
+}
+
+impl Home {
+    fn render(&self, env: &[(&str, &str)]) -> Result<(), String> {
+        let home = self.path().to_string_lossy().into_owned();
+        let lookup = move |key: &str| (key == "HOME").then(|| home.clone());
+        let env: Vec<(String, String)> = env
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect();
+        Pi::default().render_profile(&lookup, &env)
+    }
+
+    fn mcp(&self) -> Value {
+        serde_json::from_str(&std::fs::read_to_string(self.profile().join("mcp.json")).unwrap())
+            .unwrap()
+    }
+}
+
+#[test]
+fn mcp_json_is_rendered_from_the_agents_env() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    home.seed(
+        &home.user().join("mcp.json"),
+        r#"{"mcpServers":{"asana":{"clientSecret":"${SECRET}","url":"https://x/${HOST}/${SECRET}-$SECRET","port":8080,"on":true,"none":null,"args":["${SECRET}","${UNKNOWN}","${1bad}"]}}}"#,
+    );
+    home.prepare();
+    assert!(home.profile().join("mcp.json").symlink_metadata().is_err());
+    home.render(&[("SECRET", "s3cr3t"), ("HOST", "h")]).unwrap();
+
+    let meta = std::fs::symlink_metadata(home.profile().join("mcp.json")).unwrap();
+    assert!(meta.is_file());
+    assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        home.mcp(),
+        json!({"mcpServers":{"asana":{
+            "clientSecret":"s3cr3t",
+            "url":"https://x/h/s3cr3t-$SECRET",
+            "port":8080,"on":true,"none":null,
+            "args":["s3cr3t","${UNKNOWN}","${1bad}"]
+        }}})
+    );
+
+    home.render(&[("SECRET", "other")]).unwrap();
+    assert_eq!(home.mcp()["mcpServers"]["asana"]["clientSecret"], "other");
+}
+
+#[test]
+fn without_a_user_mcp_json_the_profile_has_none() {
+    let home = Home::new();
+    home.prepare();
+    home.render(&[]).unwrap();
+    assert!(home.profile().join("mcp.json").exists());
+    std::fs::remove_file(home.user().join("mcp.json")).unwrap();
+    home.render(&[]).unwrap();
+    assert!(home.profile().join("mcp.json").symlink_metadata().is_err());
+}
+
+#[test]
+fn an_invalid_user_mcp_json_names_the_path() {
+    let home = Home::new();
+    home.seed(&home.user().join("mcp.json"), "{nope");
+    home.prepare();
+    let err = home.render(&[]).unwrap_err();
+    assert!(
+        err.contains(&home.user().join("mcp.json").to_string_lossy().into_owned()),
+        "{err}"
+    );
 }

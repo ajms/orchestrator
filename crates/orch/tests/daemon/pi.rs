@@ -104,6 +104,21 @@ async fn a_sandboxed_pi_session_gets_its_env_past_the_cleared_environment() {
 }
 
 #[tokio::test]
+async fn a_pi_session_gets_its_mcp_json_rendered_from_its_env() {
+    let env = pi_env_with("ORCH_TEST_SECRET = { command = \"echo hush\" }\n");
+    std::fs::write(
+        env.path("home/.pi/agent/mcp.json"),
+        r#"{"mcpServers":{"x":{"clientSecret":"${ORCH_TEST_SECRET}","other":"${ORCH_TEST_UNSET}"}}}"#,
+    )
+    .unwrap();
+    pi_pane_shows_env(&env, "ORCH_TEST_SECRET", "hush").await;
+    let rendered = env.path("state/orchestrator/agent-profiles/pi/mcp.json");
+    let text = std::fs::read_to_string(&rendered).unwrap();
+    assert!(text.contains("\"clientSecret\": \"hush\""), "{text}");
+    assert!(text.contains("${ORCH_TEST_UNSET}"), "{text}");
+}
+
+#[tokio::test]
 async fn a_failing_env_command_errors_the_session_naming_the_variable() {
     let env = pi_env_with("ORCH_TEST_VALUE = { command = \"echo leaked; exit 3\" }\n");
     let _daemon = env.start_daemon().await;
