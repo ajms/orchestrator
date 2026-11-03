@@ -8,7 +8,13 @@ use serde_json::{Map, Value};
 pub(super) const RESOURCES: [&str; 4] = ["extensions", "skills", "prompts", "themes"];
 pub(super) const CREDENTIALS: [&str; 2] = ["auth.json", "models-store.json"];
 const LEFT_OUT: [&str; 4] = ["git-worktree-isolation", "sandbox", "notify", "caffeinate"];
-const LINKED: [&str; 4] = ["SYSTEM.md", "AGENTS.md", "keybindings.json", "agents"];
+const LINKED: [&str; 5] = [
+    "SYSTEM.md",
+    "AGENTS.md",
+    "keybindings.json",
+    "mcp.json",
+    "agents",
+];
 const SETTINGS: &str = "settings.json";
 const EXTENSION_DIR: &str = "orch/extension";
 const EXTENSION_ENTRY: &str = "index.ts";

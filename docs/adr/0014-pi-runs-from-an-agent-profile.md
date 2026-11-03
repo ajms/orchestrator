@@ -8,7 +8,7 @@ pi reads all of its user-level state from one agent dir, `~/.pi/agent` unless `P
   - `git-worktree-isolation` and `sandbox`, because orch owns the Worktree and the Sandbox;
   - `notify`, because orch owns notifications;
   - `caffeinate`, which is macOS-only.
-- `SYSTEM.md`, `AGENTS.md`, `keybindings.json` and `agents/` are links to the user's.
+- `SYSTEM.md`, `AGENTS.md`, `keybindings.json`, `mcp.json` and `agents/` are links to the user's.
 - `auth.json` and `models-store.json` are links to the user's, so there is no second login.
 - Only what orch generates is rebuilt: `settings.json`, the links, `extensions/` holding only orch's own extension, `skills/` holding only the skill links, and the empty `prompts/` and `themes/`. Whatever an Agent changed there (e.g. `settings.json`, a link, a planted extension) is reset. Everything pi creates itself, such as `sessions/`, the `search` extension's `index/`, `trust.json`, `models.json`, logs and `bin/`, is left alone, so a pi Session that is already running isn't disturbed.
 - Each generated entry is built under a staged name and renamed into place. An entry in the way that rename can't replace, such as a non-empty dir, is first renamed aside and then removed. The Agent can write the profile, so the Daemon never follows a link there: a staged path is removed and created anew, and a profile that is itself a link is refused.

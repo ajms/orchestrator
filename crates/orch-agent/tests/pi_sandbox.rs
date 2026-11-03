@@ -92,6 +92,7 @@ fn pi_reads_its_installation_and_the_users_setup_but_not_their_sessions() {
             "/home/dev/.pi/agent/SYSTEM.md",
             "/home/dev/.pi/agent/AGENTS.md",
             "/home/dev/.pi/agent/keybindings.json",
+            "/home/dev/.pi/agent/mcp.json",
             "/home/dev/.pi/agent/settings.json",
             "/home/dev/.pi/agent/sandbox.json",
             "/home/dev/.local/share/pi-node",
