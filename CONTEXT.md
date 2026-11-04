@@ -138,8 +138,16 @@ An OS enclosure around a Session's Agent and everything it runs, limiting which 
 _Avoid_: Jail, container
 
 **Broker**:
-The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: fetching from origin, pushing its Branch, managing its pull request, reading its Repo on GitHub and signing its commits, with the user's credentials and the Agent signing key, which never enter the Sandbox.
+The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: fetching from origin, pushing its Branch, managing its pull request, reading its Repo and the repos of Readable owners on GitHub and signing its commits, with the user's credentials and the Agent signing key, which never enter the Sandbox.
 _Avoid_: Proxy, relay, credential helper
+
+**Readable owner**:
+A GitHub user or organisation the user lists in the global config, whose repos a sandboxed Agent can read through the Broker (clone, fetch and gh reads), but never change.
+_Avoid_: Allowed org, trusted owner
+
+**Mirror**:
+A bare copy of a Readable owner's repo that the Broker keeps up to date for sandboxed Agents to clone and fetch from. Every Sandbox can see it read-only.
+_Avoid_: Cache, proxy repo
 
 **Shell**:
 The user's own shell, or one command they run, in a Session's Worktree outside the Sandbox, started from the TUI and shown in the Session pane in place of the Agent. Each Session has at most one, and only the user can start it.

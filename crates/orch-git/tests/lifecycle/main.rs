@@ -3,6 +3,7 @@ mod discard;
 mod existing_branch;
 mod landing;
 mod leftovers;
+mod mirror;
 mod removal;
 mod repo;
 mod review;

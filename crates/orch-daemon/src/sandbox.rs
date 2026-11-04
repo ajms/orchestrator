@@ -10,7 +10,7 @@ use orch_config::xdg;
 use orch_store::SessionRecord;
 
 use crate::agents::default_adapter;
-use crate::broker::{EnvVars, SHIMS_DIR, install_shims};
+use crate::broker::{EnvVars, SHIMS_DIR, install_shims, owner_mirrors};
 use crate::broker_sign::{IDENTITY_FILE, origin, public_key, user_identity};
 use crate::private_dir;
 use crate::state::Daemon;
@@ -51,12 +51,8 @@ impl Daemon {
     ) -> Result<(Vec<String>, EnvVars), String> {
         let paths = self.session_paths(record, repo, self.holder_socket(&record.id))?;
         let shims = self.session_dir(&record.id).join(SHIMS_DIR);
-        let key = self
-            .config
-            .loader
-            .global()
-            .map_err(|err| err.to_string())?
-            .signing_key;
+        let global = self.config.loader.global().map_err(|err| err.to_string())?;
+        let key = global.signing_key;
         let public = key.as_deref().map(public_key).transpose()?;
         let identity = user_identity(repo)?;
         let identity_file = self.session_dir(&record.id).join(IDENTITY_FILE);
@@ -75,9 +71,12 @@ impl Daemon {
             &origin,
             identity.as_ref(),
             public.as_deref(),
+            &global.readable_owners,
         )?;
+        let mirrors = owner_mirrors(&self.mirrors_dir(), &global.readable_owners)?;
         let mut layout = layout(paths, self.config.orch_program.clone(), configured)?;
         layout.read_only.push(shims);
+        layout.read_only.extend(mirrors);
         layout.masked.extend(key.filter(|key| key.exists()));
         let args = carved_args(&layout, &adapter.sandbox_needs(&xdg::process_env))?;
         Ok((args, env))

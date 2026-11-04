@@ -510,6 +510,25 @@ async fn a_sandboxed_agent_reads_its_repo_through_gh() {
 }
 
 #[tokio::test]
+async fn a_sandboxed_agent_reads_a_readable_owners_repo_through_gh() {
+    let env = on_github();
+    env.write_config("[broker]\nreadable_owners = [\"libs\"]\n");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, _, mut pane) = session(&env, &mut client, "inherit").await;
+
+    assert_eq!(
+        shell(&mut pane, "gh issue view 3 -R libs/core").await,
+        "exit 0"
+    );
+    assert_ne!(
+        shell(&mut pane, "gh issue comment 3 -b x -R libs/core").await,
+        "exit 0"
+    );
+    assert_eq!(gh_calls(&env), [args("issue view 3 --repo libs/core")]);
+}
+
+#[tokio::test]
 async fn a_sandboxed_agent_creates_and_edits_its_own_pr_with_the_base_fixed() {
     let env = on_github();
     let _daemon = env.start_daemon().await;
@@ -834,4 +853,157 @@ async fn an_unsandboxed_agent_commits_as_the_user() {
     let made = shell(&mut pane, "git commit -q --allow-empty -m work").await;
     assert_eq!(made, "exit 0");
     assert_eq!(last_commit(&view.worktree, "%cn|%G?"), "Test|N");
+}
+
+fn github_repo(env: &Env, slug: &str) -> PathBuf {
+    let upstream = env.path(&format!("github/{slug}.git"));
+    git(
+        &env.path("repos"),
+        &[
+            "init",
+            "-q",
+            "--bare",
+            "-b",
+            "main",
+            upstream.to_str().unwrap(),
+        ],
+    );
+    let seed = env.path(&format!("seed/{slug}"));
+    std::fs::create_dir_all(&seed).unwrap();
+    git(&seed, &["init", "-q", "-b", "main"]);
+    commit(&seed, "README", "core\n");
+    git(&seed, &["push", "-q", upstream.to_str().unwrap(), "main"]);
+    upstream
+}
+
+fn advance(upstream: &std::path::Path, seed: &std::path::Path) -> String {
+    commit(seed, "more.rs", "more\n");
+    git(seed, &["push", "-q", upstream.to_str().unwrap(), "main"]);
+    git(seed, &["rev-parse", "HEAD"])
+}
+
+async fn github_daemon(env: &Env) -> Daemon {
+    let global = env.path("user/gitconfig");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    let github = env.path("github");
+    std::fs::write(
+        &global,
+        format!(
+            "[url \"{}/\"]\n\tinsteadOf = git@github.com:\n",
+            github.display()
+        ),
+    )
+    .unwrap();
+    let mut daemon_command = env.daemon_command(std::time::Duration::from_secs(600));
+    daemon_command.env("GIT_CONFIG_GLOBAL", &global);
+    env.spawn_daemon(&mut daemon_command).await
+}
+
+const READS_LIBS: &str = "[broker]\nreadable_owners = [\"libs\"]\n";
+const CLONE_LIBS: &str = "git clone -q https://github.com/libs/core core";
+
+#[tokio::test]
+async fn a_sandboxed_agent_clones_and_pulls_a_readable_owners_repo_through_the_broker() {
+    let env = on_github();
+    let upstream = github_repo(&env, "libs/core");
+    env.write_config(READS_LIBS);
+    let _daemon = github_daemon(&env).await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let clone = view.worktree.join("core");
+
+    assert_eq!(shell(&mut pane, CLONE_LIBS).await, "exit 0");
+    assert_eq!(
+        std::fs::read_to_string(clone.join("README")).unwrap(),
+        "core\n"
+    );
+    client.until_notice(&id, "Broker: read libs/core").await;
+
+    let tip = advance(&upstream, &env.path("seed/libs/core"));
+    assert_eq!(
+        shell(&mut pane, "git -C core pull -q --ff-only").await,
+        "exit 0"
+    );
+    assert_eq!(git(&clone, &["rev-parse", "HEAD"]), tip);
+}
+
+#[tokio::test]
+async fn mirrors_are_read_only_and_a_dropped_owners_mirrors_are_removed() {
+    if !crate::bwrap::bwrap_runs() {
+        return;
+    }
+    let env = on_github();
+    env.real_bwrap();
+    github_repo(&env, "libs/core");
+    let mirrors = env.path("state/orchestrator/mirrors");
+    let dropped = mirrors.join("gone/old.git");
+    std::fs::create_dir_all(&dropped).unwrap();
+    env.write_config(READS_LIBS);
+    let _daemon = github_daemon(&env).await;
+    let mut client = env.client().await;
+    let (_, _, mut pane) = session(&env, &mut client, "inherit").await;
+
+    assert_eq!(shell(&mut pane, CLONE_LIBS).await, "exit 0");
+    let mirror = mirrors.join("libs/core.git");
+    assert!(mirror.join("HEAD").exists());
+    let planted = format!("touch {}", mirror.join("hooks/planted").display());
+    assert_ne!(shell(&mut pane, &planted).await, "exit 0");
+    assert!(!mirror.join("hooks/planted").exists());
+    assert!(!dropped.exists());
+}
+
+#[tokio::test]
+async fn listing_the_repos_own_owner_still_pushes_its_branch_to_origin() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let remote = env.github_remote(&repo);
+    env.write_config("[broker]\nreadable_owners = [\"acme\"]\n");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+
+    let push = format!("git push -u origin {}", view.branch);
+    assert_eq!(shell(&mut pane, &push).await, "exit 0");
+    assert_eq!(
+        remote_tip(&remote, &view.branch),
+        Some(git(&view.worktree, &["rev-parse", "HEAD"]))
+    );
+}
+
+#[tokio::test]
+async fn a_readable_owners_repo_is_never_pushed_to() {
+    let env = on_github();
+    let upstream = github_repo(&env, "libs/core");
+    env.write_config(READS_LIBS);
+    let _daemon = github_daemon(&env).await;
+    let mut client = env.client().await;
+    let (_, _, mut pane) = session(&env, &mut client, "inherit").await;
+    let before = git(&upstream, &["rev-parse", "main"]);
+
+    let cloned = "git clone -q git@github.com:libs/core.git core";
+    assert_eq!(shell(&mut pane, cloned).await, "exit 0");
+    let sent = "cd core && git commit -q --allow-empty -m x && git push origin HEAD:main";
+    assert_ne!(shell(&mut pane, sent).await, "exit 0");
+    assert_eq!(git(&upstream, &["rev-parse", "main"]), before);
+}
+
+#[tokio::test]
+async fn the_broker_reads_no_repo_of_an_owner_dropped_from_the_config() {
+    let env = on_github();
+    github_repo(&env, "libs/core");
+    env.write_config(READS_LIBS);
+    let _daemon = github_daemon(&env).await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    assert_eq!(shell(&mut pane, CLONE_LIBS).await, "exit 0");
+    let mirror = env.path("state/orchestrator/mirrors/libs/core.git");
+    assert!(mirror.exists());
+    env.write_config("");
+
+    assert_ne!(shell(&mut pane, "git -C core fetch -q").await, "exit 0");
+    let again = "git clone -q https://github.com/libs/core again";
+    assert_ne!(shell(&mut pane, again).await, "exit 0");
+    assert!(!view.worktree.join("again/README").exists());
+    assert!(!mirror.exists());
+    client.until_notice(&id, "Broker refused").await;
 }

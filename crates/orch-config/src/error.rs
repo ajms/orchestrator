@@ -20,6 +20,7 @@ pub enum ConfigProblem {
         path: String,
         why: &'static str,
     },
+    ReadableOwner(String),
 }
 
 impl fmt::Display for ConfigProblem {
@@ -39,6 +40,12 @@ impl fmt::Display for ConfigProblem {
             ConfigProblem::Misplaced { key } => write!(f, "{key} is not allowed here"),
             ConfigProblem::SandboxPath { list, path, why } => {
                 write!(f, "sandbox {list} entry {path:?} {why}")
+            }
+            ConfigProblem::ReadableOwner(owner) => {
+                write!(
+                    f,
+                    "broker readable_owners entry {owner:?} is not a GitHub owner"
+                )
             }
         }
     }

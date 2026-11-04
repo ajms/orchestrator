@@ -135,8 +135,7 @@ impl Repo {
 
     pub fn branch_on_origin(&self, branch: &str) -> Result<Option<String>, Error> {
         let branch_ref = head_ref(branch);
-        let listing = self
-            .pinned(&["ls-remote", "origin"])
+        let listing = pinned(self.root(), &["ls-remote", "origin"])
             .arg(&branch_ref)
             .run()?;
         Ok(listing.lines().find_map(|line| {
@@ -146,7 +145,7 @@ impl Repo {
     }
 
     pub fn origin_refs(&self) -> Result<Vec<(String, String)>, Error> {
-        let listing = self.pinned(&["ls-remote", "origin"]).run()?;
+        let listing = pinned(self.root(), &["ls-remote", "origin"]).run()?;
         Ok(listing
             .lines()
             .filter_map(|line| {
@@ -165,7 +164,7 @@ impl Repo {
             "--refmap=",
             "origin",
         ];
-        self.pinned(&fetch)
+        pinned(self.root(), &fetch)
             .args(wants.iter().map(|(name, _)| name))
             .run()?;
         Ok(wants
@@ -186,7 +185,7 @@ impl Repo {
         lease: Option<&str>,
     ) -> Result<(), Error> {
         let branch_ref = head_ref(branch);
-        let mut push = self.pinned(&["push", "-q", "--no-verify"]);
+        let mut push = pinned(self.root(), &["push", "-q", "--no-verify"]);
         if let Some(expected) = lease {
             push = push.arg(format!("--force-with-lease={branch_ref}:{expected}"));
         }
@@ -204,21 +203,6 @@ impl Repo {
                 });
         }
         Ok(())
-    }
-
-    fn pinned(&self, args: &[&str]) -> Git<'_> {
-        let ssh = user_ssh_command();
-        self.git([
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.fsmonitor=false",
-        ])
-        .args(["-c", "remote.origin.receivepack=git-receive-pack"])
-        .args(["-c", "remote.origin.uploadpack=git-upload-pack"])
-        .arg("-c")
-        .arg(format!("core.sshCommand={ssh}"))
-        .args(args)
     }
 
     pub(crate) fn main_checkout_to_update(
@@ -281,6 +265,24 @@ impl Repo {
             .into()),
         }
     }
+}
+
+pub(crate) fn pinned<'a>(dir: &'a Path, args: &[&str]) -> Git<'a> {
+    let ssh = user_ssh_command();
+    git(
+        dir,
+        [
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+        ],
+    )
+    .args(["-c", "remote.origin.receivepack=git-receive-pack"])
+    .args(["-c", "remote.origin.uploadpack=git-upload-pack"])
+    .arg("-c")
+    .arg(format!("core.sshCommand={ssh}"))
+    .args(args)
 }
 
 fn user_ssh_command() -> String {

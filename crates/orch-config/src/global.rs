@@ -7,6 +7,7 @@ use serde::Deserialize;
 use crate::error::ConfigProblem;
 use crate::loader::expand_home;
 use crate::notifications::{Notifications, NotificationsLayer};
+use crate::owners::ReadableOwners;
 use crate::ports::PortRange;
 use crate::repo::{PersonalOverrides, RepoLayer};
 
@@ -17,6 +18,7 @@ pub struct GlobalConfig {
     pub ports: PortRange,
     pub notifications: Notifications,
     pub signing_key: Option<PathBuf>,
+    pub readable_owners: ReadableOwners,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -32,6 +34,15 @@ pub(crate) struct GlobalFile {
     #[serde(default)]
     pub(crate) repos: PersonalOverrides,
     signing: Option<SigningFile>,
+    #[serde(default)]
+    broker: BrokerFile,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrokerFile {
+    #[serde(default)]
+    readable_owners: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +62,7 @@ impl GlobalFile {
                 key: "notifications",
             });
         }
+        ReadableOwners::new(self.broker.readable_owners.clone())?;
         Ok(())
     }
 
@@ -64,6 +76,8 @@ impl GlobalFile {
                 .signing
                 .as_ref()
                 .map(|signing| expand_home(&signing.key, home)),
+            readable_owners: ReadableOwners::new(self.broker.readable_owners.clone())
+                .unwrap_or_default(),
         }
     }
 }

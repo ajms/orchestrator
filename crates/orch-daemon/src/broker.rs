@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use orch_agent::{GuardAnswer, GuardHit, GuardKind};
+use orch_config::ReadableOwners;
 use orch_core::{Observation, PermissionMode, SessionId};
 use orch_holder::{BrokerReply, BrokerRequest, GuardId, RefUpdate, RemoteRef, ToHolder};
 use orch_store::SessionRecord;
@@ -113,6 +114,45 @@ pub(crate) fn allowed_fetch(wants: &[RemoteRef]) -> Result<Vec<(String, String)>
         .collect()
 }
 
+pub(crate) fn upstream_url(origin: Option<&str>, repo: &GitHubRepo) -> String {
+    let spliced = origin.map(str::trim).and_then(|url| {
+        let own = GitHubRepo::from_remote(url)?;
+        let at = url.rfind(&own.slug())?;
+        let end = at + own.slug().len();
+        Some(format!("{}{}{}", &url[..at], repo.slug(), &url[end..]))
+    });
+    spliced.unwrap_or_else(|| format!("https://github.com/{}.git", repo.slug()))
+}
+
+pub(crate) fn owner_mirrors(
+    mirrors: &Path,
+    owners: &ReadableOwners,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let listed = owners.lower_case();
+    let failed = |err: std::io::Error| format!("keeping {}: {err}", mirrors.display());
+    std::fs::create_dir_all(mirrors).map_err(failed)?;
+    for entry in std::fs::read_dir(mirrors).map_err(failed)? {
+        let path = entry.map_err(failed)?.path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if !listed.iter().any(|owner| *owner == name) {
+            std::fs::remove_dir_all(&path).map_err(failed)?;
+        }
+    }
+    listed
+        .iter()
+        .map(|owner| {
+            let dir = mirrors.join(owner);
+            std::fs::create_dir_all(&dir).map_err(failed)?;
+            Ok(dir)
+        })
+        .collect()
+}
+
+pub(crate) fn mirror_name(repo: &GitHubRepo) -> std::path::PathBuf {
+    let lower = |part: &str| part.to_ascii_lowercase();
+    Path::new(&lower(repo.owner())).join(format!("{}.git", lower(repo.name())))
+}
+
 fn change_asks(mode: Option<PermissionMode>) -> bool {
     matches!(mode, Some(PermissionMode::Plan | PermissionMode::Default))
 }
@@ -123,6 +163,7 @@ pub(crate) fn install_shims(
     origin: &Origin,
     identity: Option<&Identity>,
     signing_with: Option<&str>,
+    readable_owners: &ReadableOwners,
 ) -> Result<EnvVars, String> {
     let quoted = orch.to_string_lossy().replace('\'', r"'\''");
     std::fs::create_dir_all(dir).map_err(|err| format!("installing the Broker's shims: {err}"))?;
@@ -147,9 +188,24 @@ pub(crate) fn install_shims(
         (push_urls, url) => url
             .iter()
             .chain(push_urls)
-            .map(|url| (format!("url.{HELPER_URL}.insteadOf"), url.clone()))
+            .flat_map(|url| {
+                ["insteadOf", "pushInsteadOf"]
+                    .map(|rule| (format!("url.{HELPER_URL}.{rule}"), url.clone()))
+            })
             .collect(),
     };
+    for owner in readable_owners.spellings() {
+        let helper = format!("url.orch::https://github.com/{owner}/");
+        for github in [
+            "https://github.com/",
+            "git@github.com:",
+            "ssh://git@github.com/",
+        ] {
+            for rule in ["insteadOf", "pushInsteadOf"] {
+                config.push((format!("{helper}.{rule}"), format!("{github}{owner}/")));
+            }
+        }
+    }
     let mut env = vec![("PATH".to_string(), path)];
     env.extend(identity.map(identity_env).unwrap_or_default());
     match signing_with.filter(|_| identity.is_some()) {
@@ -196,6 +252,7 @@ fn notice(reply: &BrokerReply) -> Option<(String, bool)> {
             0 => Some((format!("Broker: {said}"), false)),
             code => Some((format!("Broker: {said} failed (exit {code})"), true)),
         },
+        BrokerReply::Mirrored { said, .. } => Some((format!("Broker: {said}"), false)),
         BrokerReply::Refs { .. } | BrokerReply::Signed { .. } => None,
     }
 }
@@ -324,6 +381,35 @@ impl Daemon {
                     said: format!("pushed {} to origin{how}", record.branch),
                 })
             }
+            BrokerRequest::Mirror { url } => {
+                let github = GitHubRepo::from_remote(&url)
+                    .ok_or_else(|| format!("the Broker reads only repos on GitHub, not {url}"))?;
+                let owners = self.readable_owners().await;
+                owner_mirrors(&self.mirrors_dir(), &owners)?;
+                if !owners.reads(github.owner()) {
+                    return Err(format!(
+                        "the Broker reads {} only if its owner is in [broker] readable_owners",
+                        github.slug()
+                    ));
+                }
+                let upstream = upstream_url(origin_url(&repo).await.as_deref(), &github);
+                let mirror = self.mirrors_dir().join(mirror_name(&github));
+                let _guard = self.repo_guard(&mirror).await;
+                let path = mirror.clone();
+                tokio::task::spawn_blocking(move || orch_git::update_mirror(&path, &upstream))
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .map_err(|err| match err {
+                        orch_git::Error::Git { stderr, .. } => {
+                            format!("reading {} failed: {}", github.slug(), stderr.trim())
+                        }
+                        other => format!("reading {} failed: {other}", github.slug()),
+                    })?;
+                Ok(BrokerReply::Mirrored {
+                    path: mirror.display().to_string(),
+                    said: format!("read {}", github.slug()),
+                })
+            }
             BrokerRequest::Sign { payload } => {
                 let key = self
                     .global_config()
@@ -339,10 +425,12 @@ impl Daemon {
                 let github = origin.as_deref().and_then(GitHubRepo::from_remote).ok_or(
                     "the Broker's gh reaches only this Repo on GitHub, and origin isn't on GitHub",
                 )?;
+                let readable_owners = self.readable_owners().await;
                 let limits = Limits {
                     repo: &github,
                     branch: &record.branch,
                     base: &record.base,
+                    readable_owners: &readable_owners,
                 };
                 let call = gh_call(&args, &limits)?;
                 if let Some(change) = &call.change {
@@ -376,6 +464,13 @@ impl Daemon {
                 })
             }
         }
+    }
+
+    async fn readable_owners(&self) -> ReadableOwners {
+        self.global_config()
+            .await
+            .map(|global| global.readable_owners)
+            .unwrap_or_default()
     }
 
     async fn change_asks(&self, record: &SessionRecord, repo: &Path) -> bool {
@@ -451,6 +546,107 @@ mod tests {
         );
         assert_eq!(notice(&gh(0)), Some(("Broker: gh pr view".into(), false)));
         assert_eq!(notice(&pushed), Some(("Broker: pushed".into(), false)));
+    }
+
+    #[test]
+    fn another_repo_is_read_the_way_origin_is_reached() {
+        let core = GitHubRepo::from_remote("https://github.com/libs/core").unwrap();
+        for (origin, upstream) in [
+            (
+                Some("git@github.com:acme/app.git"),
+                "git@github.com:libs/core.git",
+            ),
+            (
+                Some("git@github.com:acme/app.git\n"),
+                "git@github.com:libs/core.git",
+            ),
+            (Some("github-work:acme/app"), "github-work:libs/core"),
+            (
+                Some("https://github.com/acme/app"),
+                "https://github.com/libs/core",
+            ),
+            (Some("/srv/git/app.git"), "https://github.com/libs/core.git"),
+            (None, "https://github.com/libs/core.git"),
+        ] {
+            assert_eq!(upstream_url(origin, &core), upstream, "{origin:?}");
+        }
+    }
+
+    fn git_config(env: &EnvVars) -> Vec<(String, String)> {
+        let value = |key: &str| {
+            env.iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.clone())
+        };
+        let count: usize = value("GIT_CONFIG_COUNT").unwrap().parse().unwrap();
+        (0..count)
+            .filter_map(|at| {
+                Some((
+                    value(&format!("GIT_CONFIG_KEY_{at}"))?,
+                    value(&format!("GIT_CONFIG_VALUE_{at}"))?,
+                ))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_github_url_form_of_a_readable_owner_fetches_and_pushes_through_the_helper() {
+        let dir = tempfile::tempdir().unwrap();
+        let origin = Origin {
+            url: Some("git@github.com:acme/app.git".into()),
+            push_urls: Vec::new(),
+        };
+        let owners = ReadableOwners::new(vec!["Libs".into()]).unwrap();
+        let env = install_shims(
+            dir.path(),
+            Path::new("/bin/orch"),
+            &origin,
+            None,
+            None,
+            &owners,
+        );
+        let config = git_config(&env.unwrap());
+        for spelling in ["Libs", "libs"] {
+            let helper = format!("url.orch::https://github.com/{spelling}/");
+            for form in [
+                "https://github.com/",
+                "git@github.com:",
+                "ssh://git@github.com/",
+            ] {
+                for rule in ["insteadOf", "pushInsteadOf"] {
+                    let entry = (format!("{helper}.{rule}"), format!("{form}{spelling}/"));
+                    assert!(config.contains(&entry), "{entry:?} missing from {config:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn only_the_mirrors_of_readable_owners_are_kept_and_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let mirrors = dir.path().join("mirrors");
+        for kept in ["libs/core.git/HEAD", "gone/x.git/HEAD"] {
+            let file = mirrors.join(kept);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "ref: refs/heads/main\n").unwrap();
+        }
+        let owners = ReadableOwners::new(vec!["Libs".into(), "new".into()]).unwrap();
+
+        let bound = owner_mirrors(&mirrors, &owners).unwrap();
+
+        assert_eq!(bound, [mirrors.join("libs"), mirrors.join("new")]);
+        assert!(mirrors.join("libs/core.git/HEAD").exists());
+        assert!(mirrors.join("new").is_dir());
+        assert!(!mirrors.join("gone").exists());
+    }
+
+    #[test]
+    fn a_mirror_is_named_by_its_repo_in_lower_case() {
+        let core = GitHubRepo::from_remote("https://github.com/Libs/Core.git").unwrap();
+        assert_eq!(
+            mirror_name(&core),
+            std::path::PathBuf::from("libs/core.git")
+        );
     }
 
     const COMMIT: &str = "c0ffee0000000000000000000000000000000000";

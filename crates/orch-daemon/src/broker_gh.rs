@@ -1,3 +1,5 @@
+use orch_config::{ReadableOwners, is_github_owner};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GitHubRepo {
     owner: String,
@@ -61,24 +63,44 @@ impl GitHubRepo {
         if host.contains('.') && !named.on_github() || !named.rest.is_empty() {
             return None;
         }
+        Self::from_parts(named.owner, named.name)
+    }
+
+    fn from_argument(text: &str) -> Option<Self> {
+        let named = Named::parse(text)?;
+        if !named.on_github() || named.host.is_none() && !named.rest.is_empty() {
+            return None;
+        }
+        Self::from_parts(named.owner, named.name)
+    }
+
+    fn from_parts(owner: &str, name: &str) -> Option<Self> {
         let valid = |part: &str| {
-            !part.is_empty()
+            !matches!(part, "" | "." | "..")
                 && part
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         };
-        (valid(named.owner) && valid(named.name)).then(|| GitHubRepo {
-            owner: named.owner.into(),
-            name: named.name.into(),
+        (is_github_owner(owner) && valid(name)).then(|| GitHubRepo {
+            owner: owner.into(),
+            name: name.into(),
         })
+    }
+
+    pub(crate) fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
     }
 
     pub(crate) fn slug(&self) -> String {
         format!("{}/{}", self.owner, self.name)
     }
 
-    fn is(&self, named: &str) -> bool {
-        Named::parse(named).is_some_and(|named| named.rest.is_empty() && named.names(self))
+    pub(crate) fn same(&self, other: &GitHubRepo) -> bool {
+        self.owner.eq_ignore_ascii_case(&other.owner) && self.name.eq_ignore_ascii_case(&other.name)
     }
 
     fn owns_url(&self, url: &str) -> bool {
@@ -90,6 +112,31 @@ pub(crate) struct Limits<'a> {
     pub(crate) repo: &'a GitHubRepo,
     pub(crate) branch: &'a str,
     pub(crate) base: &'a str,
+    pub(crate) readable_owners: &'a ReadableOwners,
+}
+
+impl Limits<'_> {
+    fn target(&self, named: &[String], writes: bool) -> Result<GitHubRepo, String> {
+        let mut target: Option<GitHubRepo> = None;
+        for text in named {
+            let repo = match GitHubRepo::from_argument(text) {
+                Some(repo) if repo.same(self.repo) => self.repo.clone(),
+                Some(repo) if !writes && self.readable_owners.reads(&repo.owner) => repo,
+                _ => return Err(another_repo(text, self, writes)),
+            };
+            match &target {
+                Some(target) if !target.same(&repo) => {
+                    return Err(format!(
+                        "the call names both {} and {}",
+                        target.slug(),
+                        repo.slug()
+                    ));
+                }
+                _ => target = Some(repo),
+            }
+        }
+        Ok(target.unwrap_or_else(|| self.repo.clone()))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -127,6 +174,9 @@ const fn switch(long: &'static str, short: Option<char>) -> Flag {
         value: false,
     }
 }
+
+const READ: bool = false;
+const WRITE: bool = true;
 
 const REPO: Flag = value("repo", Some('R'));
 const OUTPUT: &[Flag] = &[
@@ -352,52 +402,55 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
     };
     let what = format!("gh {command} {sub}").trim_end().to_string();
     if command == "api" {
-        return api(&args[1..], limits.repo);
+        return api(&args[1..], limits);
     }
-    let (tables, at_most): (&[&[Flag]], usize) = match (command, sub) {
-        ("issue", "view") => (&[OUTPUT, ISSUE_VIEW], 1),
-        ("issue", "list") => (&[OUTPUT, ISSUE_LIST], 0),
-        ("pr", "view") => (&[OUTPUT, ISSUE_VIEW], 1),
-        ("pr", "list") => (&[OUTPUT, PR_LIST], 0),
-        ("pr", "diff") => (&[PR_DIFF], 1),
-        ("pr", "checks") => (&[OUTPUT, PR_CHECKS], 1),
-        ("run", "view") => (&[OUTPUT, RUN_VIEW], 1),
-        ("run", "list") => (&[OUTPUT, RUN_LIST], 0),
-        ("repo", "view") => (&[REPO_VIEW], 1),
-        ("pr", "create") => (&[PR_CREATE], 0),
-        ("pr", "edit") => (&[PR_EDIT], 1),
-        ("pr", "ready") => (&[PR_READY], 1),
-        ("issue", "create") => (&[ISSUE_CREATE], 0),
-        ("issue", "comment") => (&[ISSUE_COMMENT], 1),
-        ("issue", "edit") => (&[ISSUE_EDIT], 1),
-        ("issue", "close") => (&[ISSUE_CLOSE], 1),
-        ("issue", "reopen") => (&[ISSUE_REOPEN], 1),
+    if (command, sub) == ("repo", "clone") {
+        return Err(
+            "the Broker doesn't run `gh repo clone`; use `git clone https://github.com/<owner>/<repo>`, which the Broker reads for owners in [broker] readable_owners"
+                .into(),
+        );
+    }
+    let (tables, at_most, writes): (&[&[Flag]], usize, bool) = match (command, sub) {
+        ("issue", "view") => (&[OUTPUT, ISSUE_VIEW], 1, READ),
+        ("issue", "list") => (&[OUTPUT, ISSUE_LIST], 0, READ),
+        ("pr", "view") => (&[OUTPUT, ISSUE_VIEW], 1, READ),
+        ("pr", "list") => (&[OUTPUT, PR_LIST], 0, READ),
+        ("pr", "diff") => (&[PR_DIFF], 1, READ),
+        ("pr", "checks") => (&[OUTPUT, PR_CHECKS], 1, READ),
+        ("run", "view") => (&[OUTPUT, RUN_VIEW], 1, READ),
+        ("run", "list") => (&[OUTPUT, RUN_LIST], 0, READ),
+        ("repo", "view") => (&[REPO_VIEW], 1, READ),
+        ("pr", "create") => (&[PR_CREATE], 0, WRITE),
+        ("pr", "edit") => (&[PR_EDIT], 1, WRITE),
+        ("pr", "ready") => (&[PR_READY], 1, WRITE),
+        ("issue", "create") => (&[ISSUE_CREATE], 0, WRITE),
+        ("issue", "comment") => (&[ISSUE_COMMENT], 1, WRITE),
+        ("issue", "edit") => (&[ISSUE_EDIT], 1, WRITE),
+        ("issue", "close") => (&[ISSUE_CLOSE], 1, WRITE),
+        ("issue", "reopen") => (&[ISSUE_REOPEN], 1, WRITE),
         _ => return Err(refused(&what)),
     };
     let mut parsed = parse(&args[2..], tables, &what)?;
     if parsed.positionals.len() > at_most {
         return Err(format!("too many arguments for {what}"));
     }
-    if let Some(other) = parsed
-        .take("repo")
-        .into_iter()
-        .find(|named| !limits.repo.is(named))
-    {
-        return Err(another_repo(&other, limits.repo));
-    }
-    if let Some(url) = parsed
-        .positionals
-        .iter()
-        .find(|arg| arg.contains("://") || arg.starts_with("github.com/"))
-        && !limits.repo.owns_url(url)
-    {
-        return Err(another_repo(url, limits.repo));
-    }
-    no_env_in_jq(&parsed)?;
     let said = match parsed.positionals.first() {
         Some(target) => format!("{what} {target}"),
         None => what.clone(),
     };
+    let mut named = parsed.take("repo");
+    if command == "repo" {
+        named.extend(parsed.positionals.pop());
+    }
+    named.extend(
+        parsed
+            .positionals
+            .iter()
+            .filter(|arg| arg.contains("://") || arg.starts_with("github.com/"))
+            .cloned(),
+    );
+    let target = limits.target(&named, writes)?;
+    no_env_in_jq(&parsed)?;
     let (mut args, change) = match sub {
         "create" if command == "pr" => {
             pr_create(&mut parsed, limits)?;
@@ -425,19 +478,12 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
             only_the_user_assigned(&parsed)?;
             (strings(&[command, sub]), Some(Change::Issue))
         }
-        "view" if command == "repo" => {
-            if let Some(named) = parsed.positionals.pop()
-                && !limits.repo.is(&named)
-            {
-                return Err(another_repo(&named, limits.repo));
-            }
-            (strings(&["repo", "view", &limits.repo.slug()]), None)
-        }
+        "view" if command == "repo" => (strings(&["repo", "view", &target.slug()]), None),
         _ => (strings(&[command, sub]), None),
     };
     args.extend(parsed.args());
     if command != "repo" {
-        args.extend(strings(&["--repo", &limits.repo.slug()]));
+        args.extend(strings(&["--repo", &target.slug()]));
     }
     Ok(GhCall { args, said, change })
 }
@@ -492,7 +538,8 @@ pub(crate) fn not_this_sessions_pr(branch: &str) -> String {
     format!("the Broker edits only this Session's PR, for {branch}")
 }
 
-fn api(args: &[String], repo: &GitHubRepo) -> Result<GhCall, String> {
+fn api(args: &[String], limits: &Limits) -> Result<GhCall, String> {
+    let repo = limits.repo;
     let mut parsed = parse(args, &[API, FIELDS], "gh api")?;
     let [endpoint] = parsed.positionals.as_slice() else {
         return Err("gh api takes one endpoint".into());
@@ -502,22 +549,27 @@ fn api(args: &[String], repo: &GitHubRepo) -> Result<GhCall, String> {
         .replace("{owner}", &repo.owner)
         .replace("{repo}", &repo.name);
     let path = endpoint.split('?').next().unwrap_or_default();
-    let prefix = format!("repos/{}", repo.slug());
-    let under = path.len() >= prefix.len()
-        && path[..prefix.len()].eq_ignore_ascii_case(&prefix)
-        && matches!(path.as_bytes().get(prefix.len()), None | Some(b'/'));
-    if !under || path.contains("..") || path.contains('%') || path.contains('\\') {
-        return Err(format!(
-            "the Broker's gh api reaches only repos/{} on GitHub",
-            repo.slug()
-        ));
-    }
     let posts = parsed
         .take("method")
         .iter()
         .any(|method| !method.eq_ignore_ascii_case("GET"));
+    let named = path.strip_prefix("repos/").and_then(|rest| {
+        let mut parts = rest.splitn(3, '/');
+        let (owner, name) = (parts.next()?, parts.next()?);
+        let prefix = "repos/".len() + owner.len() + 1 + name.len();
+        Some((GitHubRepo::from_parts(owner, name)?, prefix))
+    });
+    let safe = !(path.contains("..") || path.contains('%') || path.contains('\\'));
+    let Some((_, prefix)) = named.filter(|(named, _)| {
+        safe && (named.same(repo) || !posts && limits.readable_owners.reads(&named.owner))
+    }) else {
+        return Err(format!(
+            "the Broker's gh api reaches only repos/{} on GitHub, and GET under repos of owners in [broker] readable_owners",
+            repo.slug()
+        ));
+    };
     let change = match posts {
-        true => Some(issue_link(&parsed, &endpoint[prefix.len()..])?),
+        true => Some(issue_link(&parsed, &endpoint[prefix..])?),
         false if parsed.flags.iter().any(|(name, _)| field(name)) => {
             return Err(
                 "the Broker passes -f/-F fields to gh api only to link sub-issues and blocking issues"
@@ -584,11 +636,14 @@ fn refused(what: &str) -> String {
     )
 }
 
-fn another_repo(named: &str, repo: &GitHubRepo) -> String {
-    format!(
-        "the Broker reaches only this Repo, {}, not {named}",
-        repo.slug()
-    )
+fn another_repo(text: &str, limits: &Limits, writes: bool) -> String {
+    let slug = limits.repo.slug();
+    match writes {
+        true => format!("the Broker changes only this Repo, {slug}, not {text}"),
+        false => format!(
+            "the Broker reads only this Repo, {slug}, and repos of owners in [broker] readable_owners, not {text}"
+        ),
+    }
 }
 
 fn fixed_base(base: &str) -> String {
@@ -605,10 +660,12 @@ mod tests {
 
     fn call(line: &str) -> Result<GhCall, String> {
         let repo = acme();
+        let readable = ReadableOwners::new(vec!["libs".into()]).unwrap();
         let limits = Limits {
             repo: &repo,
             branch: "orch/work",
             base: "main",
+            readable_owners: &readable,
         };
         let args: Vec<String> = line.split(' ').map(String::from).collect();
         gh_call(&args, &limits)
@@ -705,6 +762,77 @@ mod tests {
                 refusal(line)
             );
         }
+    }
+
+    #[test]
+    fn reads_of_a_readable_owners_repo_pass_with_that_repo_pinned() {
+        for (line, args) in [
+            (
+                "issue view 1 --repo=libs/core",
+                "issue view 1 --repo libs/core",
+            ),
+            ("pr diff 3 -R LIBS/core", "pr diff 3 --repo LIBS/core"),
+            (
+                "pr view https://github.com/libs/core/pull/1 --json title",
+                "pr view https://github.com/libs/core/pull/1 --json title --repo libs/core",
+            ),
+            (
+                "issue list -R libs/core -L 3",
+                "issue list --limit 3 --repo libs/core",
+            ),
+            (
+                "repo view libs/core --json name",
+                "repo view libs/core --json name",
+            ),
+            (
+                "repo view https://github.com/libs/core",
+                "repo view libs/core",
+            ),
+            (
+                "api /repos/libs/core/contents/README.md",
+                "api repos/libs/core/contents/README.md --method GET",
+            ),
+        ] {
+            let call = call(line).unwrap();
+            assert_eq!(call.args.join(" "), args, "{line}");
+            assert_eq!(call.change, None, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_readable_owners_repo_is_never_changed() {
+        for line in [
+            "issue comment 1 -b x -R libs/core",
+            "issue create -t x --repo libs/core",
+            "issue close https://github.com/libs/core/issues/1",
+            "pr create --fill -R libs/core",
+            "pr edit https://github.com/libs/core/pull/1 -t x",
+            "api -X POST repos/libs/core/issues/3/sub_issues -F sub_issue_id=1",
+        ] {
+            assert!(
+                refusal(line).contains("acme/app"),
+                "{line}: {}",
+                refusal(line)
+            );
+        }
+    }
+
+    #[test]
+    fn a_read_naming_two_repos_or_no_repo_name_is_refused() {
+        for line in [
+            "issue view https://github.com/libs/core/issues/1 --repo acme/app",
+            "pr view https://github.com/acme/app/pull/1 -R libs/core",
+            "api repos/libs",
+            "api repos/libs/core/../../other/x",
+            "repo view libs",
+        ] {
+            assert!(call(line).is_err(), "{line} went through");
+        }
+    }
+
+    #[test]
+    fn repo_clone_points_at_git_clone() {
+        assert!(refusal("repo clone libs/core").contains("git clone"));
     }
 
     #[test]
