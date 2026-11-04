@@ -565,6 +565,10 @@ impl Daemon {
         self.config.sessions_dir.join(id.as_str())
     }
 
+    pub(crate) fn mirrors_dir(&self) -> PathBuf {
+        self.config.sessions_dir.with_file_name("mirrors")
+    }
+
     pub(crate) async fn route_clicks(
         self: Arc<Self>,
         mut clicked: tokio::sync::mpsc::Receiver<SessionId>,

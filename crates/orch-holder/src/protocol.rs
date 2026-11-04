@@ -80,6 +80,7 @@ pub enum BrokerRequest {
     Push { updates: Vec<RefUpdate> },
     Gh { args: Vec<String> },
     Sign { payload: Vec<u8> },
+    Mirror { url: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +100,7 @@ pub enum BrokerReply {
     Refused { reason: String },
     Gh { said: String, output: GhOutput },
     Signed { signature: String },
+    Mirrored { path: String, said: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -16,6 +16,6 @@ Fetches never ask. Pushes, PR changes and issue changes follow the Preset: plan 
 
 ## Consequences
 
-- No credential can leak from a Sandbox, and the Agent can't touch other repos or refs.
+- No credential can leak from a Sandbox, and the Agent can't touch other repos or refs. (Amended by 0017: it can read, never change, the repos of owners the user lists.)
 - orch now runs git on a Worktree that the Agent can write. The Broker must therefore pin `core.hooksPath`, `core.sshCommand` and `--no-verify`, and never trust the Worktree's config.
 - The shims and the allowlist are orch's to keep up to date as Claude's habits with `gh` change.

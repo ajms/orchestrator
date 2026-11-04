@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use orch_config::{ConfigError, ConfigLoader, ConfigProblem, PortBlock, PortRange};
+use orch_config::{
+    ConfigError, ConfigLoader, ConfigProblem, PortBlock, PortRange, ReadableOwners, is_github_owner,
+};
 use tempfile::TempDir;
 
 fn loader_in(dir: &TempDir) -> ConfigLoader {
@@ -153,4 +155,42 @@ fn the_agent_signing_key_is_unset_by_default_and_expands_a_home_path() {
         loader.global().unwrap().signing_key,
         Some(std::path::PathBuf::from("/home/u/keys/orch"))
     );
+}
+
+#[test]
+fn the_broker_reads_no_other_owners_by_default_and_those_listed_once_configured() {
+    let dir = TempDir::new().unwrap();
+    let loader = loader_in(&dir);
+    assert!(!loader.global().unwrap().readable_owners.reads("ajms"));
+
+    std::fs::write(
+        loader.global_path(),
+        "[broker]\nreadable_owners = [\"ajms\", \"Acme-Org\"]\n",
+    )
+    .unwrap();
+    let owners = loader.global().unwrap().readable_owners;
+    assert!(owners.reads("ajms") && owners.reads("acme-org") && owners.reads("ACME-ORG"));
+    assert!(!owners.reads("acme"));
+}
+
+#[test]
+fn a_readable_owner_is_spelled_as_written_and_in_lower_case() {
+    let owners = ReadableOwners::new(vec!["Acme-Org".into(), "ajms".into()]).unwrap();
+    assert_eq!(owners.spellings(), ["Acme-Org", "acme-org", "ajms"]);
+}
+
+#[test]
+fn a_readable_owner_must_be_a_plain_github_owner() {
+    let dir = TempDir::new().unwrap();
+    let loader = loader_in(&dir);
+    for owner in ["acme/app", "", "../x", "acme org", "*"] {
+        std::fs::write(
+            loader.global_path(),
+            format!("[broker]\nreadable_owners = [{owner:?}]\n"),
+        )
+        .unwrap();
+        assert!(loader.global().is_err(), "{owner:?} was accepted");
+    }
+    assert!(is_github_owner("Acme-Org1"));
+    assert!(!is_github_owner("-acme") && !is_github_owner("acme_org"));
 }
