@@ -222,8 +222,8 @@ fn naming_a_hard_wall_as_readable_or_writable_is_a_config_error() {
         "/srv/app/.git/hooks",
         "/srv/app/.git/hooks/pre-commit",
         "/srv/app/.git/config",
-        "~/.claude/settings.json",
-        "~/.claude/skills/mine",
+        "~/.local/state/orchestrator/agent-profiles/claude/settings.json",
+        "~/.local/state/orchestrator/agent-profiles/claude/skills/mine",
     ] {
         for list in ["readable", "writable"] {
             let err = load(list, wall).unwrap_err();
@@ -231,7 +231,13 @@ fn naming_a_hard_wall_as_readable_or_writable_is_a_config_error() {
         }
         assert!(load("hidden", wall).is_ok(), "hidden {wall}");
     }
-    for fine in ["~/.cache", "~/.claude/projects", "/srv/app/.git/objects"] {
+    for fine in [
+        "~/.cache",
+        "~/.claude/settings.json",
+        "~/.claude/skills/mine",
+        "~/.claude/projects",
+        "/srv/app/.git/objects",
+    ] {
         assert!(load("writable", fine).is_ok(), "{fine}");
     }
 
