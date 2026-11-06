@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use orch_agent::{AgentAdapter, ClaudeCode, SandboxNeeds};
 
+const PROFILE: &str = "/home/dev/.local/state/orchestrator/agent-profiles/claude";
+
 fn needs(vars: &[(&str, &str)]) -> SandboxNeeds {
     let lookup = |key: &str| {
         vars.iter()
@@ -16,24 +18,40 @@ fn paths(paths: &[&str]) -> Vec<PathBuf> {
 }
 
 #[test]
-fn claude_writes_its_config_dir_and_config_file_but_not_its_settings() {
+fn claude_writes_only_its_profile_and_the_users_credentials() {
     let needs = needs(&[("HOME", "/home/dev")]);
     assert_eq!(
         needs.writable,
-        paths(&["/home/dev/.claude", "/home/dev/.claude.json"])
+        paths(&[PROFILE, "/home/dev/.claude/.credentials.json"])
     );
+}
+
+#[test]
+fn the_host_sessions_and_config_file_never_enter_the_sandbox() {
+    let needs = needs(&[("HOME", "/home/dev")]);
+    assert!(
+        !needs
+            .writable
+            .contains(&PathBuf::from("/home/dev/.claude.json"))
+    );
+    assert!(!needs.writable.contains(&PathBuf::from("/home/dev/.claude")));
+}
+
+#[test]
+fn an_agent_cannot_plant_config_in_the_profile() {
+    let needs = needs(&[("HOME", "/home/dev")]);
     assert_eq!(
         needs.carve_outs,
         paths(&[
-            "/home/dev/.claude/settings.json",
-            "/home/dev/.claude/settings.local.json",
-            "/home/dev/.claude/hooks",
-            "/home/dev/.claude/skills",
-            "/home/dev/.claude/agents",
-            "/home/dev/.claude/commands",
-            "/home/dev/.claude/rules",
-            "/home/dev/.claude/plugins",
-            "/home/dev/.claude/CLAUDE.md",
+            &format!("{PROFILE}/settings.json"),
+            &format!("{PROFILE}/settings.local.json"),
+            &format!("{PROFILE}/hooks"),
+            &format!("{PROFILE}/skills"),
+            &format!("{PROFILE}/agents"),
+            &format!("{PROFILE}/commands"),
+            &format!("{PROFILE}/rules"),
+            &format!("{PROFILE}/plugins"),
+            &format!("{PROFILE}/CLAUDE.md"),
         ])
     );
 }
@@ -47,7 +65,10 @@ fn claude_reads_its_installation_and_never_updates_itself() {
     );
     assert_eq!(
         needs.env,
-        [("DISABLE_AUTOUPDATER".to_string(), "1".to_string())]
+        [
+            ("DISABLE_AUTOUPDATER".to_string(), "1".to_string()),
+            ("CLAUDE_CONFIG_DIR".to_string(), PROFILE.to_string()),
+        ]
     );
 }
 
@@ -58,21 +79,23 @@ fn claude_keeps_its_own_variables_such_as_its_api_key_and_config_dir() {
 }
 
 #[test]
-fn a_moved_config_dir_is_writable_with_its_settings_carved_out() {
+fn the_profile_lives_in_orchs_state_dir() {
+    let needs = needs(&[("HOME", "/home/dev"), ("XDG_STATE_HOME", "/var/state")]);
+    assert!(needs.writable.contains(&PathBuf::from(
+        "/var/state/orchestrator/agent-profiles/claude"
+    )));
+}
+
+#[test]
+fn the_profile_links_credentials_from_a_moved_config_dir() {
     let needs = needs(&[("HOME", "/home/dev"), ("CLAUDE_CONFIG_DIR", "/srv/claude")]);
     assert_eq!(
         needs.writable,
-        paths(&["/srv/claude", "/home/dev/.claude.json"])
+        paths(&[PROFILE, "/srv/claude/.credentials.json"])
     );
-    assert!(
-        needs
-            .carve_outs
-            .contains(&PathBuf::from("/srv/claude/hooks"))
-    );
-    assert!(
-        needs
-            .carve_outs
-            .iter()
-            .all(|path| path.starts_with("/srv/claude"))
-    );
+}
+
+#[test]
+fn without_a_home_claude_needs_nothing() {
+    assert_eq!(needs(&[]), SandboxNeeds::default());
 }

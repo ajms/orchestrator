@@ -548,7 +548,14 @@ impl Daemon {
                 match configured {
                     Ok((sandbox, configured)) => {
                         env.extend(configured);
-                        match render_profile(&launch_adapter, &env).await {
+                        // Hand the adapter the Session's worktree (ORCH_WORKTREE)
+                        // so a profile render can seed it, e.g. Claude pre-trusts
+                        // the cwd in its `.claude.json`.
+                        let render_env: Vec<(String, String)> = session_env(&record)
+                            .into_iter()
+                            .chain(env.iter().cloned())
+                            .collect();
+                        match render_profile(&launch_adapter, &render_env).await {
                             Ok(()) => {
                                 self.opened_conversation(id, launch.conversation).await;
                                 self.spawn_holder(&record, launch.argv, env, sandbox).await
