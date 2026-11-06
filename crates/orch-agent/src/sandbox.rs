@@ -137,10 +137,17 @@ pub fn sandbox_carve_outs(
         Some("json") => Placeholder::File("{}"),
         Some(_) => Placeholder::File(""),
     };
-    let agents = needs
-        .carve_outs
-        .iter()
-        .map(|path| (path.clone(), placeholder(path)));
+    // A carve-out may be a symlink in an Agent profile (e.g. Claude links
+    // settings.json/skills from the real ~/.claude). bwrap cannot mount onto a
+    // symlink destination, so resolve to the real target: mounting it read-only
+    // both lets the Agent read the real file through the link and keeps it from
+    // writing it, while a missing target gets an empty placeholder instead of a
+    // dangling bind.
+    let agents = needs.carve_outs.iter().map(|path| {
+        let real = std::fs::read_link(path).unwrap_or_else(|_| path.clone());
+        let placeholder = placeholder(&real);
+        (real, placeholder)
+    });
     let git = [
         ("hooks", Placeholder::Dir),
         ("config", Placeholder::File("")),

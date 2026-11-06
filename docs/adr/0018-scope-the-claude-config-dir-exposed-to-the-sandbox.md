@@ -13,8 +13,14 @@ The profile is rebuilt before every launch, resume and restart (`prepare`):
   the real config dir marked writable in the Sandbox.
 - The config carve-outs (`settings.json`, `settings.local.json`, `hooks/`,
   `skills/`, `agents/`, `commands/`, `rules/`, `plugins/` and `CLAUDE.md`) are
-  symlinked read-only into the profile and carved out again inside it, so the
-  Agent can't plant hooks that would run in the user's other Claude sessions.
+  symlinked into the profile (always, even when the source is still missing). The
+  Sandbox resolves each link to its real `~/.claude` target and mounts only that
+  target read-only — binding over the profile symlink itself is impossible
+  (bwrap refuses to mount onto a symlink destination), and a missing target gets
+  an empty read-only placeholder. Claude therefore reads the real carve-out
+  through the link but can't plant hooks that would run in the user's other
+  Claude sessions, nor create a missing `skills/`/`hooks/` under `~/.claude`.
+  Only these carve-outs are exposed; the rest of `~/.claude` stays hidden.
 - `projects/`, `todos/` and `shell-snapshots/` are created empty and writable,
   and kept across rebuilds so resume still finds the Session's transcripts.
 - A minimal `.claude.json` is rendered into the profile (Claude reads it from
