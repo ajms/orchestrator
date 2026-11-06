@@ -160,6 +160,27 @@ fn a_session_without_a_live_agent_shows_its_setup_output_instead_of_a_pane() {
 }
 
 #[test]
+fn long_setup_output_stays_scrolled_to_its_end() {
+    let wrapped = "w".repeat(WIDTH as usize * 2);
+    let output = (0..100)
+        .map(|n| format!("step-{n:03} {wrapped}"))
+        .chain(["npm ERR! could not resolve".to_string()])
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut failed = in_phase(session("webshop", "broken"), PhaseView::SetupFailed);
+    failed.setup_output = Some(output);
+    failed.error = Some("Setup exited with status 1".into());
+    let mut tui = Harness::new();
+    tui.sessions(vec![failed]);
+
+    let screen = tui.screen();
+    assert!(screen.contains("npm ERR! could not resolve"), "{screen}");
+    assert!(screen.contains("Setup exited with status 1"), "{screen}");
+    assert!(screen.contains("Setup failed — :retry"), "{screen}");
+    assert!(!screen.contains("step-000"), "{screen}");
+}
+
+#[test]
 fn a_closed_pane_shows_the_reason() {
     let mut tui = three_sessions();
     tui.pane(

@@ -68,11 +68,13 @@ pub(super) fn draw(app: &App, frame: &mut Frame, areas: &Areas) {
                 .as_ref()
                 .filter(|pane| pane.session == view.id)
                 .and_then(|pane| pane.closed.clone());
-            let text = placeholder(view, closed);
-            frame.render_widget(
-                Paragraph::new(text).wrap(Wrap { trim: false }).block(block),
-                area,
-            );
+            let inner = block.inner(area);
+            let text = Paragraph::new(placeholder(view, closed)).wrap(Wrap { trim: false });
+            let overflow = text
+                .line_count(inner.width)
+                .saturating_sub(inner.height.into());
+            let top = u16::try_from(overflow).unwrap_or(u16::MAX);
+            frame.render_widget(text.scroll((top, 0)).block(block), area);
         }
     }
 }
