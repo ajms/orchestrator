@@ -1,4 +1,5 @@
 mod hooks;
+mod profile;
 mod settings;
 mod statusline;
 mod subagents;
@@ -8,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use hooks::HookEvent;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
+use profile::{CREDENTIALS, Dirs, path_text};
 use serde_json::{Map, Value, json};
 use subagents::ClaudeSubagentTranscripts;
 use transcript::TranscriptTitles;
@@ -31,6 +33,8 @@ const CONFIG_CARVE_OUTS: [&str; 9] = [
     "plugins",
     "CLAUDE.md",
 ];
+const INSTALLED: [&str; 2] = [".local/share/claude", ".local/bin"];
+const NO_HOME: &str = "claude's Agent profile needs HOME to be set";
 
 pub const CLAUDE: &str = "claude";
 
@@ -199,29 +203,78 @@ impl AgentAdapter for ClaudeCode {
     }
 
     fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
-        settings::config_dir(lookup)
-            .map(|dir| vec![dir.join("projects"), dir.join("plans")])
-            .unwrap_or_default()
+        match Dirs::resolve(lookup) {
+            Some(Dirs { profile, .. }) => vec![profile.join("projects"), profile.join("plans")],
+            None => Vec::new(),
+        }
+    }
+
+    fn agent_profile(
+        &self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<PathBuf>, String> {
+        match Dirs::resolve(lookup) {
+            Some(Dirs { profile, .. }) => Ok(Some(profile)),
+            None => Err(NO_HOME.into()),
+        }
+    }
+
+    fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
+        let Some(Dirs { user, profile, .. }) = Dirs::resolve(lookup) else {
+            return Err(NO_HOME.into());
+        };
+        profile::build(&user, &profile).map_err(|err| {
+            format!(
+                "building claude's Agent profile {}: {err}",
+                profile.display()
+            )
+        })
+    }
+
+    fn render_profile(
+        &self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        env: &[(String, String)],
+    ) -> Result<(), String> {
+        let Some(Dirs { profile, .. }) = Dirs::resolve(lookup) else {
+            return Err(NO_HOME.into());
+        };
+        let cwd = env
+            .iter()
+            .find(|(key, _)| key == "ORCH_WORKTREE")
+            .map(|(_, value)| PathBuf::from(value));
+        profile::render_config(&profile, cwd.as_deref()).map_err(|err| {
+            format!(
+                "rendering claude's .claude.json in {}: {err}",
+                profile.display()
+            )
+        })
+    }
+
+    fn env(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+        let mut env = vec![("DISABLE_AUTOUPDATER".into(), "1".into())];
+        if let Some(Dirs { profile, .. }) = Dirs::resolve(lookup) {
+            env.push(("CLAUDE_CONFIG_DIR".into(), path_text(&profile)));
+        }
+        env
     }
 
     fn sandbox_needs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> SandboxNeeds {
-        let home = lookup("HOME")
-            .filter(|home| !home.is_empty())
-            .map(PathBuf::from);
-        let config = settings::config_dir(lookup);
-        let in_home = |path: &str| home.iter().map(|home| home.join(path)).collect::<Vec<_>>();
+        let Some(Dirs {
+            home,
+            user,
+            profile,
+        }) = Dirs::resolve(lookup)
+        else {
+            return SandboxNeeds::default();
+        };
         SandboxNeeds {
-            writable: config
-                .iter()
-                .cloned()
-                .chain(in_home(".claude.json"))
+            writable: std::iter::once(profile.clone())
+                .chain(CREDENTIALS.map(|name| user.join(name)))
                 .collect(),
-            read_only: [in_home(".local/share/claude"), in_home(".local/bin")].concat(),
-            carve_outs: config
-                .iter()
-                .flat_map(|dir| CONFIG_CARVE_OUTS.map(|name| dir.join(name)))
-                .collect(),
-            env: vec![("DISABLE_AUTOUPDATER".into(), "1".into())],
+            read_only: INSTALLED.map(|path| home.join(path)).into(),
+            carve_outs: CONFIG_CARVE_OUTS.map(|name| profile.join(name)).into(),
+            env: self.env(lookup),
             env_prefixes: vec!["ANTHROPIC_".into(), "CLAUDE_".into()],
         }
     }
