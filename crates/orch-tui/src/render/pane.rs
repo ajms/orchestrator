@@ -26,12 +26,7 @@ pub(super) fn draw(app: &App, frame: &mut Frame, areas: &Areas) {
         .border_style(super::border(focused, app.inserting()));
     if let Some(preparing) = app.cursor_preparing() {
         let block = block.title(preparing_title(preparing));
-        frame.render_widget(
-            Paragraph::new(preparing_lines(preparing))
-                .wrap(Wrap { trim: false })
-                .block(block),
-            area,
-        );
+        render_tail(frame, area, block, preparing_lines(preparing));
         return;
     }
     if let Some((view, subagent)) = app.cursor_subagent() {
@@ -68,13 +63,20 @@ pub(super) fn draw(app: &App, frame: &mut Frame, areas: &Areas) {
                 .as_ref()
                 .filter(|pane| pane.session == view.id)
                 .and_then(|pane| pane.closed.clone());
-            let text = placeholder(view, closed);
-            frame.render_widget(
-                Paragraph::new(text).wrap(Wrap { trim: false }).block(block),
-                area,
-            );
+            render_tail(frame, area, block, placeholder(view, closed));
         }
     }
+}
+
+fn render_tail(frame: &mut Frame, area: Rect, block: Block, mut lines: Vec<Line<'static>>) {
+    let inner = block.inner(area);
+    let hidden = lines.len().saturating_sub(inner.height.into());
+    let text = Paragraph::new(lines.split_off(hidden)).wrap(Wrap { trim: false });
+    let overflow = text
+        .line_count(inner.width)
+        .saturating_sub(inner.height.into());
+    let top = u16::try_from(overflow).unwrap_or(u16::MAX);
+    frame.render_widget(text.scroll((top, 0)).block(block), area);
 }
 
 fn shown_selection(app: &App) -> Option<Selection> {
