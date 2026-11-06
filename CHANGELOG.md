@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1](https://github.com/ajms/orchestrator/compare/v0.15.0...v0.15.1) - 2026-11-06
+
+### Fixed
+
+- *(tui)* bound tail rendering and cover the Preparing pane
+- *(tui)* keep the end of long Setup output in view
+
 ## [0.15.0](https://github.com/ajms/orchestrator/compare/v0.14.1...v0.15.0) - 2026-11-04
 
 ### Added
