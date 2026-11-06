@@ -61,7 +61,17 @@ pub(super) fn build(user: &Path, profile: &Path) -> io::Result<()> {
     }
     std::fs::set_permissions(profile, std::fs::Permissions::from_mode(0o700))?;
 
-    for name in CREDENTIALS.into_iter().chain(CONFIG_CARVE_OUTS) {
+    // The config carve-outs are always linked, even when the source is still
+    // missing: the Sandbox resolves the link target and mounts it read-only (so
+    // Claude reads the real file through the profile and can't plant into it),
+    // creating an empty placeholder when the target does not exist yet. A
+    // dangling link is never bound directly, so bwrap never sees a missing bind.
+    for name in CONFIG_CARVE_OUTS {
+        link(profile, name, &user.join(name))?;
+    }
+    // Credentials are linked only when they exist; a missing link would be a
+    // writable bind with no source, which bwrap rejects.
+    for name in CREDENTIALS {
         let target = user.join(name);
         if target.symlink_metadata().is_ok() {
             link(profile, name, &target)?;

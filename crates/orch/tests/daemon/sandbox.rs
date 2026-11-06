@@ -70,9 +70,12 @@ async fn a_sandboxed_agent_writes_its_worktree_and_nothing_else_of_the_users() {
     assert_ne!(run(&mut pane, "write", &main_checkout).await, "ok");
     assert_eq!(std::fs::read_to_string(main_checkout).unwrap(), "hello\n");
 
+    // The real ~/.claude is no longer bound into the Sandbox (Claude runs from a
+    // scoped CLAUDE_CONFIG_DIR profile), so a write to the user's history lands
+    // in the Session's throwaway home and never reaches the host file.
     let history = env.path("home/.claude/history.jsonl");
-    assert_eq!(run(&mut pane, "write", &history).await, "ok");
-    assert!(history.exists());
+    run(&mut pane, "write", &history).await;
+    assert!(!history.exists());
 }
 
 #[tokio::test]
@@ -220,19 +223,23 @@ async fn the_agent_signing_key_reads_as_empty_inside_the_sandbox_wherever_it_liv
 }
 
 #[tokio::test]
-async fn claude_json_saves_from_inside_the_sandbox_persist() {
+async fn the_host_claude_json_never_persists_from_inside_the_sandbox() {
     if !bwrap_runs() {
         return;
     }
     let env = Env::new();
     env.real_bwrap();
+    // The real ~/.claude.json (foreign-project history and MCP configs) never
+    // enters the Sandbox: Claude reads a synthesized .claude.json from its
+    // CLAUDE_CONFIG_DIR profile, so a save inside the Sandbox must not reach the
+    // host file.
     let config = seed(env.path("home/.claude.json"), "before");
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let (_, mut pane) = sandboxed_session(&env, &mut client).await;
 
-    assert_eq!(run(&mut pane, "save", &config).await, "ok");
-    assert_eq!(std::fs::read_to_string(config).unwrap(), "saved");
+    run(&mut pane, "save", &config).await;
+    assert_eq!(std::fs::read_to_string(config).unwrap(), "before");
 }
 
 #[tokio::test]
