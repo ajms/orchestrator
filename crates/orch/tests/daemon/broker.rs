@@ -580,7 +580,7 @@ async fn merges_other_repos_and_a_changed_base_are_refused_with_a_message() {
 
     for (call, says) in [
         ("gh pr merge 42", "doesn't run `gh pr merge`"),
-        ("gh pr comment 42 -b hi", "doesn't run `gh pr comment`"),
+        ("gh pr close 42", "doesn't run `gh pr close`"),
         ("gh issue view 1 -R other/app", "not other/app"),
         (
             "gh pr create --base develop",

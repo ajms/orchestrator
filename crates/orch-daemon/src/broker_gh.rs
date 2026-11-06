@@ -143,6 +143,8 @@ impl Limits<'_> {
 pub(crate) enum Change {
     PrCreate,
     PrEdit { pr: Option<u64> },
+    PrComment,
+    PrReview,
     Issue,
 }
 
@@ -278,6 +280,14 @@ const ISSUE_CREATE: &[Flag] = &[
     value("assignee", Some('a')),
 ];
 const ISSUE_COMMENT: &[Flag] = &[REPO, value("body", Some('b'))];
+const PR_COMMENT: &[Flag] = &[REPO, value("body", Some('b'))];
+const PR_REVIEW: &[Flag] = &[
+    REPO,
+    switch("approve", Some('a')),
+    switch("request-changes", Some('r')),
+    switch("comment", Some('c')),
+    value("body", Some('b')),
+];
 const ISSUE_EDIT: &[Flag] = &[
     REPO,
     value("title", Some('t')),
@@ -423,6 +433,8 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
         ("pr", "create") => (&[PR_CREATE], 0, WRITE),
         ("pr", "edit") => (&[PR_EDIT], 1, WRITE),
         ("pr", "ready") => (&[PR_READY], 1, WRITE),
+        ("pr", "comment") => (&[PR_COMMENT], 1, WRITE),
+        ("pr", "review") => (&[PR_REVIEW], 1, WRITE),
         ("issue", "create") => (&[ISSUE_CREATE], 0, WRITE),
         ("issue", "comment") => (&[ISSUE_COMMENT], 1, WRITE),
         ("issue", "edit") => (&[ISSUE_EDIT], 1, WRITE),
@@ -474,6 +486,8 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
                 Some(Change::PrEdit { pr }),
             )
         }
+        "comment" if command == "pr" => (strings(&["pr", "comment"]), Some(Change::PrComment)),
+        "review" if command == "pr" => (strings(&["pr", "review"]), Some(Change::PrReview)),
         "create" | "comment" | "edit" | "close" | "reopen" if command == "issue" => {
             only_the_user_assigned(&parsed)?;
             (strings(&[command, sub]), Some(Change::Issue))
@@ -569,7 +583,7 @@ fn api(args: &[String], limits: &Limits) -> Result<GhCall, String> {
         ));
     };
     let change = match posts {
-        true => Some(issue_link(&parsed, &endpoint[prefix..])?),
+        true => Some(api_post(&parsed, &endpoint[prefix..])?),
         false if parsed.flags.iter().any(|(name, _)| field(name)) => {
             return Err(
                 "the Broker passes -f/-F fields to gh api only to link sub-issues and blocking issues"
@@ -594,11 +608,21 @@ fn field(name: &str) -> bool {
     matches!(name, "field" | "raw-field")
 }
 
-fn issue_link(parsed: &Parsed, path: &str) -> Result<Change, String> {
+fn api_post(parsed: &Parsed, path: &str) -> Result<Change, String> {
     let refused = || {
-        "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues"
+        "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues, or add pull request review comments"
             .to_string()
     };
+    // POST /repos/<owner>/<repo>/pulls/<n>/comments adds a review comment (or a
+    // reply, with in_reply_to) to a PR in this Repo; its fields are free-form.
+    let review_comment = path.strip_prefix("/pulls/").is_some_and(|rest| {
+        rest.split_once('/').is_some_and(|(number, tail)| {
+            number.bytes().all(|b| b.is_ascii_digit()) && tail == "comments"
+        })
+    });
+    if review_comment {
+        return Ok(Change::PrComment);
+    }
     let link = path.strip_prefix("/issues/").and_then(|rest| {
         let (number, link) = rest.split_once('/')?;
         number.bytes().all(|b| b.is_ascii_digit()).then_some(link)
@@ -866,11 +890,80 @@ mod tests {
     }
 
     #[test]
+    fn pr_comment_passes_for_any_pr_in_this_repo() {
+        for (line, args) in [
+            (
+                "pr comment 42 -b hi",
+                "pr comment 42 --body hi --repo acme/app",
+            ),
+            (
+                "pr comment https://github.com/acme/app/pull/7 -b hi",
+                "pr comment https://github.com/acme/app/pull/7 --body hi --repo acme/app",
+            ),
+        ] {
+            let call = call(line).unwrap();
+            assert_eq!(call.args.join(" "), args, "{line}");
+            assert_eq!(call.change, Some(Change::PrComment), "{line}");
+        }
+        assert!(refusal("pr comment 7 8 -b x").contains("too many"));
+        assert!(refusal("pr comment 7 --edit-last").contains("--edit-last"));
+        assert!(
+            refusal("pr comment https://github.com/other/app/pull/1 -b x").contains("acme/app")
+        );
+        assert!(refusal("pr comment 1 -b x -R libs/core").contains("acme/app"));
+    }
+
+    #[test]
+    fn pr_review_passes_for_any_pr_in_this_repo() {
+        for (line, args) in [
+            (
+                "pr review 42 --approve -b lgtm",
+                "pr review 42 --approve --body lgtm --repo acme/app",
+            ),
+            (
+                "pr review https://github.com/acme/app/pull/7 -r -b fix",
+                "pr review https://github.com/acme/app/pull/7 --request-changes --body fix --repo acme/app",
+            ),
+        ] {
+            let call = call(line).unwrap();
+            assert_eq!(call.args.join(" "), args, "{line}");
+            assert_eq!(call.change, Some(Change::PrReview), "{line}");
+        }
+        assert!(refusal("pr review 7 --web").contains("--web"));
+        assert!(refusal("pr review 1 -b x -R libs/core").contains("acme/app"));
+    }
+
+    #[test]
+    fn api_posts_a_pull_request_review_comment_in_this_repo() {
+        let comment = call(
+            "api -X POST repos/acme/app/pulls/7/comments -F body=nit -F commit_id=abc -F path=a.rs -F line=3",
+        )
+        .unwrap();
+        assert_eq!(
+            comment.args.join(" "),
+            "api repos/acme/app/pulls/7/comments --method POST --field body=nit --field commit_id=abc --field path=a.rs --field line=3"
+        );
+        assert_eq!(comment.change, Some(Change::PrComment));
+        // Replies to a review thread use the same endpoint with in_reply_to.
+        let reply =
+            call("api -X POST repos/acme/app/pulls/7/comments -F body=ok -F in_reply_to=99")
+                .unwrap();
+        assert_eq!(reply.change, Some(Change::PrComment));
+        for line in [
+            "api -X POST repos/other/app/pulls/7/comments -F body=x",
+            "api -X POST repos/acme/app/pulls/x/comments -F body=x",
+            "api -X POST repos/acme/app/pulls/7/reviews -F body=x",
+            "api -X POST repos/acme/app/pulls/7/comments/99 -F body=x",
+        ] {
+            assert!(call(line).is_err(), "{line}");
+        }
+    }
+
+    #[test]
     fn writes_other_than_pr_and_issue_changes_are_refused() {
         for line in [
             "pr merge 42",
             "pr close 42",
-            "pr comment 42",
             "issue delete 1",
             "issue transfer 1 other/app",
             "issue lock 1",

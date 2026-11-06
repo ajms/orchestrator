@@ -14,6 +14,6 @@ Sandbox (unless the user's Preset turns it off):
 GitHub goes through orch's Broker, for this Repo's origin only:
 - git: \`fetch\`/\`pull\` of any ref; \`push\` of this Session's Branch only (\`--force-with-lease\` ok). Plain \`--force\`, other branches, tags, deletions and the Base branch are refused.
 - gh reads: \`issue view/list\`, \`pr view/list/diff/checks\`, \`run view/list\`, \`repo view\`, GET-only \`gh api repos/<owner>/<repo>/...\`.
-- gh writes: \`pr create\` for your Branch (base is always the Base branch), \`pr edit\` title/body, \`pr ready [--undo]\`; \`issue create/comment/edit/close/reopen\` (assign only \`@me\`); \`gh api -X POST\` only to \`issues/<n>/sub_issues\` and \`issues/<n>/dependencies/blocked_by\`.
-- Refused: PR comments, review replies, resolving threads, re-requesting reviewers, merging or closing PRs, other repos, any other \`gh api\` write. When a step needs one of these, tell the user to do it.
+- gh writes: \`pr create\` for your Branch (base is always the Base branch), \`pr edit\` title/body, \`pr ready [--undo]\`, \`pr comment\` and \`pr review\` (approve/request-changes/comment) on any PR in this Repo; \`issue create/comment/edit/close/reopen\` (assign only \`@me\`); \`gh api -X POST\` only to \`issues/<n>/sub_issues\`, \`issues/<n>/dependencies/blocked_by\`, and \`pulls/<n>/comments\` (inline review comments and replies).
+- Refused: resolving threads, re-requesting reviewers, merging or closing PRs, other repos, any other \`gh api\` write. When a step needs one of these, tell the user to do it.
 `;
