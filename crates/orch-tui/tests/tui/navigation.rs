@@ -162,7 +162,7 @@ fn a_session_without_a_live_agent_shows_its_setup_output_instead_of_a_pane() {
 #[test]
 fn long_setup_output_stays_scrolled_to_its_end() {
     let wrapped = "w".repeat(WIDTH as usize * 2);
-    let output = (0..100)
+    let output = (0..30_000)
         .map(|n| format!("step-{n:03} {wrapped}"))
         .chain(["npm ERR! could not resolve".to_string()])
         .collect::<Vec<_>>()
@@ -176,8 +176,13 @@ fn long_setup_output_stays_scrolled_to_its_end() {
     let screen = tui.screen();
     assert!(screen.contains("npm ERR! could not resolve"), "{screen}");
     assert!(screen.contains("Setup exited with status 1"), "{screen}");
-    assert!(screen.contains("Setup failed — :retry"), "{screen}");
     assert!(!screen.contains("step-000"), "{screen}");
+    let lines = tui.lines();
+    let last_row = lines.iter().rposition(|l| l.contains('╰')).unwrap() - 1;
+    assert!(
+        lines[last_row].contains("Setup failed — :retry"),
+        "{screen}"
+    );
 }
 
 #[test]

@@ -135,6 +135,21 @@ fn a_refused_creation_turns_the_row_into_an_error() {
 }
 
 #[test]
+fn a_prompt_taller_than_the_pane_leaves_the_failure_in_view() {
+    let mut tui = refused(&"Fix login timeout\n".repeat(50));
+
+    let screen = tui.screen();
+    assert!(
+        screen.contains("branch orch/fix-login-timeout already exists"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Enter reopens the form · x dismisses"),
+        "{screen}"
+    );
+}
+
+#[test]
 fn enter_on_a_failed_row_reopens_the_form_filled_in() {
     let mut tui = Harness::with_config(TuiConfig {
         repos: vec![PathBuf::from("/home/me/webshop")],
