@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use orch_git::LandingError;
 
@@ -205,6 +206,28 @@ fn a_conflicting_landing_aborts_and_reports_the_conflicting_paths() {
     assert_eq!(rev(&fixture.root, "main"), base_tip);
     assert_eq!(git(&fixture.root, &["status", "--porcelain"]), "");
     assert_eq!(read(&worktree.path, "README.md"), "worktree version\n");
+}
+
+fn await_the_next_second() {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    std::thread::sleep(Duration::from_nanos(u64::from(
+        1_000_000_000 - now.subsec_nanos(),
+    )));
+}
+
+#[test]
+fn an_edit_of_the_same_size_right_after_the_checkout_still_lands() {
+    let fixture = Fixture::new();
+    await_the_next_second();
+    let worktree = fixture.session("work");
+    let size = read(&worktree.path, "README.md").len();
+    write(&worktree.path, "README.md", &"x".repeat(size));
+    await_the_next_second();
+
+    let landed = fixture.repo().land_squash(&worktree, "msg");
+
+    assert!(landed.is_ok(), "{landed:?}");
+    assert_eq!(read(&fixture.root, "README.md"), "x".repeat(size));
 }
 
 #[test]
