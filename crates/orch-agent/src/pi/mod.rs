@@ -8,12 +8,13 @@ use std::path::PathBuf;
 
 pub use draft::session_dir_name as pi_session_dir_name;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
-use profile::{CREDENTIALS, Dirs, RESOURCES, extension, path_text};
+use profile::{CREDENTIALS, RESOURCES, extension};
 use subagents::PiSubagentTranscripts;
 
+use crate::profile::{Dirs, path_text};
 use crate::{
-    AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, LaunchSpec, PayloadError, SandboxNeeds,
-    SubagentTranscripts,
+    AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, LaunchSpec, PayloadError, ProfileRender,
+    SandboxNeeds, SubagentTranscripts,
 };
 
 const USER_READ_ONLY: [&str; 13] = [
@@ -114,7 +115,7 @@ impl AgentAdapter for Pi {
         spec: &DraftSpec,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Option<DraftRun>, String> {
-        let Some(Dirs { profile, .. }) = Dirs::resolve(lookup) else {
+        let Some(Dirs { profile, .. }) = profile::dirs(lookup) else {
             return Ok(None);
         };
         let fork = draft::copy_conversation(&profile, spec)
@@ -138,7 +139,7 @@ impl AgentAdapter for Pi {
         &self,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Box<dyn SubagentTranscripts>> {
-        let Dirs { profile, .. } = Dirs::resolve(lookup)?;
+        let Dirs { profile, .. } = profile::dirs(lookup)?;
         Some(Box::new(PiSubagentTranscripts::new(profile)))
     }
 
@@ -146,14 +147,14 @@ impl AgentAdapter for Pi {
         &self,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Option<PathBuf>, String> {
-        match Dirs::resolve(lookup) {
+        match profile::dirs(lookup) {
             Some(Dirs { profile, .. }) => Ok(Some(profile)),
             None => Err(NO_HOME.into()),
         }
     }
 
     fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
-        let Some(Dirs { user, profile, .. }) = Dirs::resolve(lookup) else {
+        let Some(Dirs { user, profile, .. }) = profile::dirs(lookup) else {
             return Err(NO_HOME.into());
         };
         profile::build(&user, &profile)
@@ -163,17 +164,17 @@ impl AgentAdapter for Pi {
     fn render_profile(
         &self,
         lookup: &dyn Fn(&str) -> Option<String>,
-        env: &[(String, String)],
+        render: &ProfileRender<'_>,
     ) -> Result<(), String> {
-        let Some(Dirs { user, profile, .. }) = Dirs::resolve(lookup) else {
+        let Some(Dirs { user, profile, .. }) = profile::dirs(lookup) else {
             return Err(NO_HOME.into());
         };
-        profile::render_mcp(&user, &profile, env)
+        profile::render_mcp(&user, &profile, render.env)
             .map_err(|err| format!("rendering pi's mcp.json in {}: {err}", profile.display()))
     }
 
     fn env(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
-        let Some(Dirs { profile, .. }) = Dirs::resolve(lookup) else {
+        let Some(Dirs { profile, .. }) = profile::dirs(lookup) else {
             return Vec::new();
         };
         vec![
@@ -188,7 +189,7 @@ impl AgentAdapter for Pi {
             home,
             user,
             profile,
-        }) = Dirs::resolve(lookup)
+        }) = profile::dirs(lookup)
         else {
             return SandboxNeeds::default();
         };
@@ -212,6 +213,7 @@ impl AgentAdapter for Pi {
             carve_outs: RESOURCES.map(|name| profile.join(name)).into(),
             env: self.env(lookup),
             env_prefixes: Vec::new(),
+            ..SandboxNeeds::default()
         }
     }
 }

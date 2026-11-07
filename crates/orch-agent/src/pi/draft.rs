@@ -2,8 +2,8 @@ use std::io;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use super::profile::path_text;
 use crate::lines::open;
+use crate::profile::path_text;
 use crate::{Argv, DraftSpec};
 
 const SESSIONS: &str = "sessions";

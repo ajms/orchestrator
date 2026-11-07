@@ -19,6 +19,24 @@ fn settings(args: &[String]) -> Value {
 }
 
 #[test]
+fn a_draft_reads_conversations_from_the_agent_profile() {
+    let spec = DraftSpec {
+        conversation: ConversationId("c1".into()),
+        worktree: "/tree".into(),
+        scratch: None,
+    };
+    let lookup = |key: &str| (key == "HOME").then(|| "/home/dev".to_string());
+    let run = ClaudeCode::default()
+        .draft(&spec, &lookup)
+        .unwrap()
+        .expect("claude can draft");
+    assert!(run.env.contains(&(
+        "CLAUDE_CONFIG_DIR".to_string(),
+        "/home/dev/.local/state/orchestrator/agent-profiles/claude".to_string()
+    )));
+}
+
+#[test]
 fn launch_pins_our_session_id_as_the_first_conversation() {
     let argv = ClaudeCode::default().launch(&spec(Preset::inherit()));
     assert_eq!(argv.program, "claude");
@@ -179,7 +197,7 @@ fn draft_forks_the_conversation_in_print_mode_without_our_hooks() {
         .draft(&spec, &|_| None)
         .unwrap()
         .expect("claude can draft");
-    assert!(run.env.is_empty());
+    assert!(!run.env.iter().any(|(key, _)| key == "CLAUDE_CONFIG_DIR"));
     assert!(!run.pipe_base_diff);
     let draft = run.argv;
     assert_eq!(draft.program, "claude");

@@ -1,5 +1,6 @@
 use orch_agent::{
-    Placeholder, SandboxLayout, SandboxNeeds, SandboxPaths, sandbox_args, sandbox_carve_outs,
+    Placeholder, Projection, SandboxLayout, SandboxNeeds, SandboxPaths, sandbox_args,
+    sandbox_carve_outs,
 };
 
 const HOME: &str = "/home/dev";
@@ -47,7 +48,89 @@ fn needs() -> SandboxNeeds {
         carve_outs: vec!["/home/dev/.agent/hooks".into()],
         env: vec![("AGENT_NO_UPDATE".into(), "1".into())],
         env_prefixes: vec!["AGENT_".into()],
+        ..SandboxNeeds::default()
     }
+}
+
+fn skeleton() -> SandboxNeeds {
+    SandboxNeeds {
+        scratch: vec!["/state/profile".into()],
+        writable: vec!["/state/profile/projects".into()],
+        projected: vec![
+            Projection {
+                source: "/home/dev/.agent/settings.json".into(),
+                target: "/state/profile/settings.json".into(),
+                writable: false,
+            },
+            Projection {
+                source: "/home/dev/.agent/token.json".into(),
+                target: "/state/profile/token.json".into(),
+                writable: true,
+            },
+        ],
+        hidden: vec!["/srv/agent".into()],
+        ..needs()
+    }
+}
+
+#[test]
+fn a_skeleton_mounts_its_tmpfs_before_what_it_projects_into_it() {
+    let args = sandbox_args(&layout(), &skeleton());
+    let tmpfs = find(&args, &["--tmpfs", "/state/profile"]).unwrap();
+    for later in [
+        &[
+            "--bind-try",
+            "/state/profile/projects",
+            "/state/profile/projects",
+        ][..],
+        &[
+            "--ro-bind-try",
+            "/home/dev/.agent/settings.json",
+            "/state/profile/settings.json",
+        ],
+        &[
+            "--bind-try",
+            "/home/dev/.agent/token.json",
+            "/state/profile/token.json",
+        ],
+    ] {
+        assert!(find(&args, later).unwrap() > tmpfs, "{later:?}");
+    }
+}
+
+#[test]
+fn a_projection_writes_no_placeholder_at_its_source() {
+    let carved = sandbox_carve_outs(&layout(), &skeleton());
+    assert!(
+        !carved
+            .iter()
+            .any(|(path, _)| path.ends_with("settings.json") || path.ends_with("token.json"))
+    );
+}
+
+#[test]
+fn what_an_agent_hides_is_covered_after_home_is_mounted() {
+    let args = sandbox_args(&layout(), &skeleton());
+    let hidden = find(&args, &["--tmpfs", "/srv/agent"]).unwrap();
+    assert!(hidden > find(&args, &["--tmpfs", HOME]).unwrap());
+}
+
+#[test]
+fn a_configured_path_at_a_projection_is_ignored() {
+    let layout = SandboxLayout {
+        configured: SandboxPaths {
+            writable: vec!["/home/dev/.agent/settings.json".into()],
+            ..SandboxPaths::default()
+        },
+        ..layout()
+    };
+    let args = sandbox_args(&layout, &skeleton());
+    let bound = [
+        "--bind",
+        "/home/dev/.agent/settings.json",
+        "/home/dev/.agent/settings.json",
+    ];
+    assert_eq!(find(&args, &bound), None);
 }
 
 fn bwrap_args() -> Vec<String> {

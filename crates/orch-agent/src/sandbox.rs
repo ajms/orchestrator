@@ -40,11 +40,32 @@ pub const BWRAP: &str = "bwrap";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SandboxNeeds {
+    pub scratch: Vec<PathBuf>,
     pub writable: Vec<PathBuf>,
     pub read_only: Vec<PathBuf>,
     pub carve_outs: Vec<PathBuf>,
+    pub projected: Vec<Projection>,
+    pub hidden: Vec<PathBuf>,
     pub env: Vec<(String, String)>,
     pub env_prefixes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Projection {
+    pub source: PathBuf,
+    pub target: PathBuf,
+    pub writable: bool,
+}
+
+impl SandboxNeeds {
+    pub fn read_only_config(&self) -> Vec<PathBuf> {
+        let projected = self
+            .projected
+            .iter()
+            .filter(|projection| !projection.writable)
+            .flat_map(|projection| [projection.source.clone(), projection.target.clone()]);
+        self.carve_outs.iter().cloned().chain(projected).collect()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -137,17 +158,10 @@ pub fn sandbox_carve_outs(
         Some("json") => Placeholder::File("{}"),
         Some(_) => Placeholder::File(""),
     };
-    // A carve-out may be a symlink in an Agent profile (e.g. Claude links
-    // settings.json/skills from the real ~/.claude). bwrap cannot mount onto a
-    // symlink destination, so resolve to the real target: mounting it read-only
-    // both lets the Agent read the real file through the link and keeps it from
-    // writing it, while a missing target gets an empty placeholder instead of a
-    // dangling bind.
-    let agents = needs.carve_outs.iter().map(|path| {
-        let real = std::fs::read_link(path).unwrap_or_else(|_| path.clone());
-        let placeholder = placeholder(&real);
-        (real, placeholder)
-    });
+    let agents = needs
+        .carve_outs
+        .iter()
+        .map(|path| (path.clone(), placeholder(path)));
     let git = [
         ("hooks", Placeholder::Dir),
         ("config", Placeholder::File("")),
@@ -157,11 +171,17 @@ pub fn sandbox_carve_outs(
 }
 
 pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String> {
+    let projected = needs
+        .projected
+        .iter()
+        .flat_map(|projection| [&projection.source, &projection.target]);
     let agents_paths: Vec<_> = needs
         .writable
         .iter()
         .chain(&needs.read_only)
         .chain(&needs.carve_outs)
+        .chain(&needs.scratch)
+        .chain(projected)
         .collect();
     let agents_own = |path: &Path| agents_paths.iter().any(|agents| path.starts_with(agents));
     let mut mounts = vec![Mount {
@@ -196,10 +216,27 @@ pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String>
 
     mounts.extend(
         needs
+            .scratch
+            .iter()
+            .map(|path| Mount::same(Kind::Tmpfs, path)),
+    );
+    mounts.extend(
+        needs
             .writable
             .iter()
             .map(|path| Mount::same(Kind::BindTry, path)),
     );
+    mounts.extend(needs.projected.iter().map(|projection| Mount {
+        source: projection.source.clone(),
+        ..Mount::same(
+            if projection.writable {
+                Kind::BindTry
+            } else {
+                Kind::ReadOnlyTry
+            },
+            &projection.target,
+        )
+    }));
     for path in [
         &layout.worktree,
         &layout.subagent_worktrees,
@@ -221,7 +258,7 @@ pub fn sandbox_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Vec<String>
         .map(String::from)
         .into();
     args.extend(mounts.iter().flat_map(Mount::args));
-    for hidden in &layout.hidden {
+    for hidden in layout.hidden.iter().chain(&needs.hidden) {
         args.extend(Mount::same(Kind::Tmpfs, hidden).args());
         let inside = mounts
             .iter()

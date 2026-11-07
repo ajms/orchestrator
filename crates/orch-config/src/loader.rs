@@ -46,7 +46,9 @@ impl ConfigLoader {
         let base = xdg::config_home(&lookup)?;
         let loader = Self {
             state_dir: xdg::state_home(&lookup).map(|state| state.join("orchestrator")),
-            carve_outs: ClaudeCode::default().sandbox_needs(&lookup).carve_outs,
+            carve_outs: ClaudeCode::default()
+                .sandbox_needs(&lookup)
+                .read_only_config(),
             ..Self::new(base.join("orchestrator").join("config.toml"))
         };
         Some(match xdg::home(&lookup) {

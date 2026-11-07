@@ -70,9 +70,6 @@ async fn a_sandboxed_agent_writes_its_worktree_and_nothing_else_of_the_users() {
     assert_ne!(run(&mut pane, "write", &main_checkout).await, "ok");
     assert_eq!(std::fs::read_to_string(main_checkout).unwrap(), "hello\n");
 
-    // The real ~/.claude is no longer bound into the Sandbox (Claude runs from a
-    // scoped CLAUDE_CONFIG_DIR profile), so a write to the user's history lands
-    // in the Session's throwaway home and never reaches the host file.
     let history = env.path("home/.claude/history.jsonl");
     run(&mut pane, "write", &history).await;
     assert!(!history.exists());
@@ -127,7 +124,7 @@ async fn a_sandboxed_agent_cannot_plant_a_missing_skills_dir_or_git_hooks_dir() 
         "mkdir -p {0}/evil && echo evil > {0}/evil/SKILL.md",
         skills.display()
     );
-    assert_ne!(shell(&mut pane, &skill).await, "exit 0");
+    shell(&mut pane, &skill).await;
     assert!(!skills.join("evil").exists());
 
     let hooks = repo.join(".git/hooks");
@@ -229,10 +226,6 @@ async fn the_host_claude_json_never_persists_from_inside_the_sandbox() {
     }
     let env = Env::new();
     env.real_bwrap();
-    // The real ~/.claude.json (foreign-project history and MCP configs) never
-    // enters the Sandbox: Claude reads a synthesized .claude.json from its
-    // CLAUDE_CONFIG_DIR profile, so a save inside the Sandbox must not reach the
-    // host file.
     let config = seed(env.path("home/.claude.json"), "before");
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
@@ -534,4 +527,110 @@ async fn configured_writable_paths_are_writable_and_hidden_ones_are_masked() {
         "no"
     );
     assert_eq!(run(&mut pane, "exists", &data).await, "no");
+}
+
+fn claude_profile(env: &Env) -> PathBuf {
+    env.path("state/orchestrator/agent-profiles/claude")
+}
+
+#[tokio::test]
+async fn an_agent_cannot_plant_config_in_the_claude_profile() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.real_bwrap();
+    let settings = seed(env.path("home/.claude/settings.json"), "{}");
+    let hook = seed(env.path("home/.claude/hooks/pre.sh"), "real");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, mut pane) = sandboxed_session(&env, &mut client).await;
+    let profile = claude_profile(&env);
+
+    assert_ne!(
+        run(&mut pane, "write", &profile.join("settings.json")).await,
+        "ok"
+    );
+    assert_ne!(
+        run(&mut pane, "save", &profile.join(".claude.json")).await,
+        "ok"
+    );
+    assert_ne!(
+        run(&mut pane, "write", &profile.join("hooks/planted.sh")).await,
+        "ok"
+    );
+    assert_eq!(
+        run(&mut pane, "write", &profile.join("planted.json")).await,
+        "ok"
+    );
+
+    assert_eq!(std::fs::read_to_string(settings).unwrap(), "{}");
+    assert_eq!(std::fs::read_to_string(hook).unwrap(), "real");
+    assert!(!profile.join("planted.json").exists());
+    assert!(!env.path("home/.claude/hooks/planted.sh").exists());
+    assert!(
+        profile
+            .join("settings.json")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[tokio::test]
+async fn a_missing_claude_carve_out_writes_nothing_to_the_users_config() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.real_bwrap();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, mut pane) = sandboxed_session(&env, &mut client).await;
+
+    run(
+        &mut pane,
+        "write",
+        &claude_profile(&env).join("settings.json"),
+    )
+    .await;
+
+    assert!(!env.path("home/.claude/settings.json").exists());
+    assert!(!env.path("home/.claude/hooks").exists());
+}
+
+#[tokio::test]
+async fn a_token_refresh_saved_inside_the_sandbox_reaches_the_users_credentials() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.real_bwrap();
+    let credentials = seed(env.path("home/.claude/.credentials.json"), "before");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, mut pane) = sandboxed_session(&env, &mut client).await;
+
+    let path = claude_profile(&env).join(".credentials.json");
+    assert_eq!(run(&mut pane, "save", &path).await, "ok");
+
+    assert_eq!(std::fs::read_to_string(credentials).unwrap(), "saved");
+}
+
+#[tokio::test]
+async fn conversations_written_in_the_sandbox_outlive_it() {
+    if !bwrap_runs() {
+        return;
+    }
+    let env = Env::new();
+    env.real_bwrap();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, mut pane) = sandboxed_session(&env, &mut client).await;
+
+    let conversation = claude_profile(&env).join("projects/live.jsonl");
+    assert_eq!(run(&mut pane, "write", &conversation).await, "ok");
+
+    assert!(conversation.exists());
 }

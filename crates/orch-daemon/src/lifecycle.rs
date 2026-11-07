@@ -4,7 +4,9 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orch_agent::{AgentAdapter, Argv, LaunchSpec, Preset, SandboxPaths, adapter_named};
+use orch_agent::{
+    AgentAdapter, Argv, LaunchSpec, Preset, ProfileRender, SandboxPaths, adapter_named,
+};
 use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted, xdg};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
@@ -548,14 +550,13 @@ impl Daemon {
                 match configured {
                     Ok((sandbox, configured)) => {
                         env.extend(configured);
-                        // Hand the adapter the Session's worktree (ORCH_WORKTREE)
-                        // so a profile render can seed it, e.g. Claude pre-trusts
-                        // the cwd in its `.claude.json`.
-                        let render_env: Vec<(String, String)> = session_env(&record)
-                            .into_iter()
-                            .chain(env.iter().cloned())
-                            .collect();
-                        match render_profile(&launch_adapter, &render_env).await {
+                        let rendered = render_profile(
+                            &launch_adapter,
+                            &env,
+                            &record.worktree,
+                            launch.conversation.as_ref(),
+                        );
+                        match rendered.await {
                             Ok(()) => {
                                 self.opened_conversation(id, launch.conversation).await;
                                 self.spawn_holder(&record, launch.argv, env, sandbox).await
@@ -847,12 +848,26 @@ async fn prepare(adapter: &Adapter) -> Result<(), String> {
         .map_err(|err| err.to_string())?
 }
 
-async fn render_profile(adapter: &Adapter, env: &[(String, String)]) -> Result<(), String> {
+async fn render_profile(
+    adapter: &Adapter,
+    env: &[(String, String)],
+    worktree: &Path,
+    conversation: Option<&ConversationId>,
+) -> Result<(), String> {
     let adapter = adapter.clone();
     let env = env.to_vec();
-    tokio::task::spawn_blocking(move || adapter.render_profile(&xdg::process_env, &env))
-        .await
-        .map_err(|err| err.to_string())?
+    let worktree = worktree.to_path_buf();
+    let conversation = conversation.cloned();
+    tokio::task::spawn_blocking(move || {
+        let render = ProfileRender {
+            env: &env,
+            worktree: &worktree,
+            conversation: conversation.as_ref(),
+        };
+        adapter.render_profile(&xdg::process_env, &render)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 pub(crate) fn select_preset(

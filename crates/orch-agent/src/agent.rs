@@ -7,6 +7,13 @@ use orch_core::{
 
 use crate::{GuardAnswer, Preset, SandboxNeeds};
 
+#[derive(Debug, Clone, Copy)]
+pub struct ProfileRender<'a> {
+    pub env: &'a [(String, String)],
+    pub worktree: &'a Path,
+    pub conversation: Option<&'a ConversationId>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Capabilities {
     pub hooks: bool,
@@ -231,12 +238,12 @@ pub trait AgentAdapter {
         Ok(())
     }
 
-    /// Renders launch-time files into the Agent profile from the Agent's
-    /// resolved env, after env resolution and before the Holder spawns.
+    /// Renders launch-time files into the Agent profile, after env resolution
+    /// and before the Holder spawns.
     fn render_profile(
         &self,
         _lookup: &dyn Fn(&str) -> Option<String>,
-        _env: &[(String, String)],
+        _render: &ProfileRender<'_>,
     ) -> Result<(), String> {
         Ok(())
     }

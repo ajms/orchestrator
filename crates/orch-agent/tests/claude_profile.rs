@@ -1,8 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use orch_agent::{AgentAdapter, ClaudeCode};
-use serde_json::Value;
+use orch_agent::{AgentAdapter, ClaudeCode, ProfileRender};
+use orch_core::ConversationId;
+use serde_json::{Value, json};
 use tempfile::TempDir;
+
+const WORKTREE: &str = "/work/my.tree";
+const PROJECT: &str = "-work-my-tree";
+const CONVERSATION: &str = "11111111-1111-4111-8111-111111111111";
 
 struct Home {
     dir: TempDir,
@@ -57,12 +62,26 @@ impl Home {
     }
 
     fn render(&self, worktree: &str) {
+        self.launch(worktree, None);
+    }
+
+    fn resume(&self, conversation: &str) {
+        self.launch(WORKTREE, Some(&ConversationId(conversation.into())));
+    }
+
+    fn launch(&self, worktree: &str, conversation: Option<&ConversationId>) {
+        let render = ProfileRender {
+            env: &[],
+            worktree: Path::new(worktree),
+            conversation,
+        };
         ClaudeCode::default()
-            .render_profile(
-                &self.lookup(),
-                &[("ORCH_WORKTREE".to_string(), worktree.to_string())],
-            )
+            .render_profile(&self.lookup(), &render)
             .unwrap();
+    }
+
+    fn project_in(&self, dir: &Path) -> PathBuf {
+        dir.join("projects").join(PROJECT)
     }
 
     fn config(&self) -> Value {
@@ -99,7 +118,7 @@ fn the_config_carve_outs_are_linked_read_only() {
 fn the_writable_state_dirs_are_created_empty() {
     let home = Home::new();
     home.prepare();
-    for name in ["projects", "todos", "shell-snapshots"] {
+    for name in ["projects", "todos", "shell-snapshots", "plans"] {
         let dir = home.profile().join(name);
         assert!(dir.is_dir(), "{name} should be a writable dir");
         assert!(!dir.symlink_metadata().unwrap().file_type().is_symlink());
@@ -158,8 +177,159 @@ fn a_rebuild_keeps_the_writable_state() {
     let home = Home::new();
     home.prepare();
     home.render("/work/tree");
-    std::fs::write(home.profile().join("projects/live.jsonl"), "transcript").unwrap();
-    // A second launch rebuilds the profile but must keep the transcripts.
+    std::fs::write(home.profile().join("projects/live.jsonl"), "turns").unwrap();
     home.prepare();
     assert!(home.profile().join("projects/live.jsonl").exists());
+}
+
+#[test]
+fn trust_survives_a_parallel_launch_and_a_rebuild() {
+    let home = Home::new();
+    home.prepare();
+    home.render("/work/one");
+    home.render("/work/two");
+    home.prepare();
+    let projects = home.config()["projects"].clone();
+    assert_eq!(projects["/work/one"]["hasTrustDialogAccepted"], true);
+    assert_eq!(projects["/work/two"]["hasTrustDialogAccepted"], true);
+}
+
+#[test]
+fn a_rebuild_keeps_only_the_config_orch_owns() {
+    let home = Home::new();
+    home.prepare();
+    let planted = json!({
+        "mcpServers": { "planted": {} },
+        "projects": {
+            "/a": { "hasTrustDialogAccepted": true, "mcpServers": { "planted": {} } },
+            "/b": { "hasTrustDialogAccepted": false },
+        },
+    });
+    home.seed(&home.profile().join(".claude.json"), &planted.to_string());
+    home.prepare();
+    let config = home.config();
+    assert!(config["mcpServers"].is_null());
+    assert_eq!(
+        config["projects"]["/a"],
+        json!({ "hasTrustDialogAccepted": true })
+    );
+    assert!(config["projects"]["/b"].is_null());
+}
+
+#[test]
+fn a_malformed_config_never_stops_a_launch() {
+    let home = Home::new();
+    home.prepare();
+    let config = home.profile().join(".claude.json");
+    home.seed(&config, r#"{"projects":"nope"}"#);
+    home.render("/work/tree");
+    assert_eq!(
+        home.config()["projects"]["/work/tree"]["hasTrustDialogAccepted"],
+        true
+    );
+}
+
+#[test]
+fn a_linked_config_is_never_followed() {
+    let home = Home::new();
+    home.prepare();
+    let foreign = home.path().join("foreign.json");
+    std::fs::write(&foreign, r#"{"foreign":true}"#).unwrap();
+    let config = home.profile().join(".claude.json");
+    std::fs::remove_file(&config).unwrap();
+    std::os::unix::fs::symlink(&foreign, &config).unwrap();
+
+    home.prepare();
+
+    assert!(!config.symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(home.config()["foreign"].is_null());
+    assert_eq!(
+        std::fs::read_to_string(&foreign).unwrap(),
+        r#"{"foreign":true}"#
+    );
+}
+
+#[test]
+fn a_rebuild_resets_a_replaced_carve_out() {
+    let home = Home::new();
+    home.prepare();
+    let settings = home.profile().join("settings.json");
+    std::fs::remove_file(&settings).unwrap();
+    std::fs::write(&settings, "planted").unwrap();
+
+    home.prepare();
+
+    assert_eq!(
+        std::fs::read_link(&settings).unwrap(),
+        home.user().join("settings.json")
+    );
+}
+
+#[test]
+fn resuming_adopts_only_that_conversation_from_before_the_profile() {
+    let home = Home::new();
+    let source = home.project_in(&home.user());
+    home.seed(&source.join(format!("{CONVERSATION}.jsonl")), "old turns");
+    let nested = format!("{CONVERSATION}/subagents/one.jsonl");
+    home.seed(&source.join(&nested), "sub");
+    home.seed(&source.join("other.jsonl"), "another conversation");
+    home.prepare();
+
+    home.resume(CONVERSATION);
+
+    let adopted = home.project_in(&home.profile());
+    let read = |name: &str| std::fs::read_to_string(adopted.join(name)).unwrap();
+    assert_eq!(read(&format!("{CONVERSATION}.jsonl")), "old turns");
+    assert_eq!(read(&nested), "sub");
+    assert!(!adopted.join("other.jsonl").exists());
+}
+
+#[test]
+fn adopting_never_overwrites_the_profiles_newer_conversation() {
+    let home = Home::new();
+    let file = format!("{CONVERSATION}.jsonl");
+    home.seed(&home.project_in(&home.user()).join(&file), "old");
+    home.prepare();
+    let adopted = home.project_in(&home.profile()).join(&file);
+    home.seed(&adopted, "newer");
+
+    home.resume(CONVERSATION);
+
+    assert_eq!(std::fs::read_to_string(adopted).unwrap(), "newer");
+}
+
+#[test]
+fn adopting_never_writes_through_a_planted_link() {
+    let home = Home::new();
+    let file = format!("{CONVERSATION}.jsonl");
+    home.seed(&home.project_in(&home.user()).join(&file), "old");
+    home.prepare();
+    let elsewhere = home.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, home.project_in(&home.profile())).unwrap();
+
+    home.resume(CONVERSATION);
+
+    assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
+    assert!(home.project_in(&home.profile()).join(&file).is_file());
+}
+
+#[test]
+fn a_new_conversation_has_nothing_to_adopt() {
+    let home = Home::new();
+    home.prepare();
+    home.resume(CONVERSATION);
+    assert!(!home.project_in(&home.profile()).exists());
+}
+
+#[test]
+fn a_conversation_id_that_is_a_path_adopts_nothing() {
+    let home = Home::new();
+    home.seed(&home.path().join("outside.jsonl"), "outside");
+    home.seed(&home.project_in(&home.user()).join("seed.jsonl"), "");
+    home.prepare();
+
+    home.resume("../../../outside");
+
+    assert!(!home.project_in(&home.profile()).exists());
 }

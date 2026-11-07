@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use orch_agent::{AgentAdapter, Pi};
+use orch_agent::{AgentAdapter, Pi, ProfileRender};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -499,7 +499,12 @@ impl Home {
             .iter()
             .map(|(k, v)| ((*k).into(), (*v).into()))
             .collect();
-        Pi::default().render_profile(&lookup, &env)
+        let render = ProfileRender {
+            env: &env,
+            worktree: Path::new("/work/tree"),
+            conversation: None,
+        };
+        Pi::default().render_profile(&lookup, &render)
     }
 
     fn mcp(&self) -> Value {
