@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0](https://github.com/ajms/orchestrator/compare/v0.15.1...v0.16.0) - 2026-11-07
+
+### Added
+
+- *(claude)* project the Agent profile into a Sandbox tmpfs
+- *(broker)* allow pr comment, pr review, and inline review comments
+- *(claude)* run from a scoped CLAUDE_CONFIG_DIR profile
+
+### Fixed
+
+- *(broker)* harden PR review calls and guard approvals
+- *(claude)* bind carve-outs at their real target so the sandbox launches
+- *(git)* keep the index mtime when snapshotting a Worktree
+
+### Other
+
+- Merge pull request #230 from ajms/orch/plan-lets-analyse-how-we-can
+- *(config)* update hard-wall paths to the Claude profile carve-outs
+
 ## [0.15.1](https://github.com/ajms/orchestrator/compare/v0.15.0...v0.15.1) - 2026-11-06
 
 ### Fixed
