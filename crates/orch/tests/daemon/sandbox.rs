@@ -12,7 +12,15 @@ use crate::common::*;
 
 async fn sandboxed_session(env: &Env, client: &mut TestClient) -> (SessionId, PaneView) {
     let repo = env.repo("app");
-    let create = CreateSession::new(&repo, "Boxed");
+    sandboxed_session_in(&repo, env, client).await
+}
+
+async fn sandboxed_session_in(
+    repo: &Path,
+    env: &Env,
+    client: &mut TestClient,
+) -> (SessionId, PaneView) {
+    let create = CreateSession::new(repo, "Boxed");
     let id = client.create(create).await;
     client
         .until(&id, "running", |view| view.agent_state.is_some())
@@ -326,11 +334,12 @@ async fn a_sandboxed_agent_pushes_its_branch_through_the_broker() {
     }
     let env = Env::new();
     env.real_bwrap();
+    let repo = env.repo("app");
+    let remote = env.remote(&repo);
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let (id, mut pane) = sandboxed_session(&env, &mut client).await;
+    let (id, mut pane) = sandboxed_session_in(&repo, &env, &mut client).await;
     let view = client.sessions[&id].clone();
-    let remote = env.remote(&env.path("repos/app"));
 
     let push = format!(
         "git commit -q --allow-empty -m boxed && git push -u origin {}",
