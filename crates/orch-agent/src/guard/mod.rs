@@ -18,6 +18,8 @@ pub enum GuardKind {
     WriteOutsideWorktree,
     Push,
     PullRequest,
+    PrReview,
+    PrApproval,
     Issue,
 }
 
