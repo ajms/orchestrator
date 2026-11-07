@@ -1,3 +1,4 @@
+use orch_agent::GuardKind;
 use orch_config::{ReadableOwners, is_github_owner};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +144,24 @@ impl Limits<'_> {
 pub(crate) enum Change {
     PrCreate,
     PrEdit { pr: Option<u64> },
+    PrReview,
+    PrApprove { pr: u64 },
     Issue,
+}
+
+impl Change {
+    pub(crate) fn always_asks(&self) -> bool {
+        matches!(self, Change::PrApprove { .. })
+    }
+
+    pub(crate) fn guard(&self, repo: &GitHubRepo, branch: &str) -> (GuardKind, String) {
+        match self {
+            Change::PrCreate | Change::PrEdit { .. } => (GuardKind::PullRequest, branch.into()),
+            Change::PrReview => (GuardKind::PrReview, repo.slug()),
+            Change::PrApprove { pr } => (GuardKind::PrApproval, format!("{}#{pr}", repo.slug())),
+            Change::Issue => (GuardKind::Issue, repo.slug()),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -278,6 +296,14 @@ const ISSUE_CREATE: &[Flag] = &[
     value("assignee", Some('a')),
 ];
 const ISSUE_COMMENT: &[Flag] = &[REPO, value("body", Some('b'))];
+const PR_COMMENT: &[Flag] = &[REPO, value("body", Some('b'))];
+const PR_REVIEW: &[Flag] = &[
+    REPO,
+    switch("approve", Some('a')),
+    switch("request-changes", Some('r')),
+    switch("comment", Some('c')),
+    value("body", Some('b')),
+];
 const ISSUE_EDIT: &[Flag] = &[
     REPO,
     value("title", Some('t')),
@@ -423,6 +449,8 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
         ("pr", "create") => (&[PR_CREATE], 0, WRITE),
         ("pr", "edit") => (&[PR_EDIT], 1, WRITE),
         ("pr", "ready") => (&[PR_READY], 1, WRITE),
+        ("pr", "comment") => (&[PR_COMMENT], 1, WRITE),
+        ("pr", "review") => (&[PR_REVIEW], 1, WRITE),
         ("issue", "create") => (&[ISSUE_CREATE], 0, WRITE),
         ("issue", "comment") => (&[ISSUE_COMMENT], 1, WRITE),
         ("issue", "edit") => (&[ISSUE_EDIT], 1, WRITE),
@@ -434,7 +462,7 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
     if parsed.positionals.len() > at_most {
         return Err(format!("too many arguments for {what}"));
     }
-    let said = match parsed.positionals.first() {
+    let mut said = match parsed.positionals.first() {
         Some(target) => format!("{what} {target}"),
         None => what.clone(),
     };
@@ -446,7 +474,7 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
         parsed
             .positionals
             .iter()
-            .filter(|arg| arg.contains("://") || arg.starts_with("github.com/"))
+            .filter(|arg| could_be_a_url(arg))
             .cloned(),
     );
     let target = limits.target(&named, writes)?;
@@ -474,6 +502,12 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
                 Some(Change::PrEdit { pr }),
             )
         }
+        "comment" if command == "pr" => (strings(&["pr", "comment"]), Some(Change::PrReview)),
+        "review" if command == "pr" => {
+            let (verdict, change) = pr_review(&parsed, limits)?;
+            said = format!("{said} --{verdict}");
+            (strings(&["pr", "review"]), Some(change))
+        }
         "create" | "comment" | "edit" | "close" | "reopen" if command == "issue" => {
             only_the_user_assigned(&parsed)?;
             (strings(&[command, sub]), Some(Change::Issue))
@@ -488,6 +522,10 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
     Ok(GhCall { args, said, change })
 }
 
+fn could_be_a_url(arg: &str) -> bool {
+    arg.contains(':') || arg.to_ascii_lowercase().starts_with("github.com/")
+}
+
 fn pr_create(parsed: &mut Parsed, limits: &Limits) -> Result<(), String> {
     if parsed.take("head").iter().any(|head| head != limits.branch) {
         return Err(format!(
@@ -499,6 +537,29 @@ fn pr_create(parsed: &mut Parsed, limits: &Limits) -> Result<(), String> {
         return Err(fixed_base(limits.base));
     }
     Ok(())
+}
+
+fn pr_review(parsed: &Parsed, limits: &Limits) -> Result<(&'static str, Change), String> {
+    let verdicts: Vec<_> = parsed
+        .flags
+        .iter()
+        .map(|(name, _)| *name)
+        .filter(|name| matches!(*name, "approve" | "request-changes" | "comment"))
+        .collect();
+    match verdicts.as_slice() {
+        ["approve"] => {
+            let pr = parsed
+                .positionals
+                .first()
+                .and_then(|target| named_pr(target, limits))
+                .ok_or("the Broker approves a PR only by its number or URL")?;
+            Ok(("approve", Change::PrApprove { pr }))
+        }
+        [verdict] => Ok((verdict, Change::PrReview)),
+        _ => Err(
+            "gh pr review takes exactly one of --approve, --request-changes and --comment".into(),
+        ),
+    }
 }
 
 fn only_the_user_assigned(parsed: &Parsed) -> Result<(), String> {
@@ -521,17 +582,20 @@ fn own_pr(target: Option<String>, limits: &Limits) -> Result<Option<u64>, String
     if target == limits.branch {
         return Ok(None);
     }
-    let number = match target.strip_prefix('#').unwrap_or(&target).parse() {
+    named_pr(&target, limits)
+        .map(Some)
+        .ok_or_else(|| not_this_sessions_pr(limits.branch))
+}
+
+fn named_pr(target: &str, limits: &Limits) -> Option<u64> {
+    match target.strip_prefix('#').unwrap_or(target).parse() {
         Ok(number) => Some(number),
-        Err(_) if limits.repo.owns_url(&target) => target
+        Err(_) if limits.repo.owns_url(target) => target
             .trim_end_matches('/')
             .split_once("/pull/")
             .and_then(|(_, number)| number.parse().ok()),
         Err(_) => None,
-    };
-    number
-        .map(Some)
-        .ok_or_else(|| not_this_sessions_pr(limits.branch))
+    }
 }
 
 pub(crate) fn not_this_sessions_pr(branch: &str) -> String {
@@ -549,10 +613,9 @@ fn api(args: &[String], limits: &Limits) -> Result<GhCall, String> {
         .replace("{owner}", &repo.owner)
         .replace("{repo}", &repo.name);
     let path = endpoint.split('?').next().unwrap_or_default();
-    let posts = parsed
-        .take("method")
-        .iter()
-        .any(|method| !method.eq_ignore_ascii_case("GET"));
+    let methods = parsed.take("method");
+    let is = |method: &String, name: &str| method.eq_ignore_ascii_case(name);
+    let posts = methods.iter().any(|method| !is(method, "GET"));
     let named = path.strip_prefix("repos/").and_then(|rest| {
         let mut parts = rest.splitn(3, '/');
         let (owner, name) = (parts.next()?, parts.next()?);
@@ -569,10 +632,13 @@ fn api(args: &[String], limits: &Limits) -> Result<GhCall, String> {
         ));
     };
     let change = match posts {
-        true => Some(issue_link(&parsed, &endpoint[prefix..])?),
+        true if methods.iter().any(|m| !is(m, "GET") && !is(m, "POST")) => {
+            return Err(api_post_refused());
+        }
+        true => Some(api_post(&parsed, &endpoint[prefix..])?),
         false if parsed.flags.iter().any(|(name, _)| field(name)) => {
             return Err(
-                "the Broker passes -f/-F fields to gh api only to link sub-issues and blocking issues"
+                "the Broker passes -f/-F fields to gh api only to link sub-issues and blocking issues, and to add pull request review comments"
                     .into(),
             );
         }
@@ -594,19 +660,39 @@ fn field(name: &str) -> bool {
     matches!(name, "field" | "raw-field")
 }
 
-fn issue_link(parsed: &Parsed, path: &str) -> Result<Change, String> {
-    let refused = || {
-        "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues"
-            .to_string()
-    };
-    let link = path.strip_prefix("/issues/").and_then(|rest| {
-        let (number, link) = rest.split_once('/')?;
-        number.bytes().all(|b| b.is_ascii_digit()).then_some(link)
-    });
-    let id_field = match link {
+fn api_post_refused() -> String {
+    "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues, or add pull request review comments"
+        .into()
+}
+
+fn numbered<'a>(path: &'a str, collection: &str) -> Option<&'a str> {
+    let (number, tail) = path.strip_prefix(collection)?.split_once('/')?;
+    (!number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())).then_some(tail)
+}
+
+fn reads_a_file(field: &str) -> bool {
+    field
+        .split_once('=')
+        .is_none_or(|(_, value)| value.starts_with('@'))
+}
+
+fn api_post(parsed: &Parsed, path: &str) -> Result<Change, String> {
+    if numbered(path, "/pulls/") == Some("comments") {
+        let fields = parsed.flags.iter().filter(|(name, _)| *name == "field");
+        return match fields
+            .filter_map(|(_, value)| value.as_deref())
+            .any(reads_a_file)
+        {
+            true => Err(
+                "the Broker doesn't read files for gh api: give the text with -f name=value".into(),
+            ),
+            false => Ok(Change::PrReview),
+        };
+    }
+    let id_field = match numbered(path, "/issues/") {
         Some("sub_issues") => "sub_issue_id",
         Some("dependencies/blocked_by") => "issue_id",
-        _ => return Err(refused()),
+        _ => return Err(api_post_refused()),
     };
     let fields: Vec<_> = parsed
         .flags
@@ -632,7 +718,7 @@ fn strings(args: &[&str]) -> Vec<String> {
 
 fn refused(what: &str) -> String {
     format!(
-        "the Broker doesn't run `{what}`: it passes reads of this Repo, creating or editing this Session's PR, and filing or updating issues"
+        "the Broker doesn't run `{what}`: it passes reads of this Repo, creating or editing this Session's PR, commenting on and reviewing any PR in this Repo, and filing or updating issues"
     )
 }
 
@@ -848,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn pr_changes_target_this_sessions_branch_only() {
+    fn pr_create_edit_and_ready_target_this_sessions_branch_only() {
         let created = call("pr create --fill --head orch/work --base main").unwrap();
         assert_eq!(
             created.args.join(" "),
@@ -866,11 +952,212 @@ mod tests {
     }
 
     #[test]
+    fn pr_comment_passes_for_any_pr_in_this_repo() {
+        for (line, args) in [
+            (
+                "pr comment 42 -b hi",
+                "pr comment 42 --body hi --repo acme/app",
+            ),
+            (
+                "pr comment https://github.com/acme/app/pull/7 -b hi",
+                "pr comment https://github.com/acme/app/pull/7 --body hi --repo acme/app",
+            ),
+        ] {
+            let call = call(line).unwrap();
+            assert_eq!(call.args.join(" "), args, "{line}");
+            assert_eq!(call.change, Some(Change::PrReview), "{line}");
+        }
+        assert!(refusal("pr comment 7 8 -b x").contains("too many"));
+        assert!(refusal("pr comment 7 --edit-last").contains("--edit-last"));
+        assert!(
+            refusal("pr comment https://github.com/other/app/pull/1 -b x").contains("acme/app")
+        );
+        assert!(refusal("pr comment 1 -b x -R libs/core").contains("acme/app"));
+    }
+
+    #[test]
+    fn pr_review_passes_for_any_pr_in_this_repo() {
+        for (line, args, said) in [
+            (
+                "pr review 42 -c -b hm",
+                "pr review 42 --comment --body hm --repo acme/app",
+                "gh pr review 42 --comment",
+            ),
+            (
+                "pr review https://github.com/acme/app/pull/7 -r -b fix",
+                "pr review https://github.com/acme/app/pull/7 --request-changes --body fix --repo acme/app",
+                "gh pr review https://github.com/acme/app/pull/7 --request-changes",
+            ),
+        ] {
+            let call = call(line).unwrap();
+            assert_eq!(call.args.join(" "), args, "{line}");
+            assert_eq!(call.said, said, "{line}");
+            assert_eq!(call.change, Some(Change::PrReview), "{line}");
+        }
+        assert!(refusal("pr review 7 --web").contains("--web"));
+        assert!(refusal("pr review 7 -b hi").contains("exactly one"));
+        assert!(refusal("pr review 7 -a -c").contains("exactly one"));
+        assert!(refusal("pr review 1 -b x -R libs/core").contains("acme/app"));
+    }
+
+    #[test]
+    fn an_approval_names_one_pr_in_this_repo() {
+        for (line, pr) in [
+            ("pr review 42 --approve -b lgtm", 42),
+            ("pr review #42 -a", 42),
+            ("pr review https://github.com/acme/app/pull/7 -a", 7),
+        ] {
+            assert_eq!(
+                call(line).unwrap().change,
+                Some(Change::PrApprove { pr }),
+                "{line}"
+            );
+        }
+        assert_eq!(
+            call("pr review 42 -a").unwrap().said,
+            "gh pr review 42 --approve"
+        );
+        assert!(refusal("pr review orch/other -a").contains("number or URL"));
+        assert!(refusal("pr review -a").contains("number or URL"));
+    }
+
+    #[test]
+    fn each_kind_of_change_has_its_own_guard() {
+        let guard = |change: Change| change.guard(&acme(), "orch/work");
+        assert_eq!(
+            guard(Change::PrEdit { pr: None }),
+            (GuardKind::PullRequest, "orch/work".to_string())
+        );
+        assert_eq!(
+            guard(Change::PrReview),
+            (GuardKind::PrReview, "acme/app".to_string())
+        );
+        assert_eq!(
+            guard(Change::PrApprove { pr: 42 }),
+            (GuardKind::PrApproval, "acme/app#42".to_string())
+        );
+        assert_eq!(
+            guard(Change::Issue),
+            (GuardKind::Issue, "acme/app".to_string())
+        );
+    }
+
+    #[test]
+    fn only_an_approval_asks_whatever_the_preset() {
+        assert!(Change::PrApprove { pr: 42 }.always_asks());
+        assert!(!Change::PrReview.always_asks());
+        assert!(!Change::Issue.always_asks());
+    }
+
+    #[test]
+    fn api_posts_a_pull_request_review_comment_in_this_repo() {
+        let comment = call(
+            "api -X POST repos/acme/app/pulls/7/comments -F body=nit -F commit_id=abc -F path=a.rs -F line=3",
+        )
+        .unwrap();
+        assert_eq!(
+            comment.args.join(" "),
+            "api repos/acme/app/pulls/7/comments --method POST --field body=nit --field commit_id=abc --field path=a.rs --field line=3"
+        );
+        assert_eq!(comment.change, Some(Change::PrReview));
+        // Replies to a review thread use the same endpoint with in_reply_to.
+        let reply =
+            call("api -X POST repos/acme/app/pulls/7/comments -F body=ok -F in_reply_to=99")
+                .unwrap();
+        assert_eq!(reply.change, Some(Change::PrReview));
+        for line in [
+            "api -X POST repos/other/app/pulls/7/comments -F body=x",
+            "api -X POST repos/acme/app/pulls/x/comments -F body=x",
+            "api -X POST repos/acme/app/pulls/7/reviews -F body=x",
+            "api -X POST repos/acme/app/pulls/7/comments/99 -F body=x",
+        ] {
+            assert!(call(line).is_err(), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_review_comment_never_reads_a_host_file() {
+        for line in [
+            "api -X POST repos/acme/app/pulls/7/comments -F body=@/home/me/notes.txt",
+            "api -X POST repos/acme/app/pulls/7/comments -F body=@-",
+            "api -X POST repos/acme/app/pulls/7/comments --field=body=@notes",
+            "api -X POST repos/acme/app/pulls/7/comments -Fbody=@notes",
+            "api -X POST repos/acme/app/pulls/7/comments -F @notes",
+        ] {
+            assert!(refusal(line).contains("-f"), "{line}");
+        }
+        assert!(call("api -X POST repos/acme/app/pulls/7/comments -f body=@octocat").is_ok());
+        assert!(call("api -X POST repos/acme/app/pulls/7/comments -F body=a@b").is_ok());
+    }
+
+    #[test]
+    fn a_url_gh_would_follow_out_of_this_repo_is_refused_in_any_spelling() {
+        for url in [
+            "https:/other/app/pull/1",
+            "http:/other/app/pull/1",
+            "HTTPS:/other/app/pull/1",
+            "https:/other/app/issues/1",
+            "HTTPS://GITHUB.COM/other/app/pull/1",
+        ] {
+            for command in [
+                "pr view",
+                "pr diff",
+                "pr checks",
+                "pr comment",
+                "pr review",
+                "pr edit",
+                "issue view",
+                "issue comment",
+                "issue close",
+            ] {
+                assert!(
+                    call(&format!("{command} {url}")).is_err(),
+                    "{command} {url}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_branch_name_with_a_slash_stays_a_branch_name() {
+        assert_eq!(
+            passed("pr view orch/other"),
+            "pr view orch/other --repo acme/app"
+        );
+        assert_eq!(
+            passed("pr comment orch/other -b hi"),
+            "pr comment orch/other --body hi --repo acme/app"
+        );
+    }
+
+    #[test]
+    fn api_writes_are_posts_only() {
+        for method in ["DELETE", "PUT", "PATCH", "delete"] {
+            for path in [
+                "pulls/7/comments -F body=x",
+                "issues/3/sub_issues -F sub_issue_id=1",
+            ] {
+                let line = format!("api -X {method} repos/acme/app/{path}");
+                assert!(refusal(&line).contains("POST"), "{line}");
+            }
+        }
+    }
+
+    #[test]
+    fn api_writes_need_a_number_in_the_path() {
+        for line in [
+            "api -X POST repos/acme/app/pulls//comments -F body=x",
+            "api -X POST repos/acme/app/issues//sub_issues -F sub_issue_id=1",
+        ] {
+            assert!(call(line).is_err(), "{line}");
+        }
+    }
+
+    #[test]
     fn writes_other_than_pr_and_issue_changes_are_refused() {
         for line in [
             "pr merge 42",
             "pr close 42",
-            "pr comment 42",
             "issue delete 1",
             "issue transfer 1 other/app",
             "issue lock 1",
@@ -936,7 +1223,7 @@ mod tests {
     }
 
     #[test]
-    fn api_writes_only_link_sub_issues_and_blocking_issues() {
+    fn api_issue_links_take_one_numeric_id() {
         for (line, args) in [
             (
                 "api --method POST repos/acme/app/issues/3/sub_issues -F sub_issue_id=123",

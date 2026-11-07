@@ -441,14 +441,9 @@ impl Daemon {
                     {
                         return Err(not_this_sessions_pr(&record.branch));
                     }
-                    if self.change_asks(&record, &repo).await {
-                        let tool = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
-                        let (kind, target) = match change {
-                            Change::Issue => (GuardKind::Issue, github.slug()),
-                            _ => (GuardKind::PullRequest, record.branch.clone()),
-                        };
-                        self.ask(id, broker, kind, &target, &format!("gh {tool}"))
-                            .await?;
+                    if change.always_asks() || self.change_asks(&record, &repo).await {
+                        let (kind, target) = change.guard(&github, &record.branch);
+                        self.ask(id, broker, kind, &target, &call.said).await?;
                     }
                 }
                 let output = gh_brokered(&repo, &call.args).await?;

@@ -34,6 +34,16 @@ pub fn worktree_status(worktree: &Path) -> Result<String, Error> {
     git(worktree, ["status", "--short", "--untracked-files=all"]).run()
 }
 
+// git's check for racily clean files compares them against the index's mtime.
+fn copy_keeping_mtime(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::copy(from, to)?;
+    let modified = std::fs::metadata(from)?.modified()?;
+    std::fs::File::options()
+        .write(true)
+        .open(to)?
+        .set_modified(modified)
+}
+
 pub(crate) fn snapshot_commit(worktree: &Path) -> Result<String, Error> {
     let scratch =
         tempfile::tempdir().map_err(|error| Error::io("create temporary index", error))?;
@@ -44,7 +54,7 @@ pub(crate) fn snapshot_commit(worktree: &Path) -> Result<String, Error> {
     )
     .run()?;
     if Path::new(&real_index).exists() {
-        std::fs::copy(&real_index, &index)
+        copy_keeping_mtime(Path::new(&real_index), &index)
             .map_err(|error| Error::io(format!("copy {real_index}"), error))?;
     }
     git(worktree, ["add", "-A"])

@@ -381,6 +381,23 @@ async fn answer_issue_change(client: &mut TestClient, id: &SessionId, choice: Gu
     answer_broker(client, id, GuardKindView::Issue, choice).await;
 }
 
+async fn answer_pr_review(client: &mut TestClient, id: &SessionId, choice: GuardChoice) {
+    answer_broker(client, id, GuardKindView::PrReview, choice).await;
+}
+
+async fn answer_pr_approval(client: &mut TestClient, id: &SessionId, pr: u64, choice: GuardChoice) {
+    let asking = client
+        .until(id, "an approval prompt", |view| {
+            !view.guard_prompts.is_empty()
+        })
+        .await;
+    let prompt = &asking.guard_prompts[0];
+    assert_eq!(prompt.kind, GuardKindView::PrApproval);
+    assert_eq!(prompt.target, format!("acme/app#{pr}"));
+    assert_eq!(prompt.tool, format!("gh pr review {pr} --approve"));
+    answer_prompt(client, id, prompt.id, choice).await;
+}
+
 async fn answer_broker(
     client: &mut TestClient,
     id: &SessionId,
@@ -393,13 +410,17 @@ async fn answer_broker(
     let prompt = &asking.guard_prompts[0];
     assert_eq!(prompt.kind, kind);
     match kind {
-        GuardKindView::Issue => assert_eq!(prompt.target, "acme/app"),
+        GuardKindView::Issue | GuardKindView::PrReview => assert_eq!(prompt.target, "acme/app"),
         _ => assert_eq!(prompt.target, asking.branch),
     }
+    answer_prompt(client, id, prompt.id, choice).await;
+}
+
+async fn answer_prompt(client: &mut TestClient, id: &SessionId, guard: u64, choice: GuardChoice) {
     let reply = client
         .request(Request::AnswerGuard {
             session: id.clone(),
-            guard: prompt.id,
+            guard,
             choice,
         })
         .await;
@@ -580,7 +601,7 @@ async fn merges_other_repos_and_a_changed_base_are_refused_with_a_message() {
 
     for (call, says) in [
         ("gh pr merge 42", "doesn't run `gh pr merge`"),
-        ("gh pr comment 42 -b hi", "doesn't run `gh pr comment`"),
+        ("gh pr close 42", "doesn't run `gh pr close`"),
         ("gh issue view 1 -R other/app", "not other/app"),
         (
             "gh pr create --base develop",
@@ -739,6 +760,131 @@ async fn an_ask_session_prompts_before_an_issue_change_and_once_for_the_session(
     );
     assert_eq!(shell(&mut pane, "gh issue close 8").await, "exit 0");
     assert_eq!(gh_calls(&env).len(), 2);
+}
+
+#[tokio::test]
+async fn an_ask_session_prompts_before_each_kind_of_pr_review() {
+    for (call, passed) in [
+        ("gh pr comment 42 -b hi", "pr comment"),
+        ("gh pr review 42 --comment -b hi", "pr review"),
+        ("gh pr review 42 --request-changes -b hi", "pr review"),
+        (
+            "gh api -X POST repos/acme/app/pulls/42/comments -f body=nit -F line=3",
+            "api repos/acme/app/pulls/42/comments",
+        ),
+    ] {
+        let env = on_github();
+        let _daemon = env.start_daemon().await;
+        let mut client = env.client().await;
+        let (id, _, mut pane) = session(&env, &mut client, "ask").await;
+
+        pane.type_line(&format!("sh {call}")).await;
+        answer_pr_review(&mut client, &id, GuardChoice::Deny).await;
+        assert_ne!(shell_result(&mut pane, call).await, "exit 0", "{call}");
+        assert_eq!(gh_calls(&env).len(), 0, "{call}");
+
+        pane.type_line(&format!("sh {call} ")).await;
+        answer_pr_review(&mut client, &id, GuardChoice::AllowOnce).await;
+        assert_eq!(
+            shell_result(&mut pane, &format!("{call} ")).await,
+            "exit 0",
+            "{call}"
+        );
+        assert_eq!(gh_calls(&env)[0][..2], args(passed), "{call}");
+    }
+}
+
+#[tokio::test]
+async fn allowing_a_pr_edit_for_the_session_doesnt_allow_a_review() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, _, mut pane) = session(&env, &mut client, "ask").await;
+
+    let edit = "gh pr edit --body Better";
+    pane.type_line(&format!("sh {edit}")).await;
+    answer_pr_change(&mut client, &id, GuardChoice::AllowForSession).await;
+    assert_eq!(shell_result(&mut pane, edit).await, "exit 0");
+
+    let review = "gh pr review 42 --comment -b hi";
+    pane.type_line(&format!("sh {review}")).await;
+    answer_pr_review(&mut client, &id, GuardChoice::AllowForSession).await;
+    assert_eq!(shell_result(&mut pane, review).await, "exit 0");
+    assert_eq!(shell(&mut pane, "gh pr comment 7 -b hi").await, "exit 0");
+    assert_eq!(gh_calls(&env).len(), 3);
+}
+
+#[tokio::test]
+async fn an_approval_always_asks_and_for_the_session_covers_only_that_pr() {
+    for preset in ["inherit", "ask"] {
+        let env = on_github();
+        let _daemon = env.start_daemon().await;
+        let mut client = env.client().await;
+        let (id, _, mut pane) = session(&env, &mut client, preset).await;
+
+        let approve = "gh pr review 42 --approve";
+        pane.type_line(&format!("sh {approve}")).await;
+        answer_pr_approval(&mut client, &id, 42, GuardChoice::Deny).await;
+        assert_ne!(shell_result(&mut pane, approve).await, "exit 0");
+        assert_eq!(gh_calls(&env).len(), 0);
+
+        pane.type_line(&format!("sh {approve} ")).await;
+        answer_pr_approval(&mut client, &id, 42, GuardChoice::AllowForSession).await;
+        assert_eq!(
+            shell_result(&mut pane, &format!("{approve} ")).await,
+            "exit 0"
+        );
+        assert_eq!(shell(&mut pane, "gh pr review '#42' -a").await, "exit 0");
+        assert_eq!(gh_calls(&env).len(), 2);
+
+        let another = "gh pr review 43 --approve";
+        pane.type_line(&format!("sh {another}")).await;
+        answer_pr_approval(&mut client, &id, 43, GuardChoice::Deny).await;
+        assert_ne!(shell_result(&mut pane, another).await, "exit 0");
+        assert_eq!(gh_calls(&env).len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn pr_comments_and_reviews_read_their_body_file_inside_the_sandbox() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let body = view.worktree.join("body");
+    std::fs::write(&body, "Why").unwrap();
+
+    for call in [
+        format!("gh pr comment 42 --body-file {}", body.display()),
+        format!("gh pr review 42 --comment -F {}", body.display()),
+    ] {
+        assert_eq!(shell(&mut pane, &call).await, "exit 0", "{call}");
+    }
+    assert_eq!(
+        gh_calls(&env),
+        [
+            args("pr comment 42 --body Why --repo acme/app"),
+            args("pr review 42 --comment --body Why --repo acme/app"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_review_comment_cant_send_a_file_from_outside_the_sandbox() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let err = view.worktree.join("err");
+
+    let call = format!(
+        "gh api -X POST repos/acme/app/pulls/42/comments -F body=@notes 2> {}",
+        err.display()
+    );
+    assert_ne!(shell(&mut pane, &call).await, "exit 0");
+    let message = std::fs::read_to_string(&err).unwrap();
+    assert!(message.contains("doesn't read files"), "{message}");
+    assert_eq!(gh_calls(&env), Vec::<Vec<String>>::new());
 }
 
 fn signing_key(env: &Env) -> (PathBuf, String) {

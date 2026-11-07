@@ -204,6 +204,8 @@ pub enum GuardKindView {
     WriteOutsideWorktree,
     Push,
     PullRequest,
+    PrReview,
+    PrApproval,
     Issue,
 }
 

@@ -133,7 +133,7 @@ fn exit_code(code: Option<i32>) -> ExitCode {
 
 fn inline_body_file(args: Vec<String>) -> io::Result<Vec<String>> {
     let takes_body = |command: &str, sub: &str| match command {
-        "pr" => matches!(sub, "create" | "edit"),
+        "pr" => matches!(sub, "create" | "edit" | "comment" | "review"),
         "issue" => matches!(sub, "create" | "comment" | "edit"),
         _ => false,
     };

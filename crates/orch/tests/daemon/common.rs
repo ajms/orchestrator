@@ -245,7 +245,7 @@ case "$1 $2" in
     cat DIR/view.json ;;
   'pr edit')
     if [ -f DIR/fail-edit ]; then echo 'gh: edit failed' >&2; exit 1; fi ;;
-  'pr ready') ;;
+  'pr ready'|'pr comment'|'pr review') ;;
   'issue create') echo https://github.com/acme/app/issues/8 ;;
   'issue comment'|'issue edit'|'issue close'|'issue reopen') ;;
   'issue view') echo "issue $3" ;;

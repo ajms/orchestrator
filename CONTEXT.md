@@ -138,7 +138,7 @@ An OS enclosure around a Session's Agent and everything it runs, limiting which 
 _Avoid_: Jail, container
 
 **Broker**:
-The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: fetching from origin, pushing its Branch, managing its pull request, reading its Repo and the repos of Readable owners on GitHub and signing its commits, with the user's credentials and the Agent signing key, which never enter the Sandbox.
+The Orchestrator acting outside the Sandbox on behalf of a sandboxed Agent: fetching from origin, pushing its Branch, managing its pull request, commenting on and reviewing any pull request in its Repo, reading its Repo and the repos of Readable owners on GitHub and signing its commits, with the user's credentials and the Agent signing key, which never enter the Sandbox.
 _Avoid_: Proxy, relay, credential helper
 
 **Readable owner**:

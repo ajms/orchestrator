@@ -3,8 +3,8 @@
 A sandboxed Agent gets no GitHub credentials. When it runs `git fetch`, `git push` or `gh`, shims inside the Sandbox forward the call over the Session's Holder socket to the Daemon. The Daemon runs it with the user's own credentials, outside the Sandbox, and only within the Session's limits:
 - **fetch:** any ref on origin, into the object store the Worktree shares with the main checkout; the Agent's own git then updates the refs;
 - **push:** this Session's Branch only, to origin under the same name, with `--force-with-lease` allowed and hooks and ssh pinned;
-- **pull request:** create it for the Branch and edit its title, body and draft state, with the base fixed to the Base branch;
-- **issues:** create, comment on, edit, close and reopen any issue in this Repo, assigning only the user, and link sub-issues and blocking issues through exactly two `api` POST endpoints;
+- **pull request:** create it for the Branch and edit its title, body and draft state, with the base fixed to the Base branch; (Amended by 0018: it can also comment on and review any PR in this Repo, and approvals always ask.)
+- **issues:** create, comment on, edit, close and reopen any issue in this Repo, assigning only the user, and link sub-issues and blocking issues through exactly two `api` POST endpoints; (Amended by 0018: a third POST endpoint adds PR review comments.)
 - **reads:** `view`/`list` reads and GET-only `api` calls under this Repo's GitHub remote.
 
 Fetches never ask. Pushes, PR changes and issue changes follow the Preset: plan and ask prompt, and the others go through. Everything else fails with a clear message. This reuses the push and PR code Landing already runs in the Daemon.
