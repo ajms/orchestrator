@@ -5,13 +5,14 @@ mod key_argument;
 mod lines;
 mod pi;
 mod preset;
+mod profile;
 mod registry;
 mod sandbox;
 mod sandbox_failure;
 mod shell;
 
 pub use agent::{
-    AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, LaunchSpec, PayloadError,
+    AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, LaunchSpec, PayloadError, ProfileRender,
     SubagentTranscripts, TitleWatch, TranscriptRead, TranscriptReader, WorktreeRequest,
 };
 pub use claude::{CLAUDE, ClaudeCode, mode_from_name, mode_name};
@@ -20,6 +21,7 @@ pub use pi::{PI, Pi, pi_session_dir_name};
 pub use preset::{INHERIT, Preset, PresetSelection, Presets, ReservedPresetName, UnknownPreset};
 pub use registry::{AGENTS, Adapter, adapter_named, implied_agent};
 pub use sandbox::{
-    BWRAP, Placeholder, SandboxLayout, SandboxNeeds, SandboxPaths, sandbox_args, sandbox_carve_outs,
+    BWRAP, Placeholder, Projection, SandboxLayout, SandboxNeeds, SandboxPaths, sandbox_args,
+    sandbox_carve_outs,
 };
 pub use sandbox_failure::{SandboxFailure, sandbox_refusal};

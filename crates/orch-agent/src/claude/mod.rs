@@ -1,4 +1,5 @@
 mod hooks;
+mod profile;
 mod settings;
 mod statusline;
 mod subagents;
@@ -8,14 +9,16 @@ use std::path::{Path, PathBuf};
 
 use hooks::HookEvent;
 use orch_core::{AgentEvent, ConversationId, PermissionMode};
+use profile::{CONFIG, CREDENTIALS, WRITABLE_DIRS};
 use serde_json::{Map, Value, json};
 use subagents::ClaudeSubagentTranscripts;
 use transcript::TranscriptTitles;
 
+use crate::profile::{Dirs, path_text};
 use crate::shell::quote;
 use crate::{
     AgentAdapter, Argv, Capabilities, DraftRun, DraftSpec, GuardAnswer, LaunchSpec, PayloadError,
-    SandboxNeeds, SubagentTranscripts, TitleWatch, WorktreeRequest,
+    ProfileRender, Projection, SandboxNeeds, SubagentTranscripts, TitleWatch, WorktreeRequest,
 };
 
 const GUARD_HOOK: HookEvent = HookEvent::PreToolUse;
@@ -31,6 +34,8 @@ const CONFIG_CARVE_OUTS: [&str; 9] = [
     "plugins",
     "CLAUDE.md",
 ];
+const INSTALLED: [&str; 2] = [".local/share/claude", ".local/bin"];
+const NO_HOME: &str = "claude's Agent profile needs HOME to be set";
 
 pub const CLAUDE: &str = "claude";
 
@@ -199,37 +204,104 @@ impl AgentAdapter for ClaudeCode {
     }
 
     fn agent_dirs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
-        settings::config_dir(lookup)
-            .map(|dir| vec![dir.join("projects"), dir.join("plans")])
-            .unwrap_or_default()
+        match profile::dirs(lookup) {
+            Some(Dirs { profile, .. }) => vec![profile.join("projects"), profile.join("plans")],
+            None => Vec::new(),
+        }
+    }
+
+    fn agent_profile(
+        &self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<PathBuf>, String> {
+        match profile::dirs(lookup) {
+            Some(Dirs { profile, .. }) => Ok(Some(profile)),
+            None => Err(NO_HOME.into()),
+        }
+    }
+
+    fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
+        let Some(Dirs { user, profile, .. }) = profile::dirs(lookup) else {
+            return Err(NO_HOME.into());
+        };
+        profile::build(&user, &profile).map_err(|err| {
+            format!(
+                "building claude's Agent profile {}: {err}",
+                profile.display()
+            )
+        })
+    }
+
+    fn render_profile(
+        &self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        render: &ProfileRender<'_>,
+    ) -> Result<(), String> {
+        let Some(Dirs { user, profile, .. }) = profile::dirs(lookup) else {
+            return Err(NO_HOME.into());
+        };
+        let adopted = render.conversation.map_or(Ok(()), |conversation| {
+            profile::adopt_conversation(&user, &profile, render.worktree, conversation)
+        });
+        adopted
+            .and_then(|()| profile::render_config(&profile, render.worktree))
+            .map_err(|err| {
+                format!(
+                    "rendering claude's Agent profile {}: {err}",
+                    profile.display()
+                )
+            })
+    }
+
+    fn env(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+        let mut env = vec![("DISABLE_AUTOUPDATER".into(), "1".into())];
+        if let Some(Dirs { profile, .. }) = profile::dirs(lookup) {
+            env.push(("CLAUDE_CONFIG_DIR".into(), path_text(&profile)));
+        }
+        env
     }
 
     fn sandbox_needs(&self, lookup: &dyn Fn(&str) -> Option<String>) -> SandboxNeeds {
-        let home = lookup("HOME")
-            .filter(|home| !home.is_empty())
-            .map(PathBuf::from);
-        let config = settings::config_dir(lookup);
-        let in_home = |path: &str| home.iter().map(|home| home.join(path)).collect::<Vec<_>>();
+        let Some(Dirs {
+            home,
+            user,
+            profile,
+        }) = profile::dirs(lookup)
+        else {
+            return SandboxNeeds::default();
+        };
+        let from_user = |name: &str, writable| Projection {
+            source: user.join(name),
+            target: profile.join(name),
+            writable,
+        };
+        let config = Projection {
+            source: profile.join(CONFIG),
+            target: profile.join(CONFIG),
+            writable: false,
+        };
+        let hidden = (user.is_dir() && !user.starts_with(&home)).then(|| user.clone());
         SandboxNeeds {
-            writable: config
-                .iter()
-                .cloned()
-                .chain(in_home(".claude.json"))
+            scratch: vec![profile.clone()],
+            writable: WRITABLE_DIRS.map(|name| profile.join(name)).into(),
+            read_only: INSTALLED.map(|path| home.join(path)).into(),
+            projected: CONFIG_CARVE_OUTS
+                .map(|name| from_user(name, false))
+                .into_iter()
+                .chain(CREDENTIALS.map(|name| from_user(name, true)))
+                .chain([config])
                 .collect(),
-            read_only: [in_home(".local/share/claude"), in_home(".local/bin")].concat(),
-            carve_outs: config
-                .iter()
-                .flat_map(|dir| CONFIG_CARVE_OUTS.map(|name| dir.join(name)))
-                .collect(),
-            env: vec![("DISABLE_AUTOUPDATER".into(), "1".into())],
+            hidden: hidden.into_iter().collect(),
+            env: self.env(lookup),
             env_prefixes: vec!["ANTHROPIC_".into(), "CLAUDE_".into()],
+            ..SandboxNeeds::default()
         }
     }
 
     fn draft(
         &self,
         spec: &DraftSpec,
-        _lookup: &dyn Fn(&str) -> Option<String>,
+        lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Option<DraftRun>, String> {
         Ok(Some(DraftRun {
             argv: Argv {
@@ -241,7 +313,7 @@ impl AgentAdapter for ClaudeCode {
                     "--fork-session".into(),
                 ],
             },
-            env: Vec::new(),
+            env: self.env(lookup),
             pipe_base_diff: false,
         }))
     }

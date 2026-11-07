@@ -135,6 +135,10 @@ pub fn probe_host_sandbox(orch_program: PathBuf) -> ProbeResult {
 }
 
 fn carved_args(layout: &SandboxLayout, needs: &SandboxNeeds) -> Result<Vec<String>, String> {
+    for path in &needs.scratch {
+        std::fs::create_dir_all(path)
+            .map_err(|err| format!("creating {}: {err}", path.display()))?;
+    }
     for (path, placeholder) in sandbox_carve_outs(layout, needs) {
         if path.symlink_metadata().is_ok() {
             continue;
