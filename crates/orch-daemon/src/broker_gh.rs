@@ -169,6 +169,7 @@ pub(crate) struct GhCall {
     pub(crate) args: Vec<String>,
     pub(crate) said: String,
     pub(crate) change: Option<Change>,
+    pub(crate) input: Option<Vec<u8>>,
 }
 
 struct Flag {
@@ -420,7 +421,11 @@ fn no_env_in_jq(parsed: &Parsed) -> Result<(), String> {
     }
 }
 
-pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String> {
+pub(crate) fn gh_call(
+    args: &[String],
+    input: Option<&str>,
+    limits: &Limits,
+) -> Result<GhCall, String> {
     let (command, sub) = match args {
         [command, sub, ..] => (command.as_str(), sub.as_str()),
         [command] => (command.as_str(), ""),
@@ -428,7 +433,10 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
     };
     let what = format!("gh {command} {sub}").trim_end().to_string();
     if command == "api" {
-        return api(&args[1..], limits);
+        return api(&args[1..], input, limits);
+    }
+    if input.is_some() {
+        return Err(input_refused());
     }
     if (command, sub) == ("repo", "clone") {
         return Err(
@@ -519,7 +527,12 @@ pub(crate) fn gh_call(args: &[String], limits: &Limits) -> Result<GhCall, String
     if command != "repo" {
         args.extend(strings(&["--repo", &target.slug()]));
     }
-    Ok(GhCall { args, said, change })
+    Ok(GhCall {
+        args,
+        said,
+        change,
+        input: None,
+    })
 }
 
 fn could_be_a_url(arg: &str) -> bool {
@@ -602,7 +615,7 @@ pub(crate) fn not_this_sessions_pr(branch: &str) -> String {
     format!("the Broker edits only this Session's PR, for {branch}")
 }
 
-fn api(args: &[String], limits: &Limits) -> Result<GhCall, String> {
+fn api(args: &[String], input: Option<&str>, limits: &Limits) -> Result<GhCall, String> {
     let repo = limits.repo;
     let mut parsed = parse(args, &[API, FIELDS], "gh api")?;
     let [endpoint] = parsed.positionals.as_slice() else {
@@ -615,7 +628,7 @@ fn api(args: &[String], limits: &Limits) -> Result<GhCall, String> {
     let path = endpoint.split('?').next().unwrap_or_default();
     let methods = parsed.take("method");
     let is = |method: &String, name: &str| method.eq_ignore_ascii_case(name);
-    let posts = methods.iter().any(|method| !is(method, "GET"));
+    let posts = input.is_some() || methods.iter().any(|method| !is(method, "GET"));
     let named = path.strip_prefix("repos/").and_then(|rest| {
         let mut parts = rest.splitn(3, '/');
         let (owner, name) = (parts.next()?, parts.next()?);
@@ -631,6 +644,12 @@ fn api(args: &[String], limits: &Limits) -> Result<GhCall, String> {
             repo.slug()
         ));
     };
+    if let Some(input) = input {
+        if methods.iter().any(|m| !is(m, "POST")) {
+            return Err(input_refused());
+        }
+        return whole_review(parsed, &endpoint, prefix, input);
+    }
     let change = match posts {
         true if methods.iter().any(|m| !is(m, "GET") && !is(m, "POST")) => {
             return Err(api_post_refused());
@@ -653,7 +672,12 @@ fn api(args: &[String], limits: &Limits) -> Result<GhCall, String> {
     };
     let mut args = strings(&["api", &endpoint, "--method", method]);
     args.extend(parsed.args());
-    Ok(GhCall { args, said, change })
+    Ok(GhCall {
+        args,
+        said,
+        change,
+        input: None,
+    })
 }
 
 fn field(name: &str) -> bool {
@@ -661,8 +685,58 @@ fn field(name: &str) -> bool {
 }
 
 fn api_post_refused() -> String {
-    "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues, or add pull request review comments"
+    "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues, add pull request review comments, or send a whole review with --input"
         .into()
+}
+
+fn input_refused() -> String {
+    "the Broker passes --input only to gh api -X POST repos/<owner>/<repo>/pulls/<n>/reviews".into()
+}
+
+fn whole_review(
+    mut parsed: Parsed,
+    endpoint: &str,
+    prefix: usize,
+    input: &str,
+) -> Result<GhCall, String> {
+    let pr: u64 = endpoint[prefix..]
+        .strip_prefix("/pulls/")
+        .and_then(|rest| rest.strip_suffix("/reviews"))
+        .filter(|number| number.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|number| number.parse().ok())
+        .ok_or_else(input_refused)?;
+    if parsed.flags.iter().any(|(name, _)| field(name)) {
+        return Err("a whole review takes its fields from --input, not -f/-F".into());
+    }
+    no_env_in_jq(&parsed)?;
+    let review: serde_json::Map<String, serde_json::Value> = serde_json::from_str(input)
+        .map_err(|err| format!("a whole review is one JSON object: {err}"))?;
+    if let Some(unknown) = review
+        .keys()
+        .find(|key| !matches!(key.as_str(), "commit_id" | "body" | "event" | "comments"))
+    {
+        return Err(format!(
+            "the Broker doesn't pass {unknown} in a whole review"
+        ));
+    }
+    let (verdict, change) = match review.get("event").and_then(|event| event.as_str()) {
+        Some("COMMENT") => ("comment", Change::PrReview),
+        Some("REQUEST_CHANGES") => ("request-changes", Change::PrReview),
+        Some("APPROVE") => ("approve", Change::PrApprove { pr }),
+        _ => {
+            return Err("a whole review's event is COMMENT, REQUEST_CHANGES or APPROVE".into());
+        }
+    };
+    let input = serde_json::to_vec(&review).map_err(|err| err.to_string())?;
+    parsed.positionals.clear();
+    let mut args = strings(&["api", endpoint, "--method", "POST", "--input", "-"]);
+    args.extend(parsed.args());
+    Ok(GhCall {
+        args,
+        said: format!("gh pr review {pr} --{verdict}"),
+        change: Some(change),
+        input: Some(input),
+    })
 }
 
 fn numbered<'a>(path: &'a str, collection: &str) -> Option<&'a str> {
@@ -745,6 +819,16 @@ mod tests {
     }
 
     fn call(line: &str) -> Result<GhCall, String> {
+        call_with(line, None)
+    }
+
+    const REVIEWS: &str = "api --method POST repos/acme/app/pulls/7/reviews";
+
+    fn review(json: &str) -> Result<GhCall, String> {
+        call_with(REVIEWS, Some(json))
+    }
+
+    fn call_with(line: &str, input: Option<&str>) -> Result<GhCall, String> {
         let repo = acme();
         let readable = ReadableOwners::new(vec!["libs".into()]).unwrap();
         let limits = Limits {
@@ -754,7 +838,104 @@ mod tests {
             readable_owners: &readable,
         };
         let args: Vec<String> = line.split(' ').map(String::from).collect();
-        gh_call(&args, &limits)
+        gh_call(&args, input, &limits)
+    }
+
+    fn sent(call: &GhCall) -> serde_json::Value {
+        serde_json::from_slice(call.input.as_deref().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_whole_review_goes_to_gh_on_stdin() {
+        let json = r#"{"commit_id":"abc","body":"Hm","event":"COMMENT","comments":[{"path":"a.rs","line":3,"body":"nit"}]}"#;
+        let call = review(json).unwrap();
+        assert_eq!(
+            call.args.join(" "),
+            "api repos/acme/app/pulls/7/reviews --method POST --input -"
+        );
+        assert_eq!(call.said, "gh pr review 7 --comment");
+        assert_eq!(call.change, Some(Change::PrReview));
+        assert_eq!(
+            sent(&call),
+            serde_json::from_str::<serde_json::Value>(json).unwrap()
+        );
+        assert!(
+            call_with(
+                "api repos/acme/app/pulls/7/reviews",
+                Some(r#"{"event":"COMMENT"}"#)
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn requesting_changes_through_a_whole_review_follows_the_preset() {
+        let call = review(r#"{"event":"REQUEST_CHANGES"}"#).unwrap();
+        assert_eq!(call.said, "gh pr review 7 --request-changes");
+        assert_eq!(call.change, Some(Change::PrReview));
+    }
+
+    #[test]
+    fn a_whole_review_that_approves_is_an_approval() {
+        let call = review(r#"{"event":"APPROVE","body":"lgtm"}"#).unwrap();
+        assert_eq!(call.said, "gh pr review 7 --approve");
+        assert_eq!(call.change, Some(Change::PrApprove { pr: 7 }));
+    }
+
+    #[test]
+    fn a_repeated_event_cant_hide_an_approval() {
+        let call = review(r#"{"event":"APPROVE","event":"COMMENT"}"#).unwrap();
+        assert_eq!(sent(&call)["event"], "COMMENT");
+        assert_eq!(call.change, Some(Change::PrReview));
+    }
+
+    #[test]
+    fn a_whole_review_has_a_known_event_and_only_review_fields() {
+        for (json, says) in [
+            (r#"{"body":"x"}"#, "event"),
+            (r#"{"event":"approve"}"#, "event"),
+            (r#"{"event":"PENDING"}"#, "event"),
+            (r#"{"event":1}"#, "event"),
+            (r#"{"event":"COMMENT","other":1}"#, "other"),
+            (r#"["event"]"#, "JSON"),
+            ("not json", "JSON"),
+        ] {
+            let refused = review(json).unwrap_err();
+            assert!(refused.contains(says), "{json}: {refused}");
+        }
+    }
+
+    #[test]
+    fn only_a_whole_review_in_this_repo_takes_input() {
+        let json = Some(r#"{"event":"COMMENT"}"#);
+        for line in [
+            "api -X POST repos/other/app/pulls/7/reviews",
+            "api -X POST repos/libs/core/pulls/7/reviews",
+            "api -X POST repos/acme/app/pulls/x/reviews",
+            "api -X POST repos/acme/app/pulls/+7/reviews",
+            "api -X POST repos/acme/app/pulls/7/reviews/9/events",
+            "api -X POST repos/acme/app/pulls/7/comments",
+            "api -X POST repos/acme/app/issues/3/sub_issues",
+            "api -X GET repos/acme/app/pulls/7/reviews",
+            "api -X PUT repos/acme/app/pulls/7/reviews",
+            "api -X POST repos/acme/app/pulls/7/reviews -f event=APPROVE",
+            "pr view 7",
+            "pr review 7 --comment",
+        ] {
+            assert!(call_with(line, json).is_err(), "{line}");
+        }
+    }
+
+    #[test]
+    fn the_broker_never_passes_a_path_to_input() {
+        for path in ["/home/me/notes", "-"] {
+            let line = format!("{REVIEWS} --input {path}");
+            assert!(refusal(&line).contains("--input"), "{line}");
+            assert!(
+                call_with(&line, Some(r#"{"event":"COMMENT"}"#)).is_err(),
+                "{line}"
+            );
+        }
     }
 
     fn passed(line: &str) -> String {

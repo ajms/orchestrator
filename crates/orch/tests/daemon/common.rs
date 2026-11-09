@@ -249,7 +249,9 @@ case "$1 $2" in
   'issue create') echo https://github.com/acme/app/issues/8 ;;
   'issue comment'|'issue edit'|'issue close'|'issue reopen') ;;
   'issue view') echo "issue $3" ;;
-  'api '*) echo '{"name":"app"}' ;;
+  'api '*)
+    case " $* " in *' --input - '*) cat > DIR/stdin ;; esac
+    echo '{"name":"app"}' ;;
   'pr list')
     [ -f DIR/fail-list ] && { echo 'HTTP 401: Bad credentials' >&2; exit 1; }
     cat DIR/list.json 2>/dev/null || echo '[]' ;;
@@ -328,6 +330,10 @@ exec "$@"
 
     pub fn gh_calls(&self) -> String {
         std::fs::read_to_string(self.path("gh/calls.log")).unwrap_or_default()
+    }
+
+    pub fn gh_stdin(&self) -> String {
+        std::fs::read_to_string(self.path("gh/stdin")).unwrap_or_default()
     }
 
     pub fn lose_state_db(&self) {

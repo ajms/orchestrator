@@ -60,8 +60,9 @@ fn gh(socket: &std::path::Path, args: Vec<String>) -> ExitCode {
         eprintln!("You are not logged in to any GitHub hosts inside the Sandbox.");
         return ExitCode::FAILURE;
     }
-    let reply =
-        inline_body_file(args).and_then(|args| request_broker(socket, BrokerRequest::Gh { args }));
+    let reply = inline_body_file(args)
+        .and_then(inline_api_input)
+        .and_then(|(args, input)| request_broker(socket, BrokerRequest::Gh { args, input }));
     match reply {
         Ok(BrokerReply::Gh {
             output:
@@ -161,6 +162,33 @@ fn inline_body_file(args: Vec<String>) -> io::Result<Vec<String>> {
         inlined.extend(["--body".into(), body]);
     }
     Ok(inlined)
+}
+
+fn inline_api_input(args: Vec<String>) -> io::Result<(Vec<String>, Option<String>)> {
+    if args.first().is_none_or(|command| command != "api") {
+        return Ok((args, None));
+    }
+    let mut kept = Vec::with_capacity(args.len());
+    let mut input = None;
+    let mut rest = args.into_iter();
+    while let Some(arg) = rest.next() {
+        let path = match arg.as_str() {
+            "--input" => rest.next(),
+            _ => arg.strip_prefix("--input=").map(String::from),
+        };
+        let Some(path) = path else {
+            kept.push(arg);
+            continue;
+        };
+        if input.is_some() {
+            return Err(io::Error::other("gh api takes one --input"));
+        }
+        input = Some(match path.as_str() {
+            "-" => io::read_to_string(io::stdin())?,
+            path => std::fs::read_to_string(path)?,
+        });
+    }
+    Ok((kept, input))
 }
 
 fn remote_helper(

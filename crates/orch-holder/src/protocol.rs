@@ -76,11 +76,23 @@ pub enum ToHolder {
 pub enum BrokerRequest {
     Refs,
     OriginRefs,
-    Fetch { wants: Vec<RemoteRef> },
-    Push { updates: Vec<RefUpdate> },
-    Gh { args: Vec<String> },
-    Sign { payload: Vec<u8> },
-    Mirror { url: String },
+    Fetch {
+        wants: Vec<RemoteRef>,
+    },
+    Push {
+        updates: Vec<RefUpdate>,
+    },
+    Gh {
+        args: Vec<String>,
+        #[serde(default)]
+        input: Option<String>,
+    },
+    Sign {
+        payload: Vec<u8>,
+    },
+    Mirror {
+        url: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

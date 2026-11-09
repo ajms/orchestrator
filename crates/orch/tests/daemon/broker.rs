@@ -869,6 +869,55 @@ async fn pr_comments_and_reviews_read_their_body_file_inside_the_sandbox() {
     );
 }
 
+const WHOLE_REVIEW: &str = "api repos/acme/app/pulls/42/reviews --method POST --input -";
+
+#[tokio::test]
+async fn a_whole_review_reads_its_input_inside_the_sandbox() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (_, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let file = view.worktree.join("review.json");
+    std::fs::write(&file, r#"{"event":"COMMENT","body":"Why"}"#).unwrap();
+    let endpoint = "repos/acme/app/pulls/42/reviews";
+
+    for call in [
+        format!("gh api --method POST {endpoint} --input {}", file.display()),
+        format!("gh api -X POST {endpoint} --input={}", file.display()),
+        format!("gh api -X POST {endpoint} --input - < {}", file.display()),
+    ] {
+        assert_eq!(shell(&mut pane, &call).await, "exit 0", "{call}");
+        let sent: serde_json::Value =
+            serde_json::from_str(&env.gh_stdin()).expect("the review on gh's stdin");
+        assert_eq!(sent["event"], "COMMENT", "{call}");
+        assert_eq!(sent["body"], "Why", "{call}");
+        assert_eq!(
+            gh_calls(&env).last().unwrap(),
+            &args(WHOLE_REVIEW),
+            "{call}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_whole_review_that_approves_always_asks() {
+    let env = on_github();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (id, view, mut pane) = session(&env, &mut client, "inherit").await;
+    let file = view.worktree.join("review.json");
+    std::fs::write(&file, r#"{"event":"APPROVE"}"#).unwrap();
+    let call = format!(
+        "gh api -X POST repos/acme/app/pulls/42/reviews --input {}",
+        file.display()
+    );
+
+    pane.type_line(&format!("sh {call}")).await;
+    answer_pr_approval(&mut client, &id, 42, GuardChoice::Deny).await;
+    assert_ne!(shell_result(&mut pane, &call).await, "exit 0");
+    assert_eq!(gh_calls(&env).len(), 0);
+}
+
 #[tokio::test]
 async fn a_review_comment_cant_send_a_file_from_outside_the_sandbox() {
     let env = on_github();
