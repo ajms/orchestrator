@@ -14,7 +14,7 @@ A comment is the Agent speaking. An approval is the user's identity satisfying a
 
 - **Follow the Preset for approvals too.** Consistent, but under Presets that don't ask, nobody sees an approval go out under their name.
 - **Refuse `--approve`.** The strongest guarantee, but the Agent can't finish a review the user asked for, and the user has to relay it by hand.
-- **Pass `--input <path>` to `gh`.** The review's nested JSON needs `--input`, but given a path `gh` reads a host file. So the shim reads the file inside the Sandbox and sends its text in the request, and `gh` only ever gets `--input -`.
+- **Allow the `pulls/<n>/reviews` endpoint.** It takes whole reviews with inline comments in one call, but its nested JSON needs `--input`, which the Broker refuses because it reads a host file. (Amended: now allowed. The shim reads the file inside the Sandbox and sends its text in the request, so `gh` only ever gets `--input -` and no host file is read.)
 - **Only `pulls/<n>/comments`, one call per comment.** It needs no JSON, but a review with many findings lands as that many separate comments, with no summary.
 
 ## Consequences

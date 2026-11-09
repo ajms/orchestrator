@@ -512,9 +512,9 @@ pub(crate) fn gh_call(
         }
         "comment" if command == "pr" => (strings(&["pr", "comment"]), Some(Change::PrReview)),
         "review" if command == "pr" => {
-            let (verdict, change) = pr_review(&parsed, limits)?;
-            said = format!("{said} --{verdict}");
-            (strings(&["pr", "review"]), Some(change))
+            let verdict = pr_review(&parsed, limits)?;
+            said = format!("{said} --{}", verdict.flag());
+            (strings(&["pr", "review"]), Some(verdict.change()))
         }
         "create" | "comment" | "edit" | "close" | "reopen" if command == "issue" => {
             only_the_user_assigned(&parsed)?;
@@ -552,7 +552,30 @@ fn pr_create(parsed: &mut Parsed, limits: &Limits) -> Result<(), String> {
     Ok(())
 }
 
-fn pr_review(parsed: &Parsed, limits: &Limits) -> Result<(&'static str, Change), String> {
+enum Verdict {
+    Comment,
+    RequestChanges,
+    Approve { pr: u64 },
+}
+
+impl Verdict {
+    fn flag(&self) -> &'static str {
+        match self {
+            Verdict::Comment => "comment",
+            Verdict::RequestChanges => "request-changes",
+            Verdict::Approve { .. } => "approve",
+        }
+    }
+
+    fn change(&self) -> Change {
+        match self {
+            Verdict::Approve { pr } => Change::PrApprove { pr: *pr },
+            Verdict::Comment | Verdict::RequestChanges => Change::PrReview,
+        }
+    }
+}
+
+fn pr_review(parsed: &Parsed, limits: &Limits) -> Result<Verdict, String> {
     let verdicts: Vec<_> = parsed
         .flags
         .iter()
@@ -566,9 +589,10 @@ fn pr_review(parsed: &Parsed, limits: &Limits) -> Result<(&'static str, Change),
                 .first()
                 .and_then(|target| named_pr(target, limits))
                 .ok_or("the Broker approves a PR only by its number or URL")?;
-            Ok(("approve", Change::PrApprove { pr }))
+            Ok(Verdict::Approve { pr })
         }
-        [verdict] => Ok((verdict, Change::PrReview)),
+        ["request-changes"] => Ok(Verdict::RequestChanges),
+        ["comment"] => Ok(Verdict::Comment),
         _ => Err(
             "gh pr review takes exactly one of --approve, --request-changes and --comment".into(),
         ),
@@ -648,7 +672,7 @@ fn api(args: &[String], input: Option<&str>, limits: &Limits) -> Result<GhCall, 
         if methods.iter().any(|m| !is(m, "POST")) {
             return Err(input_refused());
         }
-        return whole_review(parsed, &endpoint, prefix, input);
+        return whole_review(parsed, &endpoint, &endpoint[prefix..], input);
     }
     let change = match posts {
         true if methods.iter().any(|m| !is(m, "GET") && !is(m, "POST")) => {
@@ -665,19 +689,23 @@ fn api(args: &[String], input: Option<&str>, limits: &Limits) -> Result<GhCall, 
     };
     no_env_in_jq(&parsed)?;
     let said = format!("gh api {endpoint}");
-    parsed.positionals.clear();
     let method = match change {
         Some(_) => "POST",
         None => "GET",
     };
-    let mut args = strings(&["api", &endpoint, "--method", method]);
-    args.extend(parsed.args());
     Ok(GhCall {
-        args,
+        args: api_args(parsed, &endpoint, method),
         said,
         change,
         input: None,
     })
+}
+
+fn api_args(mut parsed: Parsed, endpoint: &str, method: &str) -> Vec<String> {
+    parsed.positionals.clear();
+    let mut args = strings(&["api", endpoint, "--method", method]);
+    args.extend(parsed.args());
+    args
 }
 
 fn field(name: &str) -> bool {
@@ -694,12 +722,12 @@ fn input_refused() -> String {
 }
 
 fn whole_review(
-    mut parsed: Parsed,
+    parsed: Parsed,
     endpoint: &str,
-    prefix: usize,
+    repo_path: &str,
     input: &str,
 ) -> Result<GhCall, String> {
-    let pr: u64 = endpoint[prefix..]
+    let pr: u64 = repo_path
         .strip_prefix("/pulls/")
         .and_then(|rest| rest.strip_suffix("/reviews"))
         .filter(|number| number.bytes().all(|b| b.is_ascii_digit()))
@@ -719,23 +747,22 @@ fn whole_review(
             "the Broker doesn't pass {unknown} in a whole review"
         ));
     }
-    let (verdict, change) = match review.get("event").and_then(|event| event.as_str()) {
-        Some("COMMENT") => ("comment", Change::PrReview),
-        Some("REQUEST_CHANGES") => ("request-changes", Change::PrReview),
-        Some("APPROVE") => ("approve", Change::PrApprove { pr }),
+    let verdict = match review.get("event").and_then(|event| event.as_str()) {
+        Some("COMMENT") => Verdict::Comment,
+        Some("REQUEST_CHANGES") => Verdict::RequestChanges,
+        Some("APPROVE") => Verdict::Approve { pr },
         _ => {
             return Err("a whole review's event is COMMENT, REQUEST_CHANGES or APPROVE".into());
         }
     };
-    let input = serde_json::to_vec(&review).map_err(|err| err.to_string())?;
-    parsed.positionals.clear();
-    let mut args = strings(&["api", endpoint, "--method", "POST", "--input", "-"]);
-    args.extend(parsed.args());
+    let serialised = serde_json::to_vec(&review).map_err(|err| err.to_string())?;
+    let mut args = api_args(parsed, endpoint, "POST");
+    args.extend(strings(&["--input", "-"]));
     Ok(GhCall {
         args,
-        said: format!("gh pr review {pr} --{verdict}"),
-        change: Some(change),
-        input: Some(input),
+        said: format!("gh pr review {pr} --{}", verdict.flag()),
+        change: Some(verdict.change()),
+        input: Some(serialised),
     })
 }
 
@@ -843,6 +870,11 @@ mod tests {
 
     fn sent(call: &GhCall) -> serde_json::Value {
         serde_json::from_slice(call.input.as_deref().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_whole_review_that_lost_its_input_is_refused() {
+        assert!(call(REVIEWS).is_err());
     }
 
     #[test]

@@ -201,6 +201,10 @@ _Avoid_: Sync, repair, recovery
 Inspecting a Session's changes against its Base branch, usually right before Landing.
 _Avoid_: Diff view, inspection
 
+**Whole review**:
+A GitHub PR review a sandboxed Agent posts through the Broker in one call, with a verdict, a summary and inline comments. It is not a **Review**, which happens in the Orchestrator before Landing.
+_Avoid_: Bulk review, batch review
+
 **Discarding**:
 Ending a Session without Landing by throwing its Worktree away, and its Branch too unless it is an Existing Branch.
 _Avoid_: Cancelling, deleting, aborting

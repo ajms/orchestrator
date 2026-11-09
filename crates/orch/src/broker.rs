@@ -155,11 +155,7 @@ fn inline_body_file(args: Vec<String>) -> io::Result<Vec<String>> {
             inlined.push(arg);
             continue;
         };
-        let body = match path.as_str() {
-            "-" => io::read_to_string(io::stdin())?,
-            path => std::fs::read_to_string(path)?,
-        };
-        inlined.extend(["--body".into(), body]);
+        inlined.extend(["--body".into(), read_file_or_stdin(&path)?]);
     }
     Ok(inlined)
 }
@@ -183,12 +179,19 @@ fn inline_api_input(args: Vec<String>) -> io::Result<(Vec<String>, Option<String
         if input.is_some() {
             return Err(io::Error::other("gh api takes one --input"));
         }
-        input = Some(match path.as_str() {
-            "-" => io::read_to_string(io::stdin())?,
-            path => std::fs::read_to_string(path)?,
-        });
+        input = Some(read_file_or_stdin(&path)?);
+    }
+    if input.is_some() {
+        kept.extend(["--method".into(), "POST".into()]);
     }
     Ok((kept, input))
+}
+
+fn read_file_or_stdin(path: &str) -> io::Result<String> {
+    match path {
+        "-" => io::read_to_string(io::stdin()),
+        path => std::fs::read_to_string(path),
+    }
 }
 
 fn remote_helper(
@@ -441,6 +444,26 @@ mod tests {
         )
         .unwrap();
         (String::from_utf8(out).unwrap(), asked.into_inner())
+    }
+
+    #[test]
+    fn stripping_input_forces_a_post_so_an_old_holder_cant_turn_it_into_a_get() {
+        let file = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        let args = ["api", "repos/o/r/pulls/7/reviews", "--input", file];
+        let (kept, input) = inline_api_input(args.map(String::from).to_vec()).unwrap();
+        assert_eq!(
+            kept,
+            ["api", "repos/o/r/pulls/7/reviews", "--method", "POST"]
+        );
+        assert!(input.is_some());
+    }
+
+    #[test]
+    fn an_api_call_without_input_keeps_its_method() {
+        let args = ["api", "repos/o/r/pulls/7/reviews"];
+        let (kept, input) = inline_api_input(args.map(String::from).to_vec()).unwrap();
+        assert_eq!(kept, args);
+        assert_eq!(input, None);
     }
 
     #[test]
