@@ -60,8 +60,9 @@ fn gh(socket: &std::path::Path, args: Vec<String>) -> ExitCode {
         eprintln!("You are not logged in to any GitHub hosts inside the Sandbox.");
         return ExitCode::FAILURE;
     }
-    let reply =
-        inline_body_file(args).and_then(|args| request_broker(socket, BrokerRequest::Gh { args }));
+    let reply = inline_body_file(args)
+        .and_then(inline_api_input)
+        .and_then(|(args, input)| request_broker(socket, BrokerRequest::Gh { args, input }));
     match reply {
         Ok(BrokerReply::Gh {
             output:
@@ -154,13 +155,43 @@ fn inline_body_file(args: Vec<String>) -> io::Result<Vec<String>> {
             inlined.push(arg);
             continue;
         };
-        let body = match path.as_str() {
-            "-" => io::read_to_string(io::stdin())?,
-            path => std::fs::read_to_string(path)?,
-        };
-        inlined.extend(["--body".into(), body]);
+        inlined.extend(["--body".into(), read_file_or_stdin(&path)?]);
     }
     Ok(inlined)
+}
+
+fn inline_api_input(args: Vec<String>) -> io::Result<(Vec<String>, Option<String>)> {
+    if args.first().is_none_or(|command| command != "api") {
+        return Ok((args, None));
+    }
+    let mut kept = Vec::with_capacity(args.len());
+    let mut input = None;
+    let mut rest = args.into_iter();
+    while let Some(arg) = rest.next() {
+        let path = match arg.as_str() {
+            "--input" => rest.next(),
+            _ => arg.strip_prefix("--input=").map(String::from),
+        };
+        let Some(path) = path else {
+            kept.push(arg);
+            continue;
+        };
+        if input.is_some() {
+            return Err(io::Error::other("gh api takes one --input"));
+        }
+        input = Some(read_file_or_stdin(&path)?);
+    }
+    if input.is_some() {
+        kept.extend(["--method".into(), "POST".into()]);
+    }
+    Ok((kept, input))
+}
+
+fn read_file_or_stdin(path: &str) -> io::Result<String> {
+    match path {
+        "-" => io::read_to_string(io::stdin()),
+        path => std::fs::read_to_string(path),
+    }
 }
 
 fn remote_helper(
@@ -413,6 +444,26 @@ mod tests {
         )
         .unwrap();
         (String::from_utf8(out).unwrap(), asked.into_inner())
+    }
+
+    #[test]
+    fn stripping_input_forces_a_post_so_an_old_holder_cant_turn_it_into_a_get() {
+        let file = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        let args = ["api", "repos/o/r/pulls/7/reviews", "--input", file];
+        let (kept, input) = inline_api_input(args.map(String::from).to_vec()).unwrap();
+        assert_eq!(
+            kept,
+            ["api", "repos/o/r/pulls/7/reviews", "--method", "POST"]
+        );
+        assert!(input.is_some());
+    }
+
+    #[test]
+    fn an_api_call_without_input_keeps_its_method() {
+        let args = ["api", "repos/o/r/pulls/7/reviews"];
+        let (kept, input) = inline_api_input(args.map(String::from).to_vec()).unwrap();
+        assert_eq!(kept, args);
+        assert_eq!(input, None);
     }
 
     #[test]

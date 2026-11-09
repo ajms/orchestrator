@@ -303,13 +303,17 @@ async fn gh(repo: &Path, args: &[&str], limit: Duration) -> Result<String, Strin
     subprocess::run(command, None, limit, &what).await
 }
 
-pub(crate) async fn gh_brokered(repo: &Path, args: &[String]) -> Result<GhOutput, String> {
+pub(crate) async fn gh_brokered(
+    repo: &Path,
+    args: &[String],
+    input: Option<Vec<u8>>,
+) -> Result<GhOutput, String> {
     let mut command = crate::subprocess::command("gh");
     command
         .args(args)
         .current_dir(repo)
         .env("GH_PROMPT_DISABLED", "1");
-    let output = subprocess::output(command, None, GH_TIMEOUT, "gh").await?;
+    let output = subprocess::output(command, input, GH_TIMEOUT, "gh").await?;
     Ok(GhOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),

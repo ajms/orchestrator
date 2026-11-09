@@ -420,7 +420,7 @@ impl Daemon {
                 let signature = sign(agent, key, payload).await?;
                 Ok(BrokerReply::Signed { signature })
             }
-            BrokerRequest::Gh { args } => {
+            BrokerRequest::Gh { args, input } => {
                 let origin = origin_url(&repo).await;
                 let github = origin.as_deref().and_then(GitHubRepo::from_remote).ok_or(
                     "the Broker's gh reaches only this Repo on GitHub, and origin isn't on GitHub",
@@ -432,7 +432,7 @@ impl Daemon {
                     base: &record.base,
                     readable_owners: &readable_owners,
                 };
-                let call = gh_call(&args, &limits)?;
+                let call = gh_call(&args, input.as_deref(), &limits)?;
                 if let Some(change) = &call.change {
                     if let Change::PrEdit { pr: Some(number) } = change
                         && !open_prs(&repo, &record.branch)
@@ -446,7 +446,7 @@ impl Daemon {
                         self.ask(id, broker, kind, &target, &call.said).await?;
                     }
                 }
-                let output = gh_brokered(&repo, &call.args).await?;
+                let output = gh_brokered(&repo, &call.args, call.input.clone()).await?;
                 if call.change == Some(Change::PrCreate)
                     && output.code == 0
                     && let Some(number) = pr_number(&output.stdout)
