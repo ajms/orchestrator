@@ -67,7 +67,7 @@ _Avoid_: Allow-list, permission
 
 **Session**:
 One Agent working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent, or starting a new Conversation, keeps the same Session.
-_Avoid_: Task, job, instance, run
+_Avoid_: job, instance, run
 
 **Session title**:
 A name given to the Session through its Agent, by the user (e.g. Claude Code's `/rename`) or by the Agent itself. It is shown in place of the slug and outlives the Conversation it was given in.
@@ -96,6 +96,14 @@ _Avoid_: Child session, worker, sub-session
 **Subagent worktree**:
 A git worktree the Agent asks for to isolate one Subagent. It branches from the Session's HEAD, lives under `.orchestrator/subagents/<slug>/`, counts as inside the Session for Guards, and is removed with the Session. The Orchestrator records its base when it is created and its tip when it is removed, for the Subagent's Review.
 _Avoid_: Agent worktree, child worktree
+
+**Plan**:
+The ordered Tasks one Session's Agent is working through. Each Session has at most one; only its Agent writes it, through `orch plan`, and the user views it in the TUI. It outlives Conversations and Agent restarts, and stays readable after the Session is Landed or Discarded until the Session record is removed.
+_Avoid_: Todo list, roadmap, checklist
+
+**Task**:
+One step of a Plan: a title, a status (Pending, In progress, Done or Dropped), the Tasks it is blocked by, and optionally the Subagents working on it and a link to an issue in any tracker. A Task is ready when every Task it is blocked by is Done or Dropped. It needs no Subagent.
+_Avoid_: Step, todo, item, job
 
 **Subagent transcript**:
 A read-only, live record of what a Subagent was asked and did (its prompt, its text, and its tool calls with their results), followed from the Agent's own files and shown when the Subagent is selected.
