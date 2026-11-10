@@ -136,7 +136,7 @@ async fn a_done_subagent_stays_available_from_the_transcript_subagent_stop_names
     .await;
     client
         .until(&id, "the Subagent done", |view| {
-            view.subagents.iter().all(|subagent| subagent.done)
+            view.subagents.iter().all(|subagent| subagent.finished())
         })
         .await;
 

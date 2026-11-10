@@ -1,4 +1,5 @@
 mod agent;
+mod bounded;
 mod claude;
 mod guard;
 mod key_argument;

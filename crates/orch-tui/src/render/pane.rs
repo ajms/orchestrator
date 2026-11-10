@@ -1,6 +1,8 @@
-use orch_protocol::{PhaseView, SessionView, SubagentView};
+use orch_protocol::{
+    PhaseView, SessionView, SubagentStateView, SubagentView, SubagentWorktreeView,
+};
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
@@ -203,10 +205,24 @@ fn subagent_title(view: &SessionView, subagent: &SubagentView) -> Line<'static> 
 fn transcript(app: &App, subagent: &SubagentView, frame: &mut Frame, areas: &Areas) {
     let header = Paragraph::new(subagent_header(subagent));
     frame.render_widget(header, areas.transcript_header());
+    let body = areas.transcript_body();
+    let outcome = subagent_outcome(subagent, body.height);
+    let footer_height = u16::try_from(outcome.len()).unwrap_or(0);
+    let (body, footer) = match footer_height {
+        0 => (body, None),
+        _ => {
+            let [body, footer] =
+                Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)])
+                    .areas(body);
+            (body, Some(footer))
+        }
+    };
+    if let Some(footer) = footer {
+        frame.render_widget(Paragraph::new(outcome), footer);
+    }
     let Some(transcript) = &app.transcript else {
         return;
     };
-    let body = areas.transcript_body();
     let height = usize::from(body.height);
     let rows = transcript.rows(body.width);
     if rows.is_empty() {
@@ -224,16 +240,105 @@ fn subagent_header(subagent: &SubagentView) -> Line<'static> {
         true => subagent.agent_type.clone(),
         false => format!("{}: {}", subagent.agent_type, subagent.description),
     };
-    let state = match subagent.done {
-        true => Span::raw("done").dark_gray(),
-        false => Span::raw("running").green(),
+    let state = match subagent.state {
+        SubagentStateView::Working => Span::raw("running").green(),
+        SubagentStateView::Done => Span::raw("done").dark_gray(),
+        SubagentStateView::Errored => Span::raw("errored").red(),
     };
-    Line::from(vec![
+    let mut spans = vec![
         Span::raw(name).bold(),
         Span::raw(" · "),
         state,
         Span::raw(format!(" · {} tools", subagent.tool_count)),
-    ])
+    ];
+    if let Some(duration) = subagent.duration_ms {
+        spans.push(Span::raw(format!(" · {}", duration_text(duration))));
+    }
+    if let Some(model) = &subagent.model {
+        spans.push(Span::raw(format!(" · {model}")).dark_gray());
+    }
+    if let Some(cost) = subagent.usage.as_ref().and_then(|usage| usage.cost_usd) {
+        spans.push(Span::raw(format!(" · ${cost:.2}")).dark_gray());
+    }
+    Line::from(spans)
+}
+
+/// The lines under a finished Subagent's transcript: why it failed, what
+/// became of its worktree, and its final text; at most a third of `height`.
+fn subagent_outcome(subagent: &SubagentView, height: u16) -> Vec<Line<'static>> {
+    if !subagent.finished() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    if let Some(failure) = &subagent.failure {
+        lines.push(Line::from(vec![
+            Span::raw("✗ ").red(),
+            Span::raw(failure.clone()).red(),
+        ]));
+    }
+    if let Some(worktree) = &subagent.worktree {
+        lines.push(worktree_line(worktree));
+    }
+    if let Some(summary) = &subagent.summary {
+        let label = match subagent.state {
+            SubagentStateView::Errored => "output",
+            _ => "result",
+        };
+        for (at, text) in summary
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .enumerate()
+        {
+            let prefix = match at {
+                0 => format!("{label}: "),
+                _ => " ".repeat(label.len() + 2),
+            };
+            lines.push(Line::from(vec![
+                Span::raw(prefix).dark_gray(),
+                Span::raw(text.to_string()),
+            ]));
+        }
+    }
+    let room = usize::from(height / 3);
+    if lines.is_empty() || room < 2 {
+        return Vec::new();
+    }
+    lines.truncate(room - 1);
+    lines.insert(0, Line::from("─".repeat(usize::from(u8::MAX))).dark_gray());
+    lines
+}
+
+fn worktree_line(worktree: &SubagentWorktreeView) -> Line<'static> {
+    let mut spans = vec![Span::raw("worktree ").dark_gray()];
+    if let Some(branch) = &worktree.branch {
+        spans.push(Span::raw(branch.clone()));
+    }
+    let merge = match (worktree.merged, worktree.skipped) {
+        (Some(true), _) => Some(Span::raw(" · merged").green()),
+        (_, Some(true)) => Some(Span::raw(" · nothing to merge").dark_gray()),
+        (Some(false), _) => Some(Span::raw(" · not merged").red()),
+        _ => None,
+    };
+    spans.extend(merge);
+    if let Some(kept) = &worktree.preserved_branch {
+        spans.push(Span::raw(format!(" · kept on {kept}")).yellow());
+    }
+    if worktree.merged != Some(true)
+        && let Some(message) = &worktree.message
+    {
+        spans.push(Span::raw(format!(" · {message}")).dark_gray());
+    }
+    Line::from(spans)
+}
+
+fn duration_text(ms: u64) -> String {
+    let seconds = ms / 1000;
+    match seconds {
+        0 => format!("{ms}ms"),
+        1..60 => format!("{seconds}s"),
+        60..3600 => format!("{}m {}s", seconds / 60, seconds % 60),
+        _ => format!("{}h {}m", seconds / 3600, seconds % 3600 / 60),
+    }
 }
 
 fn preparing_title(preparing: &Preparing) -> Line<'static> {

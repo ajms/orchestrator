@@ -90,7 +90,7 @@ The Agent's own chat history within a Session; a Session can move through severa
 _Avoid_: Chat, thread, transcript
 
 **Subagent**:
-A helper the Agent spawns inside its own Session; it shares the Session's Worktree or works in a worktree of its own, such as a Subagent worktree, and is not a Session itself.
+A helper the Agent spawns inside its own Session; it shares the Session's Worktree or works in a worktree of its own, such as a Subagent worktree, and is not a Session itself. It is Working until it ends, then Done, or Errored when its Agent reports it failed.
 _Avoid_: Child session, worker, sub-session
 
 **Subagent worktree**:

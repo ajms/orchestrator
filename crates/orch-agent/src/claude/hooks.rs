@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use orch_core::{AgentEvent, ConversationId, FailureKind, SubagentId};
+use orch_core::{AgentEvent, ConversationId, FailureKind, SubagentId, SubagentOutcome};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::mode_from_name;
+use crate::bounded::{SUMMARY_CHARS, bounded};
 use crate::{PayloadError, WorktreeRequest};
 
 const QUESTION_TOOL: &str = "AskUserQuestion";
@@ -66,6 +67,7 @@ struct HookPayload {
     agent_type: Option<String>,
     notification_type: Option<String>,
     error: Option<String>,
+    last_assistant_message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -166,7 +168,17 @@ impl HookPayload {
                 .into_iter()
                 .collect(),
             H::SubagentStop => subagent
-                .map(|id| AgentEvent::SubagentFinished { id })
+                .map(|id| AgentEvent::SubagentFinished {
+                    id,
+                    // SubagentStop reports only the final text, not how it ended.
+                    outcome: SubagentOutcome {
+                        summary: self
+                            .last_assistant_message
+                            .as_deref()
+                            .and_then(|text| bounded(text, SUMMARY_CHARS)),
+                        ..SubagentOutcome::default()
+                    },
+                })
                 .into_iter()
                 .collect(),
         }

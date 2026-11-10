@@ -1,7 +1,11 @@
-use orch_core::{AgentEvent, ConversationId, FailureKind, SubagentId};
+use orch_core::{
+    AgentEvent, ConversationId, FailureKind, SubagentId, SubagentOutcome, SubagentUsage,
+    SubagentWorktree,
+};
 use serde::Deserialize;
 
 use crate::PayloadError;
+use crate::bounded::{NAME_CHARS, REASON_CHARS, SUMMARY_CHARS, bounded, bounded_line};
 
 const QUESTION_TOOL: &str = "question";
 pub(super) const SUBAGENT_TOOL: &str = "subagent";
@@ -50,6 +54,8 @@ enum Hook {
     ToolExecutionEnd {
         tool_name: String,
         tool_call_id: Option<String>,
+        #[serde(flatten)]
+        outcome: Box<Ended>,
     },
     UiPromptStart,
     UiPromptEnd {
@@ -64,6 +70,115 @@ enum Hook {
     },
     #[serde(other)]
     Other,
+}
+
+/// What orch's extension forwards from a `subagent` call's final result
+/// (the user's extension's `SingleResult`). It comes from inside the Sandbox.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct Ended {
+    is_error: bool,
+    exit_code: Option<i64>,
+    stop_reason: Option<String>,
+    error_message: Option<String>,
+    model: Option<String>,
+    usage: Option<EndedUsage>,
+    text: Option<String>,
+    worktree_path: Option<String>,
+    worktree_branch: Option<String>,
+    worktree_cleanup: Option<EndedCleanup>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct EndedUsage {
+    input: Option<f64>,
+    output: Option<f64>,
+    cost: Option<f64>,
+    turns: Option<f64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct EndedCleanup {
+    merged: Option<bool>,
+    skipped: Option<bool>,
+    message: Option<String>,
+    preserved_branch: Option<String>,
+}
+
+impl Ended {
+    fn into_outcome(self) -> SubagentOutcome {
+        let stop_reason = self
+            .stop_reason
+            .as_deref()
+            .and_then(|r| bounded_line(r, NAME_CHARS));
+        let stopped_badly = matches!(stop_reason.as_deref(), Some("error" | "aborted"));
+        let exit_code = self.exit_code.filter(|code| *code != 0);
+        let errored = self.is_error || exit_code.is_some() || stopped_badly;
+        let failure = errored.then(|| {
+            self.error_message
+                .as_deref()
+                .and_then(|message| bounded_line(message, REASON_CHARS))
+                .or_else(|| stop_reason.filter(|_| stopped_badly))
+                .or_else(|| exit_code.map(|code| format!("exit code {code}")))
+                .unwrap_or_else(|| "failed".into())
+        });
+        let usage = self.usage.map(|usage| SubagentUsage {
+            input_tokens: count(usage.input),
+            output_tokens: count(usage.output),
+            cost_usd: usage.cost.filter(|cost| cost.is_finite() && *cost >= 0.0),
+            turns: count(usage.turns).and_then(|turns| u32::try_from(turns).ok()),
+        });
+        let cleanup = self.worktree_cleanup.unwrap_or_default();
+        let worktree = SubagentWorktree {
+            path: self
+                .worktree_path
+                .as_deref()
+                .and_then(|p| bounded_line(p, REASON_CHARS)),
+            branch: self
+                .worktree_branch
+                .as_deref()
+                .and_then(|b| bounded_line(b, NAME_CHARS)),
+            merged: cleanup.merged,
+            skipped: cleanup.skipped,
+            message: cleanup
+                .message
+                .as_deref()
+                .and_then(|m| bounded_line(m, REASON_CHARS)),
+            preserved_branch: cleanup
+                .preserved_branch
+                .as_deref()
+                .and_then(|b| bounded_line(b, NAME_CHARS)),
+        };
+        // A failed call's text restates its failure; only other text is kept.
+        let summary = self
+            .text
+            .as_deref()
+            .and_then(|text| bounded(text, SUMMARY_CHARS))
+            .filter(|text| {
+                !failure
+                    .as_ref()
+                    .is_some_and(|failure| text.contains(failure.as_str()))
+            });
+        SubagentOutcome {
+            errored,
+            summary,
+            failure,
+            model: self
+                .model
+                .as_deref()
+                .and_then(|m| bounded_line(m, NAME_CHARS)),
+            usage,
+            worktree: (worktree != SubagentWorktree::default()).then(|| Box::new(worktree)),
+        }
+    }
+}
+
+fn count(value: Option<f64>) -> Option<u64> {
+    value
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| value as u64)
 }
 
 pub(super) fn map_hook(payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
@@ -126,9 +241,14 @@ impl Hook {
             Hook::ToolExecutionEnd {
                 tool_name,
                 tool_call_id,
+                outcome,
             } => {
-                let finished = subagent_of_call(&tool_name, tool_call_id)
-                    .map(|id| AgentEvent::SubagentFinished { id });
+                let finished = subagent_of_call(&tool_name, tool_call_id).map(|id| {
+                    AgentEvent::SubagentFinished {
+                        id,
+                        outcome: outcome.into_outcome(),
+                    }
+                });
                 std::iter::once(AgentEvent::ToolFinished {
                     tool: tool_name,
                     subagent: None,

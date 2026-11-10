@@ -14,9 +14,10 @@ const MCP: &str = "mcp.json";
 const SETTINGS: &str = "settings.json";
 const EXTENSION_DIR: &str = "orch/extension";
 const EXTENSION_ENTRY: &str = "index.ts";
-const EXTENSION_FILES: [(&str, &str); 4] = [
+const EXTENSION_FILES: [(&str, &str); 5] = [
     (EXTENSION_ENTRY, include_str!("extension/index.ts")),
     ("forward.ts", include_str!("extension/forward.ts")),
+    ("outcome.ts", include_str!("extension/outcome.ts")),
     ("prompt.ts", include_str!("extension/prompt.ts")),
     ("transcripts.ts", include_str!("extension/transcripts.ts")),
 ];

@@ -1222,7 +1222,7 @@ impl App {
             self.sidebar.unfold(&repo);
         }
         if let Some((view, subagent)) = self.cursor_subagent()
-            && subagent.done
+            && crate::sidebar::collapses(subagent)
         {
             let session = view.id.clone();
             self.sidebar.expand(&session);

@@ -1,5 +1,7 @@
 use orch_agent::{AgentAdapter, ClaudeCode, GuardAnswer, WorktreeRequest};
-use orch_core::{AgentEvent, ConversationId, FailureKind, PermissionMode, SubagentId};
+use orch_core::{
+    AgentEvent, ConversationId, FailureKind, PermissionMode, SubagentId, SubagentOutcome,
+};
 
 fn fixture(name: &str) -> String {
     let path = format!(
@@ -207,7 +209,13 @@ fn subagents_start_and_finish_without_ending_the_turn() {
         events("subagent_stop"),
         vec![
             mode(PermissionMode::Default),
-            AgentEvent::SubagentFinished { id }
+            AgentEvent::SubagentFinished {
+                id,
+                outcome: SubagentOutcome {
+                    summary: Some("Found the redirect in src/login.rs:42.".into()),
+                    ..SubagentOutcome::default()
+                },
+            }
         ]
     );
 }

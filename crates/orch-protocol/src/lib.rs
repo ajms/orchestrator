@@ -19,5 +19,5 @@ pub use orch_holder::{ScreenSnapshot, Size};
 pub use reconcile::{Finding, Fix, LeftoverView, Problem, ReconcileReport, Repair, RepoReport};
 pub use view::{
     AgentStateView, FlagsView, GuardKindView, GuardPrompt, PhaseView, PrChecksView, PrReviewView,
-    PrView, SessionView, SubagentView,
+    PrView, SessionView, SubagentStateView, SubagentUsageView, SubagentView, SubagentWorktreeView,
 };

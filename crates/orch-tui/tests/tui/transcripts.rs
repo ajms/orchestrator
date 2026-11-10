@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, MouseEventKind};
 use orch_protocol::{
-    AgentStateView, FromDaemon, PhaseView, Request, SessionView, SubagentTranscript,
-    TranscriptEntry,
+    AgentStateView, FromDaemon, PhaseView, Request, SessionView, SubagentStateView,
+    SubagentTranscript, SubagentWorktreeView, TranscriptEntry,
 };
 use orch_tui::Event;
 use ratatui::style::Color;
@@ -466,4 +466,42 @@ fn long_lines_wrap_inside_the_pane() {
     );
 
     assert!(shows(&mut tui, "wrapped tail"));
+}
+
+#[test]
+fn an_errored_subagent_is_marked_and_its_view_shows_how_it_ended() {
+    let mut parent = parent([false, false]);
+    let errored = &mut parent.subagents[0];
+    errored.state = SubagentStateView::Errored;
+    errored.duration_ms = Some(75_000);
+    errored.model = Some("anthropic/opus".into());
+    errored.failure = Some("merge conflict in src/login.rs".into());
+    errored.summary = Some("Fixed the redirect.".into());
+    errored.worktree = Some(SubagentWorktreeView {
+        branch: Some("subagent/explore-1".into()),
+        merged: Some(false),
+        preserved_branch: Some("subagent-preserved/explore-1".into()),
+        ..SubagentWorktreeView::default()
+    });
+    let mut tui = Harness::new();
+    tui.sessions(vec![parent, session("webshop", "below")]);
+    tui.keys("J");
+
+    assert_eq!(tui.colour_of("✗"), Color::Red);
+    let shows =
+        |tui: &mut Harness, needle: &str| tui.pane_lines().iter().any(|line| line.contains(needle));
+    if !shows(&mut tui, "errored") {
+        tui.keys("J");
+    }
+    for needle in [
+        "errored",
+        "1m 15s",
+        "anthropic/opus",
+        "merge conflict in src/login.rs",
+        "subagent/explore-1 · not merged",
+        "kept on subagent-preserved",
+        "output: Fixed the redirect.",
+    ] {
+        assert!(shows(&mut tui, needle), "{needle}: {:#?}", tui.pane_lines());
+    }
 }
