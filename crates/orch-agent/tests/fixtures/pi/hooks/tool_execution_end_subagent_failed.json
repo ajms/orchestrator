@@ -13,7 +13,6 @@
     "cost": 0.0123,
     "turns": 3
   },
-  "sessionLabel": "builder: fail: fix the redirect",
   "text": "Agent failed: Merge conflict merging subagent/builder-1 into the parent HEAD",
   "worktreePath": "/tmp/pi-subagent-wt-abc123/builder",
   "worktreeBranch": "subagent/builder-1",

@@ -1,7 +1,7 @@
 use orch_agent::{AgentAdapter, PayloadError, Pi};
 use orch_core::{
-    AgentEvent, ConversationId, FailureKind, SubagentId, SubagentOutcome, SubagentUsage,
-    SubagentWorktree,
+    AgentEvent, ConversationId, FailureKind, SubagentId, SubagentMerge, SubagentOutcome,
+    SubagentUsage, SubagentWorktree,
 };
 
 fn fixture(name: &str) -> String {
@@ -165,8 +165,7 @@ fn a_failed_subagent_call_is_errored_with_its_reason_and_kept_worktree() {
             worktree: Some(Box::new(SubagentWorktree {
                 path: Some("/tmp/pi-subagent-wt-abc123/builder".into()),
                 branch: Some("subagent/builder-1".into()),
-                merged: Some(false),
-                skipped: Some(false),
+                merge: Some(SubagentMerge::NotMerged),
                 message: Some("conflict in src/login.rs".into()),
                 preserved_branch: Some("subagent-preserved/builder-1".into()),
             })),

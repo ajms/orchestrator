@@ -12,6 +12,5 @@
     "cost": 0.0123,
     "turns": 3
   },
-  "sessionLabel": "scout: Find where login redirects",
   "text": "Found the redirect in src/login.rs:42."
 }

@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, MouseEventKind};
 use orch_protocol::{
-    AgentStateView, FromDaemon, PhaseView, Request, SessionView, SubagentStateView,
-    SubagentTranscript, SubagentWorktreeView, TranscriptEntry,
+    AgentStateView, FromDaemon, PhaseView, Request, SessionView, SubagentMergeView,
+    SubagentStateView, SubagentTranscript, SubagentWorktreeView, TranscriptEntry,
 };
 use orch_tui::Event;
 use ratatui::style::Color;
@@ -479,7 +479,7 @@ fn an_errored_subagent_is_marked_and_its_view_shows_how_it_ended() {
     errored.summary = Some("Fixed the redirect.".into());
     errored.worktree = Some(SubagentWorktreeView {
         branch: Some("subagent/explore-1".into()),
-        merged: Some(false),
+        merge: Some(SubagentMergeView::NotMerged),
         preserved_branch: Some("subagent-preserved/explore-1".into()),
         ..SubagentWorktreeView::default()
     });
@@ -500,7 +500,7 @@ fn an_errored_subagent_is_marked_and_its_view_shows_how_it_ended() {
         "merge conflict in src/login.rs",
         "subagent/explore-1 · not merged",
         "kept on subagent-preserved",
-        "output: Fixed the redirect.",
+        "result: Fixed the redirect.",
     ] {
         assert!(shows(&mut tui, needle), "{needle}: {:#?}", tui.pane_lines());
     }

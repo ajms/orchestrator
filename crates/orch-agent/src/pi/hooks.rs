@@ -1,6 +1,6 @@
 use orch_core::{
-    AgentEvent, ConversationId, FailureKind, SubagentId, SubagentOutcome, SubagentUsage,
-    SubagentWorktree,
+    AgentEvent, ConversationId, FailureKind, SubagentId, SubagentMerge, SubagentOutcome,
+    SubagentUsage, SubagentWorktree,
 };
 use serde::Deserialize;
 
@@ -55,7 +55,7 @@ enum Hook {
         tool_name: String,
         tool_call_id: Option<String>,
         #[serde(flatten)]
-        outcome: Box<Ended>,
+        outcome: Box<SubagentEnd>,
     },
     UiPromptStart,
     UiPromptEnd {
@@ -76,22 +76,22 @@ enum Hook {
 /// (the user's extension's `SingleResult`). It comes from inside the Sandbox.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-struct Ended {
+struct SubagentEnd {
     is_error: bool,
     exit_code: Option<i64>,
     stop_reason: Option<String>,
     error_message: Option<String>,
     model: Option<String>,
-    usage: Option<EndedUsage>,
+    usage: Option<SubagentEndUsage>,
     text: Option<String>,
     worktree_path: Option<String>,
     worktree_branch: Option<String>,
-    worktree_cleanup: Option<EndedCleanup>,
+    worktree_cleanup: Option<SubagentEndCleanup>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct EndedUsage {
+struct SubagentEndUsage {
     input: Option<f64>,
     output: Option<f64>,
     cost: Option<f64>,
@@ -100,14 +100,14 @@ struct EndedUsage {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-struct EndedCleanup {
+struct SubagentEndCleanup {
     merged: Option<bool>,
     skipped: Option<bool>,
     message: Option<String>,
     preserved_branch: Option<String>,
 }
 
-impl Ended {
+impl SubagentEnd {
     fn into_outcome(self) -> SubagentOutcome {
         let stop_reason = self
             .stop_reason
@@ -125,10 +125,10 @@ impl Ended {
                 .unwrap_or_else(|| "failed".into())
         });
         let usage = self.usage.map(|usage| SubagentUsage {
-            input_tokens: count(usage.input),
-            output_tokens: count(usage.output),
+            input_tokens: non_negative_u64(usage.input),
+            output_tokens: non_negative_u64(usage.output),
             cost_usd: usage.cost.filter(|cost| cost.is_finite() && *cost >= 0.0),
-            turns: count(usage.turns).and_then(|turns| u32::try_from(turns).ok()),
+            turns: non_negative_u64(usage.turns).and_then(|turns| u32::try_from(turns).ok()),
         });
         let cleanup = self.worktree_cleanup.unwrap_or_default();
         let worktree = SubagentWorktree {
@@ -140,8 +140,12 @@ impl Ended {
                 .worktree_branch
                 .as_deref()
                 .and_then(|b| bounded_line(b, NAME_CHARS)),
-            merged: cleanup.merged,
-            skipped: cleanup.skipped,
+            merge: match (cleanup.merged, cleanup.skipped) {
+                (Some(true), _) => Some(SubagentMerge::Merged),
+                (_, Some(true)) => Some(SubagentMerge::NothingToMerge),
+                (Some(false), _) => Some(SubagentMerge::NotMerged),
+                _ => None,
+            },
             message: cleanup
                 .message
                 .as_deref()
@@ -175,7 +179,7 @@ impl Ended {
     }
 }
 
-fn count(value: Option<f64>) -> Option<u64> {
+fn non_negative_u64(value: Option<f64>) -> Option<u64> {
     value
         .filter(|value| value.is_finite() && *value >= 0.0)
         .map(|value| value as u64)

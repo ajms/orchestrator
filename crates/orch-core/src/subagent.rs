@@ -19,13 +19,20 @@ pub struct SubagentUsage {
     pub turns: Option<u32>,
 }
 
+/// What became of a Subagent's work when its worktree was cleaned up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubagentMerge {
+    Merged,
+    NothingToMerge,
+    NotMerged,
+}
+
 /// The worktree a Subagent ran in, and whether its work was merged back.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SubagentWorktree {
     pub path: Option<String>,
     pub branch: Option<String>,
-    pub merged: Option<bool>,
-    pub skipped: Option<bool>,
+    pub merge: Option<SubagentMerge>,
     pub message: Option<String>,
     pub preserved_branch: Option<String>,
 }

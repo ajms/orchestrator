@@ -1,11 +1,11 @@
 // How a `subagent` call ended, taken from the tool's final result. The user's
 // subagent extension puts a `SingleResult` in `details`; all of it comes from
 // inside the Sandbox, so only known fields of the expected type are kept and
-// every string is cut short. orch bounds it again on its side.
+// every string is cut short. orch bounds it again, tighter, on its side.
 
-const TEXT_CHARS = 4000;
-const REASON_CHARS = 1000;
-const NAME_CHARS = 200;
+const FORWARD_TEXT_CHARS = 4000;
+const FORWARD_REASON_CHARS = 1000;
+const FORWARD_NAME_CHARS = 200;
 
 export interface SubagentUsage {
 	input?: number;
@@ -28,7 +28,6 @@ export interface SubagentOutcome {
 	errorMessage?: string;
 	model?: string;
 	usage?: SubagentUsage;
-	sessionLabel?: string;
 	text?: string;
 	worktreePath?: string;
 	worktreeBranch?: string;
@@ -58,7 +57,7 @@ function finalText(result: Fields): string | undefined {
 		const fields = record(part);
 		return fields?.type === "text" && typeof fields.text === "string" ? [fields.text] : [];
 	});
-	return text(parts.join("\n"), TEXT_CHARS);
+	return text(parts.join("\n"), FORWARD_TEXT_CHARS);
 }
 
 function usageOf(value: unknown): SubagentUsage | undefined {
@@ -79,8 +78,8 @@ function cleanupOf(value: unknown): WorktreeCleanup | undefined {
 	return defined({
 		merged: flag(cleanup.merged),
 		skipped: flag(cleanup.skipped),
-		message: text(cleanup.message, REASON_CHARS),
-		preservedBranch: text(cleanup.preservedBranch, NAME_CHARS),
+		message: text(cleanup.message, FORWARD_REASON_CHARS),
+		preservedBranch: text(cleanup.preservedBranch, FORWARD_NAME_CHARS),
 	});
 }
 
@@ -90,14 +89,13 @@ export function subagentOutcome(result: unknown, isError: boolean): SubagentOutc
 	return defined({
 		isError: isError === true,
 		exitCode: number(details.exitCode),
-		stopReason: text(details.stopReason, NAME_CHARS),
-		errorMessage: text(details.errorMessage, REASON_CHARS),
-		model: text(details.model, NAME_CHARS),
+		stopReason: text(details.stopReason, FORWARD_NAME_CHARS),
+		errorMessage: text(details.errorMessage, FORWARD_REASON_CHARS),
+		model: text(details.model, FORWARD_NAME_CHARS),
 		usage: usageOf(details.usage),
-		sessionLabel: text(details.sessionLabel, NAME_CHARS),
 		text: finalText(fields),
-		worktreePath: text(details.worktreePath, REASON_CHARS),
-		worktreeBranch: text(details.worktreeBranch, NAME_CHARS),
+		worktreePath: text(details.worktreePath, FORWARD_REASON_CHARS),
+		worktreeBranch: text(details.worktreeBranch, FORWARD_NAME_CHARS),
 		worktreeCleanup: cleanupOf(details.worktreeCleanup),
 	});
 }

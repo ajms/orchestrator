@@ -25,7 +25,6 @@ test("a SingleResult's outcome fields are kept", () => {
 		stopReason: "stop",
 		model: "anthropic/claude",
 		usage: { input: 10, output: 5, cost: 0.01, turns: 2 },
-		sessionLabel: "scout: find it",
 		text: "Found it.",
 		worktreePath: "/tmp/wt/scout",
 		worktreeBranch: "subagent/scout-1",

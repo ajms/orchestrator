@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use orch_core::{AgentState, Phase, SessionId};
+use orch_core::{
+    AgentState, Phase, SessionId, SubagentMerge, SubagentState, SubagentUsage, SubagentWorktree,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -244,6 +246,16 @@ pub enum SubagentStateView {
     Errored,
 }
 
+impl From<SubagentState> for SubagentStateView {
+    fn from(state: SubagentState) -> Self {
+        match state {
+            SubagentState::Working => Self::Working,
+            SubagentState::Done => Self::Done,
+            SubagentState::Errored => Self::Errored,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SubagentUsageView {
     pub input_tokens: Option<u64>,
@@ -256,8 +268,49 @@ pub struct SubagentUsageView {
 pub struct SubagentWorktreeView {
     pub path: Option<String>,
     pub branch: Option<String>,
-    pub merged: Option<bool>,
-    pub skipped: Option<bool>,
+    #[serde(default)]
+    pub merge: Option<SubagentMergeView>,
     pub message: Option<String>,
     pub preserved_branch: Option<String>,
+}
+
+impl From<&SubagentUsage> for SubagentUsageView {
+    fn from(usage: &SubagentUsage) -> Self {
+        Self {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cost_usd: usage.cost_usd,
+            turns: usage.turns,
+        }
+    }
+}
+
+impl From<&SubagentWorktree> for SubagentWorktreeView {
+    fn from(worktree: &SubagentWorktree) -> Self {
+        Self {
+            path: worktree.path.clone(),
+            branch: worktree.branch.clone(),
+            merge: worktree.merge.map(SubagentMergeView::from),
+            message: worktree.message.clone(),
+            preserved_branch: worktree.preserved_branch.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentMergeView {
+    Merged,
+    NothingToMerge,
+    NotMerged,
+}
+
+impl From<SubagentMerge> for SubagentMergeView {
+    fn from(merge: SubagentMerge) -> Self {
+        match merge {
+            SubagentMerge::Merged => Self::Merged,
+            SubagentMerge::NothingToMerge => Self::NothingToMerge,
+            SubagentMerge::NotMerged => Self::NotMerged,
+        }
+    }
 }

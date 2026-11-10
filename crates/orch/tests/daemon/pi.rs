@@ -659,8 +659,11 @@ async fn a_pi_subagent_call_is_a_subagent_row_with_a_live_transcript_that_outliv
     assert!(row.duration_ms.is_some());
     let worktree = row.worktree.as_ref().unwrap();
     assert_eq!(
-        (worktree.branch.as_deref(), worktree.merged),
-        (Some("subagent/scout-1"), Some(false))
+        (worktree.branch.as_deref(), worktree.merge),
+        (
+            Some("subagent/scout-1"),
+            Some(orch_protocol::SubagentMergeView::NotMerged)
+        )
     );
     client.request(Request::UnsubscribeSubagent).await.unwrap();
     client.drain().await;

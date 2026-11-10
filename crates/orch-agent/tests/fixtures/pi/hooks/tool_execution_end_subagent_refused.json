@@ -11,6 +11,5 @@
     "cost": 0,
     "turns": 0
   },
-  "sessionLabel": "builder: refuse: push the fix",
   "text": "Agent failed: Refused: the task asks to push, which this agent may not do"
 }

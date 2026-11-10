@@ -1,5 +1,6 @@
 use orch_protocol::{
-    PhaseView, SessionView, SubagentStateView, SubagentView, SubagentWorktreeView,
+    PhaseView, SessionView, SubagentMergeView, SubagentStateView, SubagentView,
+    SubagentWorktreeView,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -280,10 +281,7 @@ fn subagent_outcome(subagent: &SubagentView, height: u16) -> Vec<Line<'static>> 
         lines.push(worktree_line(worktree));
     }
     if let Some(summary) = &subagent.summary {
-        let label = match subagent.state {
-            SubagentStateView::Errored => "output",
-            _ => "result",
-        };
+        let label = "result";
         for (at, text) in summary
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -313,17 +311,16 @@ fn worktree_line(worktree: &SubagentWorktreeView) -> Line<'static> {
     if let Some(branch) = &worktree.branch {
         spans.push(Span::raw(branch.clone()));
     }
-    let merge = match (worktree.merged, worktree.skipped) {
-        (Some(true), _) => Some(Span::raw(" · merged").green()),
-        (_, Some(true)) => Some(Span::raw(" · nothing to merge").dark_gray()),
-        (Some(false), _) => Some(Span::raw(" · not merged").red()),
-        _ => None,
-    };
+    let merge = worktree.merge.map(|merge| match merge {
+        SubagentMergeView::Merged => Span::raw(" · merged").green(),
+        SubagentMergeView::NothingToMerge => Span::raw(" · nothing to merge").dark_gray(),
+        SubagentMergeView::NotMerged => Span::raw(" · not merged").red(),
+    });
     spans.extend(merge);
     if let Some(kept) = &worktree.preserved_branch {
         spans.push(Span::raw(format!(" · kept on {kept}")).yellow());
     }
-    if worktree.merged != Some(true)
+    if worktree.merge != Some(SubagentMergeView::Merged)
         && let Some(message) = &worktree.message
     {
         spans.push(Span::raw(format!(" · {message}")).dark_gray());

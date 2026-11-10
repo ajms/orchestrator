@@ -6,14 +6,13 @@ use std::time::{Duration, Instant};
 use orch_agent::{GuardAnswer, GuardHit, GuardKind, SubagentTranscripts, mode_name};
 use orch_core::{
     AgentState, ConversationId, GateRefusal, Phase, PhaseEvent, PrStatus, SessionId, SessionStatus,
-    SubagentState,
 };
 use orch_git::{SessionName, SessionWorktree};
 use orch_holder::{Size, ToHolder};
 use orch_notify::{AttentionEvent, ClientView};
 use orch_protocol::{
     DisplayVars, FlagsView, FromDaemon, GuardKindView, GuardPrompt, ReconcileReport, SessionView,
-    SubagentStateView, SubagentUsageView, SubagentView, SubagentWorktreeView,
+    SubagentView,
 };
 use orch_store::{SessionRecord, Store};
 use tokio::sync::mpsc::Sender;
@@ -423,37 +422,15 @@ impl Live {
                     agent_type: subagent.agent_type.clone(),
                     description: subagent.description.clone(),
                     tool_count: subagent.tool_count,
-                    state: match subagent.state {
-                        SubagentState::Working => SubagentStateView::Working,
-                        SubagentState::Done => SubagentStateView::Done,
-                        SubagentState::Errored => SubagentStateView::Errored,
-                    },
+                    state: subagent.state.into(),
                     duration_ms: subagent
                         .duration
                         .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)),
                     summary: subagent.outcome.summary.clone(),
                     failure: subagent.outcome.failure.clone(),
                     model: subagent.outcome.model.clone(),
-                    usage: subagent
-                        .outcome
-                        .usage
-                        .as_ref()
-                        .map(|usage| SubagentUsageView {
-                            input_tokens: usage.input_tokens,
-                            output_tokens: usage.output_tokens,
-                            cost_usd: usage.cost_usd,
-                            turns: usage.turns,
-                        }),
-                    worktree: subagent.outcome.worktree.as_ref().map(|worktree| {
-                        SubagentWorktreeView {
-                            path: worktree.path.clone(),
-                            branch: worktree.branch.clone(),
-                            merged: worktree.merged,
-                            skipped: worktree.skipped,
-                            message: worktree.message.clone(),
-                            preserved_branch: worktree.preserved_branch.clone(),
-                        }
-                    }),
+                    usage: subagent.outcome.usage.as_ref().map(Into::into),
+                    worktree: subagent.outcome.worktree.as_deref().map(Into::into),
                 })
                 .collect(),
         }
