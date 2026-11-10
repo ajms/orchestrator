@@ -40,8 +40,12 @@ pub(super) fn draw(review: &ReviewView, frame: &mut Frame, area: Rect) {
             Block::bordered()
                 .border_type(BorderType::Rounded)
                 .title(match &review.subagent {
-                    Some(name) => format!(" Review of Subagent {name} on {} ", name.branch()),
+                    Some(name) => format!(" Review of Subagent {name} "),
                     None => format!(" Review vs {} ", review.base),
+                })
+                .title_bottom(match &review.subagent {
+                    Some(name) => format!(" branch {} ", name.branch()),
+                    None => String::new(),
                 }),
         ),
         columns.files,

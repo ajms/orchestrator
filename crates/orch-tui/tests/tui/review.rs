@@ -228,10 +228,8 @@ fn reviewing_subagent() -> Harness {
 fn a_subagent_review_names_the_subagent_in_its_header() {
     let mut tui = reviewing_subagent();
     let screen = tui.screen();
-    assert!(
-        screen.contains("Review of Subagent agent-a on worktree-agent-a"),
-        "{screen}"
-    );
+    assert!(screen.contains("Review of Subagent agent-a"), "{screen}");
+    assert!(screen.contains("branch worktree-agent-a"), "{screen}");
     assert!(screen.contains("src/a.rs"), "{screen}");
 }
 
@@ -302,10 +300,8 @@ fn a_subagent_review_arriving_after_a_session_review_was_requested_keeps_its_lab
         }])),
     });
     let screen = tui.screen();
-    assert!(
-        screen.contains("Review of Subagent agent-a on worktree-agent-a"),
-        "{screen}"
-    );
+    assert!(screen.contains("Review of Subagent agent-a"), "{screen}");
+    assert!(screen.contains("branch worktree-agent-a"), "{screen}");
     tui.command("land");
     assert!(!tui.screen().contains("push + PR"));
     assert!(statusline(&mut tui).contains("only Subagent agent-a"));
