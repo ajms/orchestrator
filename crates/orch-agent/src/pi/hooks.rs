@@ -10,6 +10,8 @@ use crate::{PayloadError, WorktreeRequest};
 const QUESTION_TOOL: &str = "question";
 pub(super) const SUBAGENT_TOOL: &str = "subagent";
 const LABEL_CHARS: usize = 60;
+/// At most this many conflicting files are kept from a failed merge-back.
+const CONFLICT_FILES: usize = 20;
 const STATUS_WORDS: [&str; 4] = ["status", "code", "error", "http"];
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
@@ -105,6 +107,35 @@ struct SubagentEndCleanup {
     skipped: Option<bool>,
     message: Option<String>,
     preserved_branch: Option<String>,
+    conflict_files: Option<Vec<String>>,
+    discarded: Option<bool>,
+}
+
+impl SubagentEndCleanup {
+    fn merge(&self) -> Option<SubagentMerge> {
+        let conflict_files = self.conflict_files.as_ref().map(|files| {
+            files
+                .iter()
+                .filter_map(|file| bounded_line(file, REASON_CHARS))
+                .take(CONFLICT_FILES)
+                .collect::<Vec<_>>()
+        });
+        Some(match (self.discarded, self.merged, self.skipped) {
+            (Some(true), _, _) => SubagentMerge::Abandoned,
+            (_, Some(true), _) => SubagentMerge::Merged,
+            _ if conflict_files
+                .as_ref()
+                .is_some_and(|files| !files.is_empty()) =>
+            {
+                SubagentMerge::Conflict {
+                    files: conflict_files.unwrap_or_default(),
+                }
+            }
+            (_, _, Some(true)) => SubagentMerge::NothingToMerge,
+            (_, Some(false), _) => SubagentMerge::NotMerged,
+            _ => return None,
+        })
+    }
 }
 
 impl SubagentEnd {
@@ -140,12 +171,7 @@ impl SubagentEnd {
                 .worktree_branch
                 .as_deref()
                 .and_then(|b| bounded_line(b, NAME_CHARS)),
-            merge: match (cleanup.merged, cleanup.skipped) {
-                (Some(true), _) => Some(SubagentMerge::Merged),
-                (_, Some(true)) => Some(SubagentMerge::NothingToMerge),
-                (Some(false), _) => Some(SubagentMerge::NotMerged),
-                _ => None,
-            },
+            merge: cleanup.merge(),
             message: cleanup
                 .message
                 .as_deref()

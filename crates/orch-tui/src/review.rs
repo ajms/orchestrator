@@ -7,6 +7,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Paragraph, Widget};
 use unicode_width::UnicodeWidthStr;
 
+use crate::event::SubagentName;
 use crate::selection::{Grid, Row, Selector};
 
 const SCROLL_STEP: isize = 10;
@@ -77,7 +78,7 @@ pub(crate) struct ReviewView {
     pub base: String,
     pub worktree: PathBuf,
     /// Set when this Review covers only one Subagent's worktree.
-    pub subagent: Option<String>,
+    pub subagent: Option<SubagentName>,
     pub files: Vec<FileDiff>,
     pub file: usize,
     pub scroll: u16,

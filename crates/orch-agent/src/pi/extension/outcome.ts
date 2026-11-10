@@ -6,6 +6,7 @@
 const FORWARD_TEXT_CHARS = 4000;
 const FORWARD_REASON_CHARS = 1000;
 const FORWARD_NAME_CHARS = 200;
+const FORWARD_LIST_ITEMS = 50;
 
 export interface SubagentUsage {
 	input?: number;
@@ -19,6 +20,8 @@ export interface WorktreeCleanup {
 	skipped?: boolean;
 	message?: string;
 	preservedBranch?: string;
+	conflictFiles?: string[];
+	discarded?: boolean;
 }
 
 export interface SubagentOutcome {
@@ -43,6 +46,15 @@ const text = (value: unknown, max: number) =>
 	typeof value === "string" && value.length > 0 ? value.slice(0, max) : undefined;
 
 const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+
+const names = (value: unknown, max: number) => {
+	if (!Array.isArray(value)) return undefined;
+	const kept = value.flatMap((item) => {
+		const name = text(item, max);
+		return name === undefined ? [] : [name];
+	});
+	return kept.length > 0 ? kept.slice(0, FORWARD_LIST_ITEMS) : undefined;
+};
 
 const flag = (value: unknown) => (typeof value === "boolean" ? value : undefined);
 
@@ -80,6 +92,8 @@ function cleanupOf(value: unknown): WorktreeCleanup | undefined {
 		skipped: flag(cleanup.skipped),
 		message: text(cleanup.message, FORWARD_REASON_CHARS),
 		preservedBranch: text(cleanup.preservedBranch, FORWARD_NAME_CHARS),
+		conflictFiles: names(cleanup.conflictFiles, FORWARD_REASON_CHARS),
+		discarded: flag(cleanup.discarded),
 	});
 }
 

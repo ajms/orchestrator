@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
-use orch_git::subagent_worktrees_dir;
 use orch_protocol::{
     AgentStateView, BranchLookup, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt,
     LandingMode, LeftoverView, LookupDepth, PhaseView, ReconcileReport, Reply, Request,
@@ -16,7 +15,8 @@ use crate::clipboard::copy_effects;
 pub use crate::config::TuiConfig;
 use crate::discard::{DiscardConfirm, DiscardTarget};
 use crate::event::{
-    EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewTarget, ShellEvent,
+    EditorError, Effect, Event, PaneId, ReviewData, ReviewPurpose, ReviewScope, ReviewTarget,
+    ShellEvent, SubagentName,
 };
 use crate::guard::{GuardId, Guards};
 use crate::hyperlinks::Hyperlinks;
@@ -129,7 +129,7 @@ pub(crate) enum Pending {
     Repos,
     FormSettings(PathBuf),
     BranchLookup(LookupKey, LookupDepth),
-    ReviewSettings(SessionId, Option<String>),
+    ReviewSettings(SessionId, ReviewScope),
     Resume(SessionId),
     Create(PreparingId),
     Trust(Box<Retry>),
@@ -257,7 +257,6 @@ pub(crate) struct App {
     next_request: u64,
     next_pane: u64,
     external_review_command: Option<String>,
-    /// The Subagent the in-flight Review load is for, if any.
     pending: HashMap<RequestId, (Request, Pending)>,
     calls: Vec<Call>,
 }
@@ -311,10 +310,10 @@ impl App {
             Event::EditorClosed(result) => self.editor_closed(result),
             Event::Review {
                 session,
-                subagent,
+                scope,
                 purpose,
                 result,
-            } => self.review_loaded(session, subagent, purpose, result),
+            } => self.review_loaded(session, scope, purpose, result),
             Event::VersionMismatch { message } => self.mismatch = Some(message),
             Event::Notice(text) => self.message = Some(text.into()),
             Event::Tick => {
@@ -437,7 +436,7 @@ impl App {
                 };
                 self.branch_looked_up(&asked, depth, lookup);
             }
-            (Pending::ReviewSettings(session, subagent), result) => {
+            (Pending::ReviewSettings(session, scope), result) => {
                 let command = match result {
                     Ok(Reply::RepoSettings(settings)) => settings.review_command,
                     Err(err) => {
@@ -449,7 +448,7 @@ impl App {
                 };
                 self.external_review_command =
                     Some(command.unwrap_or_else(|| self.config.review_command.clone()));
-                self.start_review(&session, subagent, ReviewPurpose::External);
+                self.start_review(&session, scope, ReviewPurpose::External);
             }
             (Pending::Create(preparing), Ok(Reply::Created { session })) => {
                 if let Some(preparing) = self.preparing_mut(preparing) {
@@ -1655,37 +1654,32 @@ impl App {
         };
         let session = view.id.clone();
         let repo = view.repo.clone();
-        let subagent = match self.cursor_subagent() {
+        let scope = match self.cursor_subagent() {
             Some((view, subagent)) => match subagent_review_name(view, subagent) {
-                Ok(name) => Some(name),
+                Ok(name) => ReviewScope::Subagent(name),
                 Err(refusal) => {
                     self.message = Some(refusal.into());
                     return;
                 }
             },
-            None => None,
+            None => ReviewScope::Session,
         };
         match purpose {
-            ReviewPurpose::BuiltIn => self.start_review(&session, subagent, purpose),
+            ReviewPurpose::BuiltIn => self.start_review(&session, scope, purpose),
             ReviewPurpose::External => {
                 let request = Request::RepoSettings { repo };
-                self.request(request, Pending::ReviewSettings(session, subagent));
+                self.request(request, Pending::ReviewSettings(session, scope));
             }
         }
     }
 
-    fn start_review(
-        &mut self,
-        session: &SessionId,
-        subagent: Option<String>,
-        purpose: ReviewPurpose,
-    ) {
+    fn start_review(&mut self, session: &SessionId, scope: ReviewScope, purpose: ReviewPurpose) {
         let Some(view) = self.sessions.get(session) else {
             return;
         };
-        let message = match &subagent {
-            Some(name) => format!("diffing Subagent {name} of {}…", view.slug),
-            None => format!("diffing {} against {}…", view.slug, view.base),
+        let message = match &scope {
+            ReviewScope::Subagent(name) => format!("diffing Subagent {name} of {}…", view.slug),
+            ReviewScope::Session => format!("diffing {} against {}…", view.slug, view.base),
         };
         let effect = Effect::LoadReview {
             session: view.id.clone(),
@@ -1695,7 +1689,7 @@ impl App {
                 slug: view.slug.clone(),
                 branch: view.branch.clone(),
                 base: view.base.clone(),
-                subagent,
+                scope,
             },
             purpose,
         };
@@ -1706,7 +1700,7 @@ impl App {
     fn review_loaded(
         &mut self,
         session: SessionId,
-        subagent: Option<String>,
+        scope: ReviewScope,
         purpose: ReviewPurpose,
         result: Result<ReviewData, orch_git::Error>,
     ) {
@@ -1721,12 +1715,14 @@ impl App {
             }
         };
         self.message = None;
+        let worktree = match &scope {
+            ReviewScope::Subagent(name) => name.worktree(&view.worktree),
+            ReviewScope::Session => view.worktree.clone(),
+        };
         match purpose {
             ReviewPurpose::BuiltIn => {
-                let (base, worktree) = (view.base.clone(), view.worktree.clone());
-                let mut review = ReviewView::new(base, worktree, data.files);
-                if let Some(name) = subagent {
-                    review.worktree = subagent_worktrees_dir(&view.worktree).join(&name);
+                let mut review = ReviewView::new(view.base.clone(), worktree, data.files);
+                if let ReviewScope::Subagent(name) = scope {
                     review.subagent = Some(name);
                 }
                 self.review = Some(review);
@@ -1736,13 +1732,9 @@ impl App {
                     .external_review_command
                     .take()
                     .unwrap_or_else(|| self.config.review_command.clone());
-                let cwd = match &subagent {
-                    Some(name) => subagent_worktrees_dir(&view.worktree).join(name),
-                    None => view.worktree.clone(),
-                };
                 let effect = Effect::RunExternal {
                     command,
-                    cwd,
+                    cwd: worktree,
                     env: vec![
                         ("ORCH_BASE".into(), view.base.clone()),
                         ("ORCH_MERGE_BASE".into(), data.merge_base),
@@ -1905,25 +1897,18 @@ fn landing_refusal(view: &SessionView) -> Option<String> {
     }
 }
 
-/// The Subagent name a Review of `subagent` diffs, or why it cannot be reviewed.
-/// Only worktrees directly inside the Session's `subagents/<slug>/` dir qualify.
+/// The Subagent worktree a Review of `subagent` diffs, or why it cannot be
+/// reviewed. Only worktrees directly inside the Session's Subagent worktrees
+/// dir qualify.
 fn subagent_review_name(
     view: &SessionView,
     subagent: &SubagentView,
-) -> Result<String, &'static str> {
+) -> Result<SubagentName, &'static str> {
     let path = subagent
         .worktree
         .as_ref()
         .and_then(|worktree| worktree.path.as_deref())
         .ok_or("this Subagent has no worktree of its own to review")?;
-    let path = Path::new(path);
-    let inside = path.parent() == Some(subagent_worktrees_dir(&view.worktree).as_path())
-        && !path
-            .components()
-            .any(|part| part == std::path::Component::ParentDir);
-    let name = path.file_name().and_then(|name| name.to_str());
-    match name {
-        Some(name) if inside => Ok(name.to_owned()),
-        _ => Err("this Subagent's worktree is not one the Session manages; nothing to review"),
-    }
+    SubagentName::of_worktree(&view.worktree, Path::new(path))
+        .ok_or("this Subagent's worktree is not one the Session manages; nothing to review")
 }

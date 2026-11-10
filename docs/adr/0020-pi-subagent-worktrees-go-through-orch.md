@@ -11,7 +11,7 @@ Merging back stays with the Agent: the extension still merges or applies the Sub
 - **orch's own worktree tool for pi.** orch's pi extension could offer a `subagent` tool of its own. It would duplicate the user's tool, with its agents, model fallback and merge logic, and drift from it. Rejected.
 - **Rewrite the `/tmp` paths afterwards.** orch could move or re-point the extension's worktrees once it sees them. They live in the Session's `/tmp` inside the Sandbox, are gone by `tool_execution_end`, and orch can't reach them from the Daemon. Rejected.
 - **Record base and tip in the database through the Holder socket.** `orch worktree-hook` could report them to the Daemon. That adds IPC on the hook's path, and at create time the hook doesn't know which Subagent the worktree belongs to. Rejected.
-- **Record base and tip as git refs** (chosen). `orch worktree-hook` writes `refs/orch/subagents/<slug>/<name>/base` on create and `.../head` on remove, a snapshot that includes uncommitted and untracked files. The Subagent row finds them by the `worktreePath` its outcome already carries.
+- **Record base and tip as git refs** (chosen). `orch worktree-hook` writes `refs/orch/subagents/<slug>/<name>/base` on create and `.../tip` on remove, a snapshot that includes uncommitted and untracked files. The Subagent row finds them by the `worktreePath` its outcome already carries. The branch isn't recorded: it is always `worktree-<name>`, so `subagent_diff_refs` derives it and the Subagent's Review shows it.
 
 ## Consequences
 
@@ -20,3 +20,5 @@ Merging back stays with the Agent: the extension still merges or applies the Sub
 - A branch with unmerged commits is kept as orch's `worktree-<name>` until the Session is removed, rather than renamed to `subagent-preserved/*`.
 - The refs are written from inside the Sandbox's reach (the git common dir is writable), so orch validates them as untrusted before a Review reads them. They are dropped with the Session.
 - Claude Subagent worktrees get the same refs, so their rows open the same Review.
+- If the tip can't be recorded, the worktree is still removed; `orch worktree-hook` reports the failure on stderr and the Subagent's Review then has nothing to diff.
+- The patched extension reports how merging back went beyond `merged` / `skipped`: `conflictFiles` (the unmerged paths, read before it aborts a failed merge) and `discarded` (a failed run whose worktree was discarded, or its commits kept, without a merge attempt). orch shows these as a `conflict` with its files, and `abandoned` (`SubagentMerge::Conflict { files }`, `SubagentMerge::Abandoned`).

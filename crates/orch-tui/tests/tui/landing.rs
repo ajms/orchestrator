@@ -2,6 +2,7 @@ use crossterm::event::KeyCode;
 use orch_protocol::{
     AgentStateView, CommitView, Landing, LandingMode, Reply, Request, RequestError,
 };
+use orch_tui::ReviewScope;
 use orch_tui::{Effect, Event, FileDiff, ReviewData, ReviewPurpose};
 use ratatui::style::Color;
 
@@ -219,7 +220,7 @@ fn land_works_from_the_review() {
     tui.keys("d");
     tui.send(Event::Review {
         session: id("done"),
-        subagent: None,
+        scope: ReviewScope::Session,
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(ReviewData {
             merge_base: "b".into(),

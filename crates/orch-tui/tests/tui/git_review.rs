@@ -1,3 +1,4 @@
+use orch_tui::{ReviewScope, SubagentName};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Once;
@@ -86,7 +87,7 @@ fn the_review_covers_commits_uncommitted_and_untracked_files_but_not_base_progre
         slug: "wt".into(),
         branch: "orch/work".into(),
         base: "main".into(),
-        subagent: None,
+        scope: ReviewScope::Session,
     })
     .unwrap();
     let files = review.files;
@@ -113,7 +114,7 @@ fn a_missing_base_is_an_error() {
         slug: "x".into(),
         branch: "main".into(),
         base: "no-such-branch".into(),
-        subagent: None,
+        scope: ReviewScope::Session,
     };
     assert!(load_review(&target).is_err());
 }
@@ -141,7 +142,7 @@ fn a_file_removed_in_the_worktree_is_marked_as_deleted() {
         slug: "wt".into(),
         branch: "orch/work".into(),
         base: "main".into(),
-        subagent: None,
+        scope: ReviewScope::Session,
     })
     .unwrap();
 
@@ -183,7 +184,7 @@ fn a_subagent_review_diffs_only_that_subagents_work() {
         slug: "s".into(),
         branch: "orch/s".into(),
         base: "main".into(),
-        subagent: Some("agent-a".into()),
+        scope: ReviewScope::Subagent(SubagentName::new("agent-a").unwrap()),
     })
     .unwrap();
     let paths: Vec<&str> = review.files.iter().map(|file| file.path.as_str()).collect();
@@ -195,7 +196,7 @@ fn a_subagent_review_diffs_only_that_subagents_work() {
         slug: "s".into(),
         branch: "orch/s".into(),
         base: "main".into(),
-        subagent: Some("agent-b".into()),
+        scope: ReviewScope::Subagent(SubagentName::new("agent-b").unwrap()),
     });
     assert!(missing.is_err());
 }

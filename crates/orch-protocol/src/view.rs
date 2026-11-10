@@ -290,19 +290,21 @@ impl From<&SubagentWorktree> for SubagentWorktreeView {
         Self {
             path: worktree.path.clone(),
             branch: worktree.branch.clone(),
-            merge: worktree.merge.map(SubagentMergeView::from),
+            merge: worktree.merge.clone().map(SubagentMergeView::from),
             message: worktree.message.clone(),
             preserved_branch: worktree.preserved_branch.clone(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubagentMergeView {
     Merged,
     NothingToMerge,
     NotMerged,
+    Conflict { files: Vec<String> },
+    Abandoned,
 }
 
 impl From<SubagentMerge> for SubagentMergeView {
@@ -311,6 +313,8 @@ impl From<SubagentMerge> for SubagentMergeView {
             SubagentMerge::Merged => Self::Merged,
             SubagentMerge::NothingToMerge => Self::NothingToMerge,
             SubagentMerge::NotMerged => Self::NotMerged,
+            SubagentMerge::Conflict { files } => Self::Conflict { files },
+            SubagentMerge::Abandoned => Self::Abandoned,
         }
     }
 }

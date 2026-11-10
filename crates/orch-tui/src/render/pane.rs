@@ -207,7 +207,7 @@ fn transcript(app: &App, subagent: &SubagentView, frame: &mut Frame, areas: &Are
     let header = Paragraph::new(subagent_header(subagent));
     frame.render_widget(header, areas.transcript_header());
     let body = areas.transcript_body();
-    let outcome = subagent_outcome(subagent, body.height);
+    let outcome = subagent_outcome(subagent, body);
     let footer_height = u16::try_from(outcome.len()).unwrap_or(0);
     let (body, footer) = match footer_height {
         0 => (body, None),
@@ -265,8 +265,8 @@ fn subagent_header(subagent: &SubagentView) -> Line<'static> {
 }
 
 /// The lines under a finished Subagent's transcript: why it failed, what
-/// became of its worktree, and its final text; at most a third of `height`.
-fn subagent_outcome(subagent: &SubagentView, height: u16) -> Vec<Line<'static>> {
+/// became of its worktree, and its final text; at most a third of `area`.
+fn subagent_outcome(subagent: &SubagentView, area: Rect) -> Vec<Line<'static>> {
     if !subagent.finished() {
         return Vec::new();
     }
@@ -279,6 +279,14 @@ fn subagent_outcome(subagent: &SubagentView, height: u16) -> Vec<Line<'static>> 
     }
     if let Some(worktree) = &subagent.worktree {
         lines.push(worktree_line(worktree));
+        if let Some(SubagentMergeView::Conflict { files }) = &worktree.merge
+            && !files.is_empty()
+        {
+            lines.push(Line::from(vec![
+                Span::raw("conflicts: ").dark_gray(),
+                Span::raw(files.join(", ")).red(),
+            ]));
+        }
     }
     if let Some(summary) = &subagent.summary {
         let label = "result";
@@ -297,12 +305,15 @@ fn subagent_outcome(subagent: &SubagentView, height: u16) -> Vec<Line<'static>> 
             ]));
         }
     }
-    let room = usize::from(height / 3);
+    let room = usize::from(area.height / 3);
     if lines.is_empty() || room < 2 {
         return Vec::new();
     }
     lines.truncate(room - 1);
-    lines.insert(0, Line::from("─".repeat(usize::from(u8::MAX))).dark_gray());
+    lines.insert(
+        0,
+        Line::from("─".repeat(usize::from(area.width))).dark_gray(),
+    );
     lines
 }
 
@@ -311,10 +322,12 @@ fn worktree_line(worktree: &SubagentWorktreeView) -> Line<'static> {
     if let Some(branch) = &worktree.branch {
         spans.push(Span::raw(branch.clone()));
     }
-    let merge = worktree.merge.map(|merge| match merge {
+    let merge = worktree.merge.as_ref().map(|merge| match merge {
         SubagentMergeView::Merged => Span::raw(" · merged").green(),
         SubagentMergeView::NothingToMerge => Span::raw(" · nothing to merge").dark_gray(),
         SubagentMergeView::NotMerged => Span::raw(" · not merged").red(),
+        SubagentMergeView::Conflict { .. } => Span::raw(" · conflict").red(),
+        SubagentMergeView::Abandoned => Span::raw(" · abandoned").yellow(),
     });
     spans.extend(merge);
     if let Some(kept) = &worktree.preserved_branch {

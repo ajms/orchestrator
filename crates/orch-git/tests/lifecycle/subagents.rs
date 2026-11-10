@@ -219,21 +219,24 @@ fn diff_refs_cover_a_subagents_committed_work_live_and_after_removal() {
         .unwrap();
     commit(&path, "b.txt", "b\n", "subagent work");
 
-    let (live_base, live_head) = repo
+    let live = repo
         .subagent_diff_refs(&worktree.path, "agent-1")
         .unwrap()
         .unwrap();
-    assert_eq!(live_base, base);
-    assert_eq!(show(&fixture, &live_head, "b.txt"), "b");
+    assert_eq!(live.base, base);
+    assert_eq!(live.branch, "worktree-agent-1");
+    assert_eq!(show(&fixture, &live.tip, "b.txt"), "b");
 
-    repo.remove_subagent_worktree(&worktree.path, &path)
-        .unwrap();
-    let (old_base, old_head) = repo
+    assert_eq!(
+        repo.remove_subagent_worktree(&worktree.path, &path),
+        Ok(None)
+    );
+    let old = repo
         .subagent_diff_refs(&worktree.path, "agent-1")
         .unwrap()
         .unwrap();
-    assert_eq!(old_base, base);
-    assert_eq!(show(&fixture, &old_head, "b.txt"), "b");
+    assert_eq!(old.base, base);
+    assert_eq!(show(&fixture, &old.tip, "b.txt"), "b");
 }
 
 #[test]
@@ -250,13 +253,14 @@ fn diff_refs_include_uncommitted_and_untracked_work() {
 
     repo.remove_subagent_worktree(&worktree.path, &path)
         .unwrap();
-    let (_, head) = repo
+    let tip = repo
         .subagent_diff_refs(&worktree.path, "agent-1")
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .tip;
 
-    assert_eq!(show(&fixture, &head, "tracked.txt"), "two");
-    assert_eq!(show(&fixture, &head, "new.txt"), "untracked");
+    assert_eq!(show(&fixture, &tip, "tracked.txt"), "two");
+    assert_eq!(show(&fixture, &tip, "new.txt"), "untracked");
 }
 
 #[test]
@@ -274,11 +278,12 @@ fn a_merged_subagent_branch_is_deleted_but_its_diff_refs_are_kept() {
         .unwrap();
 
     assert!(!repo.branch_exists("worktree-agent-1"));
-    let (_, head) = repo
+    let tip = repo
         .subagent_diff_refs(&worktree.path, "agent-1")
         .unwrap()
-        .unwrap();
-    assert_eq!(show(&fixture, &head, "b.txt"), "b");
+        .unwrap()
+        .tip;
+    assert_eq!(show(&fixture, &tip, "b.txt"), "b");
 }
 
 #[test]

@@ -1,3 +1,4 @@
+use orch_tui::{ReviewScope, SubagentName};
 use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
@@ -13,7 +14,7 @@ fn reviewing() -> Harness {
     tui.take_effects();
     tui.send(Event::Review {
         session: id("first"),
-        subagent: None,
+        scope: ReviewScope::Session,
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(data(vec![
             FileDiff {
@@ -52,7 +53,7 @@ fn target() -> ReviewTarget {
         slug: "first".into(),
         branch: "orch/first".into(),
         base: "main".into(),
-        subagent: None,
+        scope: ReviewScope::Session,
     }
 }
 
@@ -111,7 +112,7 @@ fn an_empty_diff_says_so() {
     tui.keys("d");
     tui.send(Event::Review {
         session: id("first"),
-        subagent: None,
+        scope: ReviewScope::Session,
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(data(Vec::new())),
     });
@@ -125,7 +126,7 @@ fn a_failed_diff_is_reported() {
     tui.keys("d");
     tui.send(Event::Review {
         session: id("first"),
-        subagent: None,
+        scope: ReviewScope::Session,
         purpose: ReviewPurpose::BuiltIn,
         result: Err(orch_git::Error::Git {
             command: "git merge-base".into(),
@@ -151,7 +152,7 @@ fn capital_d_runs_the_external_review_on_the_same_change_set() {
 
     tui.send(Event::Review {
         session: id("first"),
-        subagent: None,
+        scope: ReviewScope::Session,
         purpose: ReviewPurpose::External,
         result: Ok(data(Vec::new())),
     });
@@ -205,14 +206,14 @@ fn reviewing_subagent() -> Harness {
     assert!(tui.take_effects().contains(&Effect::LoadReview {
         session: id("first"),
         target: ReviewTarget {
-            subagent: Some("agent-a".into()),
+            scope: ReviewScope::Subagent(SubagentName::new("agent-a").unwrap()),
             ..target()
         },
         purpose: ReviewPurpose::BuiltIn,
     }));
     tui.send(Event::Review {
         session: id("first"),
-        subagent: Some("agent-a".into()),
+        scope: ReviewScope::Subagent(SubagentName::new("agent-a").unwrap()),
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(data(vec![FileDiff {
             path: "src/a.rs".into(),
@@ -228,6 +229,7 @@ fn a_subagent_review_names_the_subagent_in_its_header() {
     let mut tui = reviewing_subagent();
     let screen = tui.screen();
     assert!(screen.contains("Review of Subagent agent-a"), "{screen}");
+    assert!(screen.contains("branch worktree-agent-a"), "{screen}");
     assert!(screen.contains("src/a.rs"), "{screen}");
 }
 
@@ -252,14 +254,14 @@ fn capital_d_on_a_subagent_hands_its_base_and_head_to_the_external_tool() {
     assert!(tui.take_effects().contains(&Effect::LoadReview {
         session: id("first"),
         target: ReviewTarget {
-            subagent: Some("agent-a".into()),
+            scope: ReviewScope::Subagent(SubagentName::new("agent-a").unwrap()),
             ..target()
         },
         purpose: ReviewPurpose::External,
     }));
     tui.send(Event::Review {
         session: id("first"),
-        subagent: Some("agent-a".into()),
+        scope: ReviewScope::Subagent(SubagentName::new("agent-a").unwrap()),
         purpose: ReviewPurpose::External,
         result: Ok(data(Vec::new())),
     });
@@ -289,7 +291,7 @@ fn a_subagent_review_arriving_after_a_session_review_was_requested_keeps_its_lab
     tui.take_effects();
     tui.send(Event::Review {
         session: id("first"),
-        subagent: Some("agent-a".into()),
+        scope: ReviewScope::Subagent(SubagentName::new("agent-a").unwrap()),
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(data(vec![FileDiff {
             path: "src/a.rs".into(),
@@ -299,6 +301,7 @@ fn a_subagent_review_arriving_after_a_session_review_was_requested_keeps_its_lab
     });
     let screen = tui.screen();
     assert!(screen.contains("Review of Subagent agent-a"), "{screen}");
+    assert!(screen.contains("branch worktree-agent-a"), "{screen}");
     tui.command("land");
     assert!(!tui.screen().contains("push + PR"));
     assert!(statusline(&mut tui).contains("only Subagent agent-a"));

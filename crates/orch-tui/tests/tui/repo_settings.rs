@@ -1,3 +1,4 @@
+use orch_tui::ReviewScope;
 use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
@@ -137,7 +138,7 @@ fn the_external_review_uses_the_repos_review_command_read_at_use() {
     );
     tui.send(Event::Review {
         session: id("first"),
-        subagent: None,
+        scope: ReviewScope::Session,
         purpose: ReviewPurpose::External,
         result: Ok(ReviewData {
             files: Vec::new(),

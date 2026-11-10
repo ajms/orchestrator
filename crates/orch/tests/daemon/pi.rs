@@ -659,7 +659,7 @@ async fn a_pi_subagent_call_is_a_subagent_row_with_a_live_transcript_that_outliv
     assert!(row.duration_ms.is_some());
     let worktree = row.worktree.as_ref().unwrap();
     assert_eq!(
-        (worktree.branch.as_deref(), worktree.merge),
+        (worktree.branch.as_deref(), worktree.merge.clone()),
         (
             Some("subagent/scout-1"),
             Some(orch_protocol::SubagentMergeView::NotMerged)

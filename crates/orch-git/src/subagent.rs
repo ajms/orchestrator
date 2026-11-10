@@ -7,6 +7,24 @@ use crate::{Error, Repo};
 
 const BRANCH_PREFIX: &str = "worktree-";
 
+/// The commits bounding a Subagent's work, and the branch it ran on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentRefs {
+    /// The Session commit the Subagent worktree was created from.
+    pub base: String,
+    /// The Subagent's work: a live snapshot, or the tip recorded at removal.
+    pub tip: String,
+    /// The Subagent's branch, `worktree-<name>`. It may since have been
+    /// deleted (after merging back) or preserved by the Agent.
+    pub branch: String,
+}
+
+/// The branch a Subagent worktree named `name` is created on.
+pub fn subagent_branch(name: &str) -> String {
+    format!("{BRANCH_PREFIX}{name}")
+}
+
+/// The directory holding a Session's Subagent worktrees.
 pub fn subagent_worktrees_dir(session_worktree: &Path) -> PathBuf {
     let orchestrator = session_worktree
         .parent()
@@ -31,7 +49,7 @@ impl Repo {
             session_worktree,
             ["worktree", "add", "-q", "--no-track", "-b"],
         )
-        .arg(format!("{BRANCH_PREFIX}{name}"))
+        .arg(subagent_branch(name))
         .arg(&path)
         .arg("HEAD")
         .run()?;
@@ -43,11 +61,16 @@ impl Repo {
         Ok(path)
     }
 
+    /// Remove a Subagent worktree, first recording its tip so a Subagent
+    /// Review still works afterwards.
+    ///
+    /// Removal proceeds even when the tip cannot be recorded; that failure is
+    /// returned as `Ok(Some(error))` for the caller to report.
     pub fn remove_subagent_worktree(
         &self,
         session_worktree: &Path,
         path: &Path,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<Error>, Error> {
         let dir = resolve(&subagent_worktrees_dir(session_worktree));
         let path = resolve(path);
         let inside = path.parent() == Some(dir.as_path())
@@ -56,16 +79,17 @@ impl Repo {
             return Err(Error::NotAnOrchestratorWorktree { path });
         }
         let branch = self.worktree_branch(&path)?;
-        if let (Some(name), Ok(snapshot)) = (path.file_name(), snapshot_commit(&path)) {
-            let _ = git(session_worktree, ["update-ref"])
-                .arg(subagent_ref(
-                    session_worktree,
-                    &name.to_string_lossy(),
-                    "head",
-                ))
-                .arg(&snapshot)
-                .run();
-        }
+        let tip_error = path.file_name().and_then(|name| {
+            let tip = subagent_ref(session_worktree, &name.to_string_lossy(), "tip");
+            snapshot_commit(&path)
+                .and_then(|snapshot| {
+                    git(session_worktree, ["update-ref"])
+                        .arg(&tip)
+                        .arg(&snapshot)
+                        .run()
+                })
+                .err()
+        });
         self.remove_checkout(&path)?;
         if let Some(branch) = branch.filter(|branch| merged_into(branch, session_worktree)) {
             self.delete_branch(&branch)?;
@@ -73,7 +97,7 @@ impl Repo {
         if fs::read_dir(&dir).is_ok_and(|mut entries| entries.next().is_none()) {
             let _ = fs::remove_dir(&dir);
         }
-        Ok(())
+        Ok(tip_error)
     }
 
     pub(crate) fn remove_subagent_worktrees(&self, session_worktree: &Path) {
@@ -92,18 +116,18 @@ impl Repo {
         }
     }
 
-    /// The `(base, head)` commits bounding a subagent's work, if known.
+    /// The commits bounding a Subagent's work, and its branch, if known.
     ///
-    /// A live subagent worktree is snapshotted now (including uncommitted and
-    /// untracked files); a removed one uses the snapshot taken at removal.
-    /// The refs are written inside the Sandbox, so they are untrusted: they
-    /// are ignored unless both resolve to commits, the base is in the
-    /// Session's history and the head descends from the base.
+    /// A live Subagent worktree is snapshotted now (including uncommitted and
+    /// untracked files) for the tip; a removed one uses the tip recorded at
+    /// removal. The refs are written inside the Sandbox, so they are
+    /// untrusted: they are ignored unless both resolve to commits, the base is
+    /// in the Session's history and the tip descends from the base.
     pub fn subagent_diff_refs(
         &self,
         session_worktree: &Path,
         name: &str,
-    ) -> Result<Option<(String, String)>, Error> {
+    ) -> Result<Option<SubagentRefs>, Error> {
         validate_name(name)?;
         let commit = |reference: &str| {
             self.git(["rev-parse", "--verify", "--quiet"])
@@ -116,12 +140,12 @@ impl Repo {
             return Ok(None);
         };
         let live = subagent_worktrees_dir(session_worktree).join(name);
-        let head = if self.worktree_exists(&live) {
+        let tip = if self.worktree_exists(&live) {
             Some(snapshot_commit(&live)?)
         } else {
-            commit(&subagent_ref(session_worktree, name, "head"))
+            commit(&subagent_ref(session_worktree, name, "tip"))
         };
-        let Some(head) = head else {
+        let Some(tip) = tip else {
             return Ok(None);
         };
         let Some(session_head) = session_worktree
@@ -137,10 +161,14 @@ impl Repo {
         };
         let ancestor =
             |a: &str, b: &str| self.git(["merge-base", "--is-ancestor", a, b]).succeeds();
-        if !ancestor(&base, &session_head) || !ancestor(&base, &head) {
+        if !ancestor(&base, &session_head) || !ancestor(&base, &tip) {
             return Ok(None);
         }
-        Ok(Some((base, head)))
+        Ok(Some(SubagentRefs {
+            base,
+            tip,
+            branch: subagent_branch(name),
+        }))
     }
 
     pub(crate) fn subagent_worktrees(&self, session_worktree: &Path) -> Vec<PathBuf> {
