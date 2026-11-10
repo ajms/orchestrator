@@ -126,6 +126,7 @@ async fn event_loop(
                         let result = load_review(&target);
                         let _ = events.send(Event::Review {
                             session,
+                            scope: target.scope,
                             purpose,
                             result,
                         });

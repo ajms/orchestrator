@@ -131,6 +131,10 @@ impl AgentAdapter for Pi {
         hooks::map_hook(payload)
     }
 
+    fn worktree_request(&self, payload: &str) -> Option<crate::WorktreeRequest> {
+        hooks::worktree_request(payload)
+    }
+
     fn map_tap(&self, payload: &str) -> Result<Vec<AgentEvent>, PayloadError> {
         usage::map_tap(payload)
     }

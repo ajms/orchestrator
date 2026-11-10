@@ -1,0 +1,15 @@
+{
+  "event": "tool_execution_end",
+  "toolName": "subagent",
+  "toolCallId": "call_subagent_refused",
+  "isError": true,
+  "exitCode": 1,
+  "errorMessage": "Refused: the task asks to push, which this agent may not do",
+  "usage": {
+    "input": 0,
+    "output": 0,
+    "cost": 0,
+    "turns": 0
+  },
+  "text": "Agent failed: Refused: the task asks to push, which this agent may not do"
+}

@@ -11,7 +11,7 @@ use orch_core::SessionId;
 use orch_protocol::{
     AgentStateView, BranchLookup, CreateSession, FlagsView, FromDaemon, LookupBranch, LookupDepth,
     PhaseView, Reply, RepoSettings, Request, RequestError, ScreenSnapshot, SessionView, Size,
-    SubagentView,
+    SubagentStateView, SubagentView,
 };
 use orch_tui::{DaemonLink, Effect, Event, PaneId, RequestId, Tui, TuiConfig};
 use ratatui::Terminal;
@@ -563,7 +563,16 @@ pub fn subagent(id: &str, agent_type: &str, description: &str, done: bool) -> Su
         agent_type: agent_type.into(),
         description: description.into(),
         tool_count: 3,
-        done,
+        state: match done {
+            true => SubagentStateView::Done,
+            false => SubagentStateView::Working,
+        },
+        duration_ms: None,
+        summary: None,
+        failure: None,
+        model: None,
+        usage: None,
+        worktree: None,
     }
 }
 

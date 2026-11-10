@@ -422,7 +422,15 @@ impl Live {
                     agent_type: subagent.agent_type.clone(),
                     description: subagent.description.clone(),
                     tool_count: subagent.tool_count,
-                    done: subagent.done,
+                    state: subagent.state.into(),
+                    duration_ms: subagent
+                        .duration
+                        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)),
+                    summary: subagent.outcome.summary.clone(),
+                    failure: subagent.outcome.failure.clone(),
+                    model: subagent.outcome.model.clone(),
+                    usage: subagent.outcome.usage.as_ref().map(Into::into),
+                    worktree: subagent.outcome.worktree.as_deref().map(Into::into),
                 })
                 .collect(),
         }

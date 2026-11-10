@@ -1,5 +1,16 @@
 {
   "event": "tool_execution_end",
   "toolName": "subagent",
-  "toolCallId": "call_subagent"
+  "toolCallId": "call_subagent",
+  "isError": false,
+  "exitCode": 0,
+  "stopReason": "stop",
+  "model": "orch-scripted/scripted",
+  "usage": {
+    "input": 1200,
+    "output": 340,
+    "cost": 0.0123,
+    "turns": 3
+  },
+  "text": "Found the redirect in src/login.rs:42."
 }

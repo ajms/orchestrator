@@ -1,5 +1,8 @@
 use orch_agent::{AgentAdapter, PayloadError, Pi};
-use orch_core::{AgentEvent, ConversationId, FailureKind, SubagentId};
+use orch_core::{
+    AgentEvent, ConversationId, FailureKind, SubagentId, SubagentMerge, SubagentOutcome,
+    SubagentUsage, SubagentWorktree,
+};
 
 fn fixture(name: &str) -> String {
     let path = format!(
@@ -122,8 +125,94 @@ fn a_subagent_call_is_a_subagent_row_named_by_its_agent_and_task_until_it_ends()
                 tool: "subagent".into(),
                 subagent: None
             },
-            AgentEvent::SubagentFinished { id },
+            AgentEvent::SubagentFinished {
+                id,
+                outcome: SubagentOutcome {
+                    summary: Some("Found the redirect in src/login.rs:42.".into()),
+                    model: Some("orch-scripted/scripted".into()),
+                    usage: Some(SCRIPTED_USAGE),
+                    ..SubagentOutcome::default()
+                },
+            },
         ]
+    );
+}
+
+const SCRIPTED_USAGE: SubagentUsage = SubagentUsage {
+    input_tokens: Some(1200),
+    output_tokens: Some(340),
+    cost_usd: Some(0.0123),
+    turns: Some(3),
+};
+
+fn finished(name: &str) -> SubagentOutcome {
+    match events(name).pop() {
+        Some(AgentEvent::SubagentFinished { outcome, .. }) => outcome,
+        other => panic!("{name} did not finish a Subagent: {other:?}"),
+    }
+}
+
+#[test]
+fn a_failed_subagent_call_is_errored_with_its_reason_and_kept_worktree() {
+    assert_eq!(
+        finished("tool_execution_end_subagent_failed"),
+        SubagentOutcome {
+            errored: true,
+            summary: None,
+            failure: Some("Merge conflict merging subagent/builder-1 into the parent HEAD".into()),
+            model: Some("orch-scripted/scripted".into()),
+            usage: Some(SCRIPTED_USAGE),
+            worktree: Some(Box::new(SubagentWorktree {
+                path: Some("/tmp/pi-subagent-wt-abc123/builder".into()),
+                branch: Some("subagent/builder-1".into()),
+                merge: Some(SubagentMerge::NotMerged),
+                message: Some("conflict in src/login.rs".into()),
+                preserved_branch: Some("subagent-preserved/builder-1".into()),
+            })),
+        }
+    );
+}
+
+#[test]
+fn a_refused_subagent_call_is_errored_with_its_reason() {
+    let outcome = finished("tool_execution_end_subagent_refused");
+    assert!(outcome.errored);
+    assert_eq!(
+        outcome.failure.as_deref(),
+        Some("Refused: the task asks to push, which this agent may not do")
+    );
+    assert_eq!(outcome.worktree, None);
+}
+
+#[test]
+fn a_subagent_outcome_is_bounded_and_cleaned() {
+    let payload = serde_json::json!({
+        "event": "tool_execution_end",
+        "toolName": "subagent",
+        "toolCallId": "call_1",
+        "exitCode": 2,
+        "errorMessage": "bad\u{1b}[2J\nthing",
+        "text": "x".repeat(10_000),
+    });
+    let Some(AgentEvent::SubagentFinished { outcome, .. }) =
+        Pi::default().map_hook(&payload.to_string()).unwrap().pop()
+    else {
+        panic!("no Subagent finished");
+    };
+    assert!(outcome.errored);
+    assert_eq!(outcome.failure.as_deref(), Some("bad[2J thing"));
+    assert!(outcome.summary.unwrap().chars().count() <= 2000);
+}
+
+#[test]
+fn a_subagent_end_with_no_outcome_is_done() {
+    let payload = r#"{"event":"tool_execution_end","toolName":"subagent","toolCallId":"call_1"}"#;
+    assert_eq!(
+        Pi::default().map_hook(payload).unwrap().pop(),
+        Some(AgentEvent::SubagentFinished {
+            id: SubagentId("call_1".into()),
+            outcome: SubagentOutcome::default(),
+        })
     );
 }
 
@@ -284,4 +373,66 @@ fn a_payload_that_isnt_an_event_is_refused() {
         Pi::default().map_hook("not json"),
         Err(PayloadError(_))
     ));
+}
+
+#[test]
+fn worktree_hooks_ask_for_subagent_worktrees() {
+    use orch_agent::WorktreeRequest;
+    let pi = Pi::default();
+    assert_eq!(
+        pi.worktree_request(&fixture("worktree_create")),
+        Some(WorktreeRequest::Create {
+            name: "builder".into()
+        })
+    );
+    assert_eq!(
+        pi.worktree_request(&fixture("worktree_remove")),
+        Some(WorktreeRequest::Remove {
+            path: "/repo/.orch/worktrees/builder".into()
+        })
+    );
+    assert_eq!(pi.worktree_request(&fixture("agent_start")), None);
+    assert_eq!(pi.worktree_request("not json"), None);
+}
+
+fn merge_of(cleanup: serde_json::Value) -> Option<SubagentMerge> {
+    let payload = serde_json::json!({
+        "event": "tool_execution_end",
+        "toolName": "subagent",
+        "toolCallId": "call_1",
+        "isError": true,
+        "worktreeCleanup": cleanup,
+    });
+    let Some(AgentEvent::SubagentFinished { outcome, .. }) =
+        Pi::default().map_hook(&payload.to_string()).unwrap().pop()
+    else {
+        panic!("no Subagent finished");
+    };
+    outcome.worktree.and_then(|worktree| worktree.merge)
+}
+
+#[test]
+fn a_conflicted_merge_back_names_its_files_and_a_discarded_run_is_abandoned() {
+    let files: Vec<String> = (0..30).map(|at| format!("src/{at}.rs")).collect();
+    let conflict = merge_of(serde_json::json!({
+        "merged": false, "skipped": false, "conflictFiles": files,
+    }));
+    let Some(SubagentMerge::Conflict { files: kept }) = conflict else {
+        panic!("not a conflict: {conflict:?}");
+    };
+    assert_eq!(kept.len(), 20);
+    assert_eq!(kept[0], "src/0.rs");
+
+    assert_eq!(
+        merge_of(serde_json::json!({ "merged": false, "skipped": true, "discarded": true })),
+        Some(SubagentMerge::Abandoned)
+    );
+    assert_eq!(
+        merge_of(serde_json::json!({ "merged": false, "skipped": false, "conflictFiles": [] })),
+        Some(SubagentMerge::NotMerged)
+    );
+    assert_eq!(
+        merge_of(serde_json::json!({ "merged": false, "skipped": true })),
+        Some(SubagentMerge::NothingToMerge)
+    );
 }

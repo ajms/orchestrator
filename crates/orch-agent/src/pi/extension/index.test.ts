@@ -104,6 +104,15 @@ test("nothing is forwarded without an orch Session", async () => {
 	assert.deepEqual(await pi.payloads(), []);
 });
 
+test("session_start points subagent worktree hooks at orch only within an orch Session", () => {
+	delete process.env.ORCH_BIN;
+	new FakePi({}).emit("session_start", { reason: "startup" });
+	assert.equal(process.env.ORCH_BIN, undefined);
+	new FakePi().emit("session_start", { reason: "startup" });
+	assert.equal(process.env.ORCH_BIN, "/opt/orch");
+	delete process.env.ORCH_BIN;
+});
+
 test("each payload goes to orch hook or tap for pi and the Session", async () => {
 	const pi = new FakePi();
 	pi.emit("session_start", { reason: "startup" });
@@ -434,8 +443,32 @@ test("a subagent call names its Conversation, agent and task name, and its end n
 			agent: "scout",
 			taskName: "find the redirect",
 		},
-		{ event: "tool_execution_end", toolName: "subagent", toolCallId: "call_7" },
+		{ event: "tool_execution_end", toolName: "subagent", toolCallId: "call_7", isError: false },
 	]);
+});
+
+test("a subagent's end carries how it ended", async () => {
+	const pi = new FakePi();
+	pi.emit("session_start", { reason: "startup" });
+	pi.emit("tool_execution_end", {
+		toolCallId: "call_7",
+		toolName: "subagent",
+		result: {
+			content: [{ type: "text", text: "Agent failed: conflict" }],
+			details: { exitCode: 1, errorMessage: "conflict", messages: [], worktreeBranch: "subagent/b-1" },
+		},
+		isError: true,
+	});
+	assert.deepEqual((await pi.payloads()).at(-1), {
+		event: "tool_execution_end",
+		toolName: "subagent",
+		toolCallId: "call_7",
+		isError: true,
+		exitCode: 1,
+		errorMessage: "conflict",
+		text: "Agent failed: conflict",
+		worktreeBranch: "subagent/b-1",
+	});
 });
 
 test("a subagent's messages are written to its transcript as they come, and its result at the end", () => {

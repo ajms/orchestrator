@@ -606,7 +606,7 @@ async fn a_pi_subagent_call_is_a_subagent_row_with_a_live_transcript_that_outliv
             row.id.as_str(),
             row.agent_type.as_str(),
             row.description.as_str(),
-            row.done
+            row.finished()
         ),
         ("call_7", "scout", "find the redirect", false)
     );
@@ -645,14 +645,26 @@ async fn a_pi_subagent_call_is_a_subagent_row_with_a_live_transcript_that_outliv
     assert_eq!(client.transcripts[1].entries.len(), 1);
 
     pane.type_line(&pi_hook(
-        r#"{"event":"tool_execution_end","toolName":"subagent","toolCallId":"call_7"}"#,
+        r#"{"event":"tool_execution_end","toolName":"subagent","toolCallId":"call_7","isError":true,"exitCode":1,"errorMessage":"merge conflict","worktreeBranch":"subagent/scout-1","worktreeCleanup":{"merged":false,"skipped":false,"message":"conflict"}}"#,
     ))
     .await;
-    client
+    let view = client
         .until(&id, "the Subagent done", |view| {
-            view.subagents.iter().all(|subagent| subagent.done)
+            view.subagents.iter().all(|subagent| subagent.finished())
         })
         .await;
+    let row = &view.subagents[0];
+    assert_eq!(row.state, orch_protocol::SubagentStateView::Errored);
+    assert_eq!(row.failure.as_deref(), Some("merge conflict"));
+    assert!(row.duration_ms.is_some());
+    let worktree = row.worktree.as_ref().unwrap();
+    assert_eq!(
+        (worktree.branch.as_deref(), worktree.merge.clone()),
+        (
+            Some("subagent/scout-1"),
+            Some(orch_protocol::SubagentMergeView::NotMerged)
+        )
+    );
     client.request(Request::UnsubscribeSubagent).await.unwrap();
     client.drain().await;
     client.transcripts.clear();

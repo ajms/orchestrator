@@ -35,6 +35,15 @@ const respond: FauxResponseFactory = (context) => {
 		const task = { agent: "scout", taskName: "find the redirect", task: "Find where login redirects" };
 		return fauxAssistantMessage(fauxToolCall("subagent", task, { id: "call_subagent" }));
 	}
+	// `subagent.ts` fails a task that starts with `fail`, and refuses one that starts with `refuse`.
+	if (prompt === "subagent failed" && !answered) {
+		const task = { agent: "builder", taskName: "fix the redirect", task: "fail: fix the redirect" };
+		return fauxAssistantMessage(fauxToolCall("subagent", task, { id: "call_subagent_failed" }));
+	}
+	if (prompt === "subagent refused" && !answered) {
+		const task = { agent: "builder", taskName: "push the fix", task: "refuse: push the fix" };
+		return fauxAssistantMessage(fauxToolCall("subagent", task, { id: "call_subagent_refused" }));
+	}
 	if (prompt === "slow") return fauxAssistantMessage("still thinking ".repeat(400));
 	return fauxAssistantMessage("Done.");
 };

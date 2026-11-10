@@ -621,6 +621,42 @@ async fn the_worktree_hook_makes_and_removes_subagent_worktrees_for_a_session() 
 }
 
 #[tokio::test]
+async fn the_worktree_hook_makes_and_removes_pi_subagent_worktrees() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let worktree = repo.join(".orchestrator/worktrees/work");
+    let worktree = worktree.to_str().unwrap();
+    git(
+        &repo,
+        &["worktree", "add", "-q", "-b", "orch/work", worktree],
+    );
+    let hook = ["worktree-hook", "--worktree", worktree, "--agent", "pi"];
+    let subagent = repo.join(".orchestrator/subagents/work/builder");
+
+    let created = orch_with_input(
+        &env,
+        &hook,
+        r#"{"event":"worktree_create","name":"builder"}"#,
+    )
+    .await;
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert_eq!(stdout(&created), format!("{}\n", subagent.display()));
+    assert!(subagent.join("README.md").exists());
+
+    let removed = orch_with_input(
+        &env,
+        &hook,
+        &format!(
+            r#"{{"event":"worktree_remove","path":"{}"}}"#,
+            subagent.display()
+        ),
+    )
+    .await;
+    assert!(removed.status.success(), "{}", stderr(&removed));
+    assert!(!subagent.exists());
+}
+
+#[tokio::test]
 async fn the_worktree_hook_fails_loudly_when_it_cannot_make_the_worktree() {
     let env = Env::new();
     let repo = env.repo("app");

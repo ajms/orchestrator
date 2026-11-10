@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Forwarder, type Payload, type Spawn, spawnHook, type Tap, type Tokens } from "./forward.ts";
+import { subagentOutcome } from "./outcome.ts";
 import { UNDER_ORCH } from "./prompt.ts";
 import { SubagentTranscripts } from "./transcripts.ts";
 
@@ -87,6 +88,7 @@ export default function orch(
 		const bin = pi.getFlag("orch-bin");
 		const session = pi.getFlag("orch-session");
 		if (typeof bin !== "string" || typeof session !== "string" || !session) return;
+		process.env.ORCH_BIN = bin;
 		if (!forwarder?.serves(bin, session)) forwarder = new Forwarder(bin, session, spawn);
 		outcome = {};
 		const name = pi.getSessionName();
@@ -137,7 +139,12 @@ export default function orch(
 			return;
 		}
 		record(ctx, event.toolCallId, event.result);
-		send({ event: "tool_execution_end", toolName: event.toolName, toolCallId: event.toolCallId });
+		send({
+			event: "tool_execution_end",
+			toolName: event.toolName,
+			toolCallId: event.toolCallId,
+			...subagentOutcome(event.result, event.isError),
+		});
 	});
 	pi.on("ui_prompt_start", () => {
 		send({ event: "ui_prompt_start" });

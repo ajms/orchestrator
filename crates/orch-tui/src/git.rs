@@ -1,6 +1,6 @@
 use orch_git::{Repo, SessionName, SessionWorktree};
 
-use crate::event::{ReviewData, ReviewTarget};
+use crate::event::{ReviewData, ReviewScope, ReviewTarget};
 use crate::review::parse_unified_diff;
 
 pub fn load_review(target: &ReviewTarget) -> Result<ReviewData, orch_git::Error> {
@@ -14,6 +14,20 @@ pub fn load_review(target: &ReviewTarget) -> Result<ReviewData, orch_git::Error>
         base: target.base.clone(),
         existing_branch: false,
     };
+    if let ReviewScope::Subagent(name) = &target.scope {
+        let Some(refs) = repo.subagent_diff_refs(&target.worktree, name.as_str())? else {
+            return Err(orch_git::Error::Io {
+                context: format!("Subagent {name}"),
+                message: "no recorded base/tip to diff".into(),
+            });
+        };
+        let diff = repo.diff(&refs.base, &refs.tip)?;
+        return Ok(ReviewData {
+            merge_base: refs.base,
+            tree: refs.tip,
+            files: parse_unified_diff(&diff),
+        });
+    }
     let snapshot = repo.review_snapshot(&worktree)?;
     let diff = repo.diff(&snapshot.merge_base, &snapshot.tree)?;
     Ok(ReviewData {

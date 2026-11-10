@@ -1,5 +1,5 @@
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitStatus;
 
 use crossterm::event::Event as TermEvent;
@@ -26,6 +26,7 @@ pub enum Event {
     EditorClosed(Result<String, EditorError>),
     Review {
         session: SessionId,
+        scope: ReviewScope,
         purpose: ReviewPurpose,
         result: Result<ReviewData, orch_git::Error>,
     },
@@ -75,6 +76,64 @@ pub struct ReviewTarget {
     pub slug: String,
     pub branch: String,
     pub base: String,
+    pub scope: ReviewScope,
+}
+
+/// What a Review covers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewScope {
+    /// The Session's work against its base.
+    Session,
+    /// Only this Subagent's work: its recorded base against its tip (a live
+    /// snapshot, or the tip recorded when its Subagent worktree was removed).
+    Subagent(SubagentName),
+}
+
+/// The name of a Subagent worktree: a single path component, so it names a
+/// directory directly inside the Session's Subagent worktrees dir.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentName(String);
+
+impl SubagentName {
+    pub fn new(name: &str) -> Option<Self> {
+        let single = matches!(
+            Path::new(name).components().collect::<Vec<_>>()[..],
+            [Component::Normal(_)]
+        );
+        single.then(|| Self(name.to_owned()))
+    }
+
+    /// The name of the Subagent worktree at `path`, if it is directly inside
+    /// the Subagent worktrees dir of the Session at `session_worktree`.
+    pub(crate) fn of_worktree(session_worktree: &Path, path: &Path) -> Option<Self> {
+        let inside = path.parent()
+            == Some(orch_git::subagent_worktrees_dir(session_worktree).as_path())
+            && !path.components().any(|part| part == Component::ParentDir);
+        inside
+            .then(|| path.file_name()?.to_str())
+            .flatten()
+            .and_then(Self::new)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Where this Subagent worktree lives for the Session at `session_worktree`.
+    pub fn worktree(&self, session_worktree: &Path) -> PathBuf {
+        orch_git::subagent_worktrees_dir(session_worktree).join(&self.0)
+    }
+
+    /// The branch this Subagent worktree was created on.
+    pub fn branch(&self) -> String {
+        orch_git::subagent_branch(&self.0)
+    }
+}
+
+impl fmt::Display for SubagentName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,3 +1,4 @@
+use orch_tui::{ReviewScope, SubagentName};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Once;
@@ -86,6 +87,7 @@ fn the_review_covers_commits_uncommitted_and_untracked_files_but_not_base_progre
         slug: "wt".into(),
         branch: "orch/work".into(),
         base: "main".into(),
+        scope: ReviewScope::Session,
     })
     .unwrap();
     let files = review.files;
@@ -112,6 +114,7 @@ fn a_missing_base_is_an_error() {
         slug: "x".into(),
         branch: "main".into(),
         base: "no-such-branch".into(),
+        scope: ReviewScope::Session,
     };
     assert!(load_review(&target).is_err());
 }
@@ -139,6 +142,7 @@ fn a_file_removed_in_the_worktree_is_marked_as_deleted() {
         slug: "wt".into(),
         branch: "orch/work".into(),
         base: "main".into(),
+        scope: ReviewScope::Session,
     })
     .unwrap();
 
@@ -148,4 +152,51 @@ fn a_file_removed_in_the_worktree_is_marked_as_deleted() {
         .map(|file| (file.path.as_str(), file.deleted))
         .collect();
     assert_eq!(marks, vec![("kept.rs", false), ("old.rs", true)]);
+}
+
+#[test]
+fn a_subagent_review_diffs_only_that_subagents_work() {
+    without_user_git_identity();
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("a.rs"), "a\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-qm", "init"]);
+    let session = repo.join(".orchestrator/worktrees/s");
+    let path = session.to_str().unwrap();
+    git(&repo, &["worktree", "add", "-q", "-b", "orch/s", path]);
+    std::fs::write(session.join("session.rs"), "s\n").unwrap();
+    git(&session, &["add", "."]);
+    git(&session, &["commit", "-qm", "session work"]);
+
+    let handle = orch_git::Repo::open(&repo).unwrap();
+    let child = handle
+        .create_subagent_worktree(&session, "agent-a")
+        .unwrap();
+    std::fs::write(child.join("child.rs"), "c\n").unwrap();
+    std::fs::write(session.join("later.rs"), "l\n").unwrap();
+
+    let review = load_review(&ReviewTarget {
+        repo: repo.clone(),
+        worktree: session.clone(),
+        slug: "s".into(),
+        branch: "orch/s".into(),
+        base: "main".into(),
+        scope: ReviewScope::Subagent(SubagentName::new("agent-a").unwrap()),
+    })
+    .unwrap();
+    let paths: Vec<&str> = review.files.iter().map(|file| file.path.as_str()).collect();
+    assert_eq!(paths, vec!["child.rs"]);
+
+    let missing = load_review(&ReviewTarget {
+        repo,
+        worktree: session,
+        slug: "s".into(),
+        branch: "orch/s".into(),
+        base: "main".into(),
+        scope: ReviewScope::Subagent(SubagentName::new("agent-b").unwrap()),
+    });
+    assert!(missing.is_err());
 }

@@ -1,4 +1,6 @@
-use orch_protocol::{AgentStateView, PhaseView, PrChecksView, PrReviewView, PrView, SubagentView};
+use orch_protocol::{
+    AgentStateView, PhaseView, PrChecksView, PrReviewView, PrView, SubagentStateView, SubagentView,
+};
 use ratatui::style::Color;
 
 use crate::common::*;
@@ -197,7 +199,16 @@ fn running_subagents_are_nested_under_their_session_and_finished_ones_collapse()
         agent_type: kind.into(),
         description: description.into(),
         tool_count: tools,
-        done,
+        state: match done {
+            true => SubagentStateView::Done,
+            false => SubagentStateView::Working,
+        },
+        duration_ms: None,
+        summary: None,
+        failure: None,
+        model: None,
+        usage: None,
+        worktree: None,
     };
     let mut parent = with_agent(session("webshop", "parent"), AgentStateView::Working);
     parent.subagents = vec![

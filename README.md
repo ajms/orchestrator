@@ -80,7 +80,7 @@ A status line under the Branch field says what the name is before you create the
 
 Local checks (the Base branches, other Sessions' Branches, checked-out Branches) run on every keystroke. origin and the PR are looked up after about half a second without typing, or when you leave the field. With an open PR, the Base field shows the PR's base read-only until the Branch field changes. `Ctrl+s` is blocked while a refusal shows. While a lookup is still running it waits for it (`⋯ checking before creating`, `Esc` stops waiting), then creates the Session or shows the refusal. If the lookup itself fails, the status line says so (`⋯ couldn't look it up: …`) without blocking `Ctrl+s`. The Daemon checks everything again when it creates the Session, and its answer decides.
 
-When Claude runs a Subagent in its own worktree, `orch` creates that worktree at `.orchestrator/subagents/<slug>/<name>` on Branch `worktree-<name>`, starting from the Session's HEAD. Guards treat it as part of the Session, so the Subagent can edit there without a prompt. It is removed with the Session. A Subagent Branch with commits that were never merged into the Session is kept.
+When Claude, or pi with the [patched `subagent` extension](docs/patches/README.md), runs a Subagent in its own worktree, `orch` creates that worktree at `.orchestrator/subagents/<slug>/<name>` on Branch `worktree-<name>`, starting from the Session's HEAD. Guards treat it as part of the Session, so the Subagent can edit there without a prompt. It is removed with the Session. A Subagent Branch with commits that were never merged into the Session is kept. `orch` records where the worktree started and, when it is removed, what it held, uncommitted files included; `d` / `D` on the Subagent's row reviews just that work. Merging it into the Session stays with the Agent.
 
 When the Agent is done, press `d` to review, then run `:land` to squash onto the Base branch or open a PR. If the Branch already has an open PR, `:land` follows that one instead. With an open PR, whether the Session is PR open or Suspended or `:land` finds one on GitHub, `:land` only commits any uncommitted changes and pushes the Branch to that PR; it refuses a squash. `:land` never force-pushes: if origin has commits the Branch lacks, it refuses until you pull or rebase. Landing, a merged PR and Discarding delete the Branch along with the Worktree, except an Existing Branch, which `orch` always keeps.
 
@@ -122,6 +122,7 @@ The TUI is modal, like nvim's `:terminal`. In **Insert** mode every key except `
 | `Ctrl-w h` / `l` / `w` | Focus sidebar / pane / other |
 | `v` / `V`, then `y` | Select and yank text |
 | `d` / `D` | Built-in Review / external Review command |
+| `d` / `D` on a Subagent | Review that Subagent's worktree, from its base to its tip |
 | `o` | Review view: open the first hunk in `$EDITOR` |
 | `:` | Command line |
 

@@ -1,6 +1,6 @@
 use crossterm::event::KeyCode;
 use orch_protocol::{AgentStateView, FromDaemon, SessionView};
-use orch_tui::Event;
+use orch_tui::{Event, ReviewScope, SubagentName};
 use ratatui::style::Color;
 
 use crate::common::*;
@@ -257,4 +257,71 @@ fn a_click_on_a_subagent_in_insert_mode_drops_to_normal_mode() {
 
     assert!(statusline(&mut tui).contains("NORMAL"));
     assert!(tui.daemon().input.is_empty());
+}
+
+fn with_worktree(path: Option<&str>) -> Harness {
+    let mut view = parent([false, true, true]);
+    view.subagents[0].worktree = Some(orch_protocol::SubagentWorktreeView {
+        path: path.map(Into::into),
+        ..Default::default()
+    });
+    let mut tui = Harness::new();
+    tui.sessions(vec![view]);
+    tui.keys("J");
+    tui.take_effects();
+    tui
+}
+
+fn review_loads(tui: &mut Harness) -> Vec<orch_tui::ReviewTarget> {
+    tui.take_effects()
+        .into_iter()
+        .filter_map(|effect| match effect {
+            orch_tui::Effect::LoadReview { target, .. } => Some(target),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn d_on_a_subagent_with_its_own_worktree_reviews_only_that_subagent() {
+    let mut tui = with_worktree(Some(
+        "/home/me/webshop/.orchestrator/subagents/parent/agent-a",
+    ));
+    tui.keys("d");
+    let targets = review_loads(&mut tui);
+    assert_eq!(targets.len(), 1);
+    assert_eq!(
+        targets[0].scope,
+        ReviewScope::Subagent(SubagentName::new("agent-a").unwrap())
+    );
+    assert_eq!(
+        targets[0].worktree,
+        std::path::PathBuf::from("/home/me/webshop/.orchestrator/worktrees/parent")
+    );
+}
+
+#[test]
+fn d_on_a_subagent_without_a_usable_worktree_explains_instead_of_reviewing() {
+    for path in [
+        None,
+        Some("/elsewhere/agent-a"),
+        Some("/home/me/webshop/.orchestrator/subagents/other/agent-a"),
+        Some("/home/me/webshop/.orchestrator/subagents/parent/../parent/agent-a"),
+    ] {
+        let mut tui = with_worktree(path);
+        tui.keys("d");
+        assert!(review_loads(&mut tui).is_empty(), "{path:?}");
+        let status = statusline(&mut tui);
+        assert!(status.contains("Subagent"), "{path:?}: {status}");
+    }
+    let mut tui = family();
+    tui.keys("J");
+    tui.keys("D");
+    assert!(review_loads(&mut tui).is_empty());
+}
+
+#[test]
+fn the_subagent_hint_mentions_review() {
+    let mut tui = with_worktree(None);
+    assert!(statusline(&mut tui).contains("d review"));
 }

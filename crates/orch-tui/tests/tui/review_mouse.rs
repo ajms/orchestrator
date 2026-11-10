@@ -1,3 +1,4 @@
+use orch_tui::ReviewScope;
 use std::path::PathBuf;
 
 use base64::Engine;
@@ -47,6 +48,7 @@ fn reviewing(files: Vec<FileDiff>) -> Harness {
     tui.keys("d");
     tui.send(Event::Review {
         session: id("first"),
+        scope: ReviewScope::Session,
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(ReviewData {
             merge_base: "b45e".into(),
@@ -312,6 +314,7 @@ fn the_editor_opens_in_the_reviewed_sessions_worktree_after_the_selection_moved(
     tui.keys("j");
     tui.send(Event::Review {
         session: id("first"),
+        scope: ReviewScope::Session,
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(ReviewData {
             merge_base: "b45e".into(),

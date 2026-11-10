@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, MouseEventKind};
 use orch_protocol::{
-    AgentStateView, FromDaemon, PhaseView, Request, SessionView, SubagentTranscript,
-    TranscriptEntry,
+    AgentStateView, FromDaemon, PhaseView, Request, SessionView, SubagentMergeView,
+    SubagentStateView, SubagentTranscript, SubagentWorktreeView, TranscriptEntry,
 };
 use orch_tui::Event;
 use ratatui::style::Color;
@@ -426,7 +426,9 @@ fn the_statusline_lists_the_subagent_keys_for_the_focused_side() {
 
     let status = statusline(&mut tui);
     assert!(
-        status.contains("Enter/l focus · J/K subagents · o full results · Esc/h back · i insert"),
+        status.contains(
+            "Enter/l focus · J/K subagents · o full results · d review · Esc/h back · i insert"
+        ),
         "{status}"
     );
 
@@ -466,4 +468,71 @@ fn long_lines_wrap_inside_the_pane() {
     );
 
     assert!(shows(&mut tui, "wrapped tail"));
+}
+
+#[test]
+fn an_errored_subagent_is_marked_and_its_view_shows_how_it_ended() {
+    let mut parent = parent([false, false]);
+    let errored = &mut parent.subagents[0];
+    errored.state = SubagentStateView::Errored;
+    errored.duration_ms = Some(75_000);
+    errored.model = Some("anthropic/opus".into());
+    errored.failure = Some("merge conflict in src/login.rs".into());
+    errored.summary = Some("Fixed the redirect.".into());
+    errored.worktree = Some(SubagentWorktreeView {
+        branch: Some("subagent/explore-1".into()),
+        merge: Some(SubagentMergeView::Conflict {
+            files: vec!["src/login.rs".into(), "src/a.rs".into()],
+        }),
+        preserved_branch: Some("subagent-preserved/explore-1".into()),
+        ..SubagentWorktreeView::default()
+    });
+    let mut tui = Harness::new();
+    tui.sessions(vec![parent, session("webshop", "below")]);
+    tui.keys("J");
+
+    assert_eq!(tui.colour_of("✗"), Color::Red);
+    let shows =
+        |tui: &mut Harness, needle: &str| tui.pane_lines().iter().any(|line| line.contains(needle));
+    if !shows(&mut tui, "errored") {
+        tui.keys("J");
+    }
+    for needle in [
+        "errored",
+        "1m 15s",
+        "anthropic/opus",
+        "merge conflict in src/login.rs",
+        "subagent/explore-1 · conflict",
+        "conflicts: src/login.rs, src/a.rs",
+        "kept on subagent-preserved",
+        "result: Fixed the redirect.",
+    ] {
+        assert!(shows(&mut tui, needle), "{needle}: {:#?}", tui.pane_lines());
+    }
+}
+
+#[test]
+fn an_abandoned_subagent_run_says_so() {
+    let mut parent = parent([false, false]);
+    let errored = &mut parent.subagents[0];
+    errored.state = SubagentStateView::Errored;
+    errored.failure = Some("model attempt failed".into());
+    errored.worktree = Some(SubagentWorktreeView {
+        branch: Some("worktree-explore-1".into()),
+        merge: Some(SubagentMergeView::Abandoned),
+        ..SubagentWorktreeView::default()
+    });
+    let mut tui = Harness::new();
+    tui.sessions(vec![parent, session("webshop", "below")]);
+    tui.keys("J");
+    let shows =
+        |tui: &mut Harness, needle: &str| tui.pane_lines().iter().any(|line| line.contains(needle));
+    if !shows(&mut tui, "abandoned") {
+        tui.keys("J");
+    }
+    assert!(
+        shows(&mut tui, "worktree-explore-1 · abandoned"),
+        "{:#?}",
+        tui.pane_lines()
+    );
 }

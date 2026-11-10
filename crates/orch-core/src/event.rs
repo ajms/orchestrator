@@ -1,3 +1,5 @@
+use crate::SubagentOutcome;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct SessionId(pub String);
@@ -122,6 +124,7 @@ pub enum AgentEvent {
     },
     SubagentFinished {
         id: SubagentId,
+        outcome: SubagentOutcome,
     },
     GuardCheck {
         tool: String,

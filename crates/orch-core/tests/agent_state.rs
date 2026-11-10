@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use orch_core::{
     AgentEvent, AgentState, ConversationId, FailureKind, Observation, PermissionMode, Phase,
-    SessionStatus, SubagentId, UsageSample,
+    SessionStatus, SubagentId, SubagentOutcome, UsageSample,
 };
 
 #[test]
@@ -124,6 +124,7 @@ fn bookkeeping_events_keep_the_agent_state() {
         AgentEvent::UsageSample(UsageSample::default()),
         AgentEvent::SubagentFinished {
             id: SubagentId("a1".into()),
+            outcome: SubagentOutcome::default(),
         },
         AgentEvent::GuardCheck {
             tool: "Bash".into(),

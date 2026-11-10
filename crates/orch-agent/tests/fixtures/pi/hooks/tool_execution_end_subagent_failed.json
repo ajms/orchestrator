@@ -1,0 +1,25 @@
+{
+  "event": "tool_execution_end",
+  "toolName": "subagent",
+  "toolCallId": "call_subagent_failed",
+  "isError": true,
+  "exitCode": 1,
+  "stopReason": "stop",
+  "errorMessage": "Merge conflict merging subagent/builder-1 into the parent HEAD",
+  "model": "orch-scripted/scripted",
+  "usage": {
+    "input": 1200,
+    "output": 340,
+    "cost": 0.0123,
+    "turns": 3
+  },
+  "text": "Agent failed: Merge conflict merging subagent/builder-1 into the parent HEAD",
+  "worktreePath": "/tmp/pi-subagent-wt-abc123/builder",
+  "worktreeBranch": "subagent/builder-1",
+  "worktreeCleanup": {
+    "merged": false,
+    "skipped": false,
+    "message": "conflict in src/login.rs",
+    "preservedBranch": "subagent-preserved/builder-1"
+  }
+}
