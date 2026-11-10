@@ -165,9 +165,10 @@ fn validate_name(name: &str) -> Result<(), Error> {
         && !name.starts_with('.')
         && !name.ends_with(".lock")
         && !name.contains("..")
+        && !name.contains("@{")
         && !name
             .chars()
-            .any(|c| c.is_control() || " ~^:?*[\\".contains(c) || c == '@' && name.contains("@{"));
+            .any(|c| c.is_control() || " ~^:?*[\\".contains(c));
     if !valid_ref {
         return Err(Error::InvalidSubagentWorktreeName { name: name.into() });
     }

@@ -26,6 +26,7 @@ pub enum Event {
     EditorClosed(Result<String, EditorError>),
     Review {
         session: SessionId,
+        subagent: Option<String>,
         purpose: ReviewPurpose,
         result: Result<ReviewData, orch_git::Error>,
     },

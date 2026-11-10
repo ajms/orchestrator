@@ -219,6 +219,7 @@ fn land_works_from_the_review() {
     tui.keys("d");
     tui.send(Event::Review {
         session: id("done"),
+        subagent: None,
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(ReviewData {
             merge_base: "b".into(),

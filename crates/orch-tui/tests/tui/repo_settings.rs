@@ -137,6 +137,7 @@ fn the_external_review_uses_the_repos_review_command_read_at_use() {
     );
     tui.send(Event::Review {
         session: id("first"),
+        subagent: None,
         purpose: ReviewPurpose::External,
         result: Ok(ReviewData {
             files: Vec::new(),
