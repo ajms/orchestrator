@@ -1,0 +1,165 @@
+diff --git a/index.ts b/index.ts
+index 341b4b7..b38783e 100644
+--- a/index.ts
++++ b/index.ts
+@@ -23,6 +23,7 @@ import {
+ 	createWorktree,
+ 	findRepoRoot,
+ 	mergeAndCleanup,
++	orchRemoveWorktree,
+ 	sweepOrphanedSubagentArtifacts,
+ 	preserveBranch,
+ 	preservedBranchHint,
+@@ -404,6 +405,18 @@ async function discardWorktreeAttempt(
+ 	reason: string,
+ ): Promise<WorktreeCleanupResult> {
+ 	const messages = [reason];
++	if (handle.orch) {
++		const err = await orchRemoveWorktree(handle.orch, handle.worktreePath);
++		if (err) messages.push(err);
++		const headRes = await runGitForDiscard(handle.parentRepoRoot, ["rev-parse", handle.branchName]);
++		const hasCommits = headRes.code === 0 && headRes.stdout.trim() !== handle.baseSha;
++		const preservedBranch = hasCommits ? handle.branchName : undefined;
++		if (preservedBranch) {
++			messages[0] = reason.replace("Discarded worktree", "Removed worktree");
++			messages.push(`Commits kept as ${preservedBranch} until the orch Session is removed.`);
++		}
++		return { merged: false, skipped: true, message: messages.join(" "), preservedBranch };
++	}
+ 	const rmRes = await runGitForDiscard(handle.parentRepoRoot, [
+ 		"worktree",
+ 		"remove",
+diff --git a/worktree.ts b/worktree.ts
+index b0e072f..bee4129 100644
+--- a/worktree.ts
++++ b/worktree.ts
+@@ -27,6 +27,65 @@ export interface WorktreeHandle {
+ 	branchName: string;
+ 	/** Sha the worktree branch started from (the parent's HEAD at create time). */
+ 	baseSha: string;
++	/** Set when orch created the worktree; it removes it through the same hook. */
++	orch?: OrchHook;
++}
++
++/** How to reach `orch worktree-hook` for a worktree orch owns. */
++export interface OrchHook {
++	bin: string;
++	sessionWorktree: string;
++}
++
++function realpathOrSelf(p: string): string {
++	try {
++		return fs.realpathSync(p);
++	} catch {
++		return p;
++	}
++}
++
++/**
++ * When pi runs in an orch Session (ORCH_BIN and ORCH_WORKTREE set) from the
++ * Session's Worktree, orch makes and removes Subagent worktrees so they live
++ * inside the Session's Sandbox and show up in orch's per-Subagent Review.
++ */
++export function orchHookFor(repoRoot: string): OrchHook | undefined {
++	const bin = process.env.ORCH_BIN;
++	const sessionWorktree = process.env.ORCH_WORKTREE;
++	if (!bin || !sessionWorktree) return undefined;
++	if (realpathOrSelf(repoRoot) !== realpathOrSelf(sessionWorktree)) return undefined;
++	return { bin, sessionWorktree };
++}
++
++function orchHookArgs(hook: OrchHook): string[] {
++	return ["worktree-hook", "--agent", "pi", "--worktree", hook.sessionWorktree];
++}
++
++function runOrchHook(hook: OrchHook, payload: object): Promise<ExecResult> {
++	return new Promise((resolve) => {
++		const proc = spawn(hook.bin, orchHookArgs(hook), { stdio: ["pipe", "pipe", "pipe"] });
++		let stdout = "";
++		let stderr = "";
++		proc.stdout.on("data", (d) => {
++			stdout += d.toString();
++		});
++		proc.stderr.on("data", (d) => {
++			stderr += d.toString();
++		});
++		proc.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
++		proc.on("error", (err) => resolve({ code: 1, stdout, stderr: stderr + String(err) }));
++		proc.stdin.on("error", () => {});
++		proc.stdin.end(JSON.stringify(payload));
++	});
++}
++
++/** Ask orch to remove one of its worktrees; returns an error message or undefined. */
++export async function orchRemoveWorktree(hook: OrchHook, worktreePath: string): Promise<string | undefined> {
++	const r = await runOrchHook(hook, { event: "worktree_remove", path: worktreePath });
++	return r.code === 0
++		? undefined
++		: `orch worktree-hook failed to remove ${worktreePath} (exit ${r.code}): ${r.stderr.trim() || r.stdout.trim()}`;
+ }
+ 
+ export interface WorktreeCleanupResult {
+@@ -108,6 +167,14 @@ const activeWorktrees = new Set<WorktreeHandle>();
+ 
+ /** Best-effort synchronous teardown — must be safe to call from signal/exit handlers. */
+ function cleanupHandleSync(h: WorktreeHandle): void {
++	if (h.orch) {
++		// orch owns the directory and its refs: never rm -rf it ourselves.
++		spawnSync(h.orch.bin, orchHookArgs(h.orch), {
++			input: JSON.stringify({ event: "worktree_remove", path: h.worktreePath }),
++			stdio: ["pipe", "ignore", "ignore"],
++		});
++		return;
++	}
+ 	const opts = { cwd: h.parentRepoRoot, stdio: "ignore" as const };
+ 	// Try the polite path first.
+ 	spawnSync("git", ["worktree", "remove", "--force", h.worktreePath], opts);
+@@ -292,6 +359,27 @@ export async function createWorktree(parentCwd: string, agentName: string): Prom
+ 	const safeAgent = agentName.replace(/[^\w.-]+/g, "_");
+ 	const rand = Math.random().toString(36).slice(2, 8);
+ 	const stamp = `${Date.now().toString(36)}-${rand}`;
++	const orch = orchHookFor(repoRoot);
++	if (orch) {
++		const r = await runOrchHook(orch, { event: "worktree_create", name: `${safeAgent}-${stamp}` });
++		const worktreePath = r.stdout.trim();
++		if (r.code !== 0 || !worktreePath) {
++			throw new Error(
++				`orch worktree-hook failed to create a worktree (exit ${r.code}): ${r.stderr.trim() || r.stdout.trim()}`,
++			);
++		}
++		const handle: WorktreeHandle = {
++			parentRepoRoot: repoRoot,
++			worktreePath,
++			branchName: await git(worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]),
++			baseSha: await git(worktreePath, ["rev-parse", "HEAD"]),
++			orch,
++		};
++		registerExitHandlers();
++		activeWorktrees.add(handle);
++		return handle;
++	}
++
+ 	const branchName = `subagent/${safeAgent}-${stamp}`;
+ 	const wtParent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-wt-"));
+ 	const worktreePath = path.join(wtParent, safeAgent);
+@@ -451,6 +539,20 @@ export async function mergeAndCleanup(
+ 			messages.push(`Merge error: ${(err as Error).message}`);
+ 		}
+ 
++		if (handle.orch) {
++			// orch removes the worktree, keeps its branch while it holds unmerged
++			// commits, and records the tip for the per-Subagent Review.
++			const err = await orchRemoveWorktree(handle.orch, worktreePath);
++			if (err) messages.push(err);
++			let preservedBranch: string | undefined;
++			if (hasCommits && !merged) {
++				preservedBranch = branchName;
++				messages.push(`Commits kept as ${branchName} until the orch Session is removed.`);
++			}
++			activeWorktrees.delete(handle);
++			return { merged, skipped, message: messages.join(" "), preservedBranch };
++		}
++
+ 		// Always remove the worktree. If git's own command fails (locked file,
+ 		// filesystem race, etc.), fall back to nuking the directory and
+ 		// running `worktree prune` so admin records still get reconciled.
