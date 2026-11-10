@@ -259,7 +259,7 @@ fn capital_d_on_a_subagent_hands_its_base_and_head_to_the_external_tool() {
     }));
     tui.send(Event::Review {
         session: id("first"),
-        subagent: None,
+        subagent: Some("agent-a".into()),
         purpose: ReviewPurpose::External,
         result: Ok(data(Vec::new())),
     });
