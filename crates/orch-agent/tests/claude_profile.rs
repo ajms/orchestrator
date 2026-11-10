@@ -217,6 +217,55 @@ fn a_rebuild_keeps_only_the_config_orch_owns() {
 }
 
 #[test]
+fn the_users_mcp_servers_reach_the_profile() {
+    let home = Home::new();
+    let servers = json!({ "mattermost": { "command": "mm-mcp" } });
+    let user_config = json!({
+        "mcpServers": servers,
+        "projects": { "/a": { "mcpServers": { "project": {} } } },
+    });
+    home.seed(&home.path().join(".claude.json"), &user_config.to_string());
+    home.prepare();
+    assert_eq!(home.config()["mcpServers"], servers);
+    home.render("/work/tree");
+    let config = home.config();
+    assert_eq!(config["mcpServers"], servers);
+    assert!(config["projects"]["/a"].is_null());
+}
+
+#[test]
+fn the_mcp_servers_come_from_a_custom_config_dir() {
+    let home = Home::new();
+    let custom = home.path().join("custom");
+    let servers = json!({ "asana": { "url": "https://asana" } });
+    home.seed(
+        &custom.join(".claude.json"),
+        &json!({ "mcpServers": servers }).to_string(),
+    );
+    home.seed(
+        &home.path().join(".claude.json"),
+        &json!({ "mcpServers": { "wrong": {} } }).to_string(),
+    );
+    let root = home.path().to_string_lossy().into_owned();
+    let dir = custom.to_string_lossy().into_owned();
+    let lookup = move |key: &str| match key {
+        "HOME" => Some(root.clone()),
+        "CLAUDE_CONFIG_DIR" => Some(dir.clone()),
+        _ => None,
+    };
+    ClaudeCode::default().prepare(&lookup).unwrap();
+    assert_eq!(home.config()["mcpServers"], servers);
+}
+
+#[test]
+fn a_malformed_user_config_carries_no_mcp_servers() {
+    let home = Home::new();
+    home.seed(&home.path().join(".claude.json"), "{ not json");
+    home.prepare();
+    assert!(home.config()["mcpServers"].is_null());
+}
+
+#[test]
 fn a_malformed_config_never_stops_a_launch() {
     let home = Home::new();
     home.prepare();
