@@ -4,7 +4,7 @@ use crate::flags::{Attention, ChecksState, Effect, Flags, PrState, PrStatus, Rev
 use crate::gate::{DiscardPlan, GateRefusal, agent_settled};
 use crate::{
     AgentEvent, AgentState, ConversationId, InvalidTransition, Observation, PermissionMode, Phase,
-    PhaseEvent, Subagent, SubagentId, UsageSample,
+    PhaseEvent, Subagent, SubagentId, SubagentOutcome, SubagentState, UsageSample,
 };
 
 type PrCondition = fn(&PrStatus) -> bool;
@@ -151,7 +151,7 @@ impl SessionStatus {
         }
 
         if let Observation::Agent(event) = &observation {
-            self.record(event);
+            self.record(event, at);
         }
 
         let before = self.agent_state;
@@ -299,7 +299,7 @@ impl SessionStatus {
         agent_settled(self.agent_state)
     }
 
-    fn record(&mut self, event: &AgentEvent) {
+    fn record(&mut self, event: &AgentEvent, at: Instant) {
         match event {
             AgentEvent::ModeChanged { mode } => self.permission_mode = Some(*mode),
             AgentEvent::ConversationChanged { id } => self.conversation = Some(id.clone()),
@@ -309,13 +309,21 @@ impl SessionStatus {
                 agent_type,
                 description,
             } => match self.subagent_mut(id) {
-                Some(resumed) => resumed.done = false,
+                Some(resumed) => {
+                    resumed.state = SubagentState::Working;
+                    resumed.started_at = Some(at);
+                    resumed.duration = None;
+                    resumed.outcome = SubagentOutcome::default();
+                }
                 None => self.subagents.push(Subagent {
                     id: id.clone(),
                     agent_type: agent_type.clone(),
                     description: description.clone(),
                     tool_count: 0,
-                    done: false,
+                    state: SubagentState::Working,
+                    started_at: Some(at),
+                    duration: None,
+                    outcome: SubagentOutcome::default(),
                 }),
             },
             AgentEvent::ToolStarted {
@@ -325,9 +333,16 @@ impl SessionStatus {
                     subagent.tool_count += 1;
                 }
             }
-            AgentEvent::SubagentFinished { id } => {
+            AgentEvent::SubagentFinished { id, outcome } => {
                 if let Some(subagent) = self.subagent_mut(id) {
-                    subagent.done = true;
+                    subagent.state = match outcome.errored {
+                        true => SubagentState::Errored,
+                        false => SubagentState::Done,
+                    };
+                    subagent.duration = subagent
+                        .started_at
+                        .map(|started| at.saturating_duration_since(started));
+                    subagent.outcome = outcome.clone();
                 }
             }
             _ => {}

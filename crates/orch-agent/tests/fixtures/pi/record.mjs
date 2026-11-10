@@ -158,6 +158,11 @@ const transcript = readFileSync(
 	"utf8",
 );
 
+for (const variant of ["failed", "refused"]) {
+	const ended = await captured(() => pi.prompt(`subagent ${variant}`));
+	keep(`tool_execution_end_subagent_${variant}`, ended, "tool_execution_end", (payload) => payload.toolName === "subagent");
+}
+
 const question = await captured(() => pi.prompt("question"));
 keep("tool_call_question", question, "tool_call");
 keep("ui_prompt_start_select", question, "ui_prompt_start");

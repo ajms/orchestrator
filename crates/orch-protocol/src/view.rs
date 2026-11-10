@@ -209,11 +209,55 @@ pub enum GuardKindView {
     Issue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SubagentView {
     pub id: String,
     pub agent_type: String,
     pub description: String,
     pub tool_count: u32,
-    pub done: bool,
+    pub state: SubagentStateView,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub failure: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub usage: Option<SubagentUsageView>,
+    #[serde(default)]
+    pub worktree: Option<SubagentWorktreeView>,
+}
+
+impl SubagentView {
+    pub fn finished(&self) -> bool {
+        self.state != SubagentStateView::Working
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentStateView {
+    Working,
+    Done,
+    Errored,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SubagentUsageView {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cost_usd: Option<f64>,
+    pub turns: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentWorktreeView {
+    pub path: Option<String>,
+    pub branch: Option<String>,
+    pub merged: Option<bool>,
+    pub skipped: Option<bool>,
+    pub message: Option<String>,
+    pub preserved_branch: Option<String>,
 }

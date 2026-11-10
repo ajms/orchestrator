@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use orch_core::SessionId;
-use orch_protocol::{PrChecksView, PrReviewView, ReconcileReport, SessionView, SubagentView};
+use orch_protocol::{
+    PrChecksView, PrReviewView, ReconcileReport, SessionView, SubagentStateView, SubagentView,
+};
 
 use crate::preparing::{Preparing, PreparingId};
 use crate::sessions::{Sessions, needs_input};
@@ -312,13 +314,13 @@ fn subagent_rows(view: &SessionView, expanded: bool) -> Vec<Row<'_>> {
     rows.extend(
         view.subagents
             .iter()
-            .filter(|subagent| !subagent.done)
+            .filter(|subagent| !collapses(subagent))
             .map(|subagent| Row::Subagent(view, subagent)),
     );
     let done = view
         .subagents
         .iter()
-        .filter(|subagent| subagent.done)
+        .filter(|subagent| collapses(subagent))
         .count();
     if done > 0 {
         rows.push(Row::SubagentsDone(view, done));
@@ -327,7 +329,7 @@ fn subagent_rows(view: &SessionView, expanded: bool) -> Vec<Row<'_>> {
         rows.extend(
             view.subagents
                 .iter()
-                .filter(|subagent| subagent.done)
+                .filter(|subagent| collapses(subagent))
                 .map(|subagent| Row::Subagent(view, subagent)),
         );
     }
@@ -390,4 +392,10 @@ fn wrap(flags: Vec<Flag>, width: usize) -> Vec<Vec<Flag>> {
         lines.push(current);
     }
     lines
+}
+
+/// Done Subagents fold into the "n done" row; running and errored ones stay
+/// in view, so a failure is seen without unfolding.
+pub(crate) fn collapses(subagent: &SubagentView) -> bool {
+    subagent.state == SubagentStateView::Done
 }

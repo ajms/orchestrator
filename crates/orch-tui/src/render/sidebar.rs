@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::time::Instant;
 
-use orch_protocol::{AgentStateView, PrChecksView, PrReviewView, SessionView, SubagentView};
+use orch_protocol::{
+    AgentStateView, PrChecksView, PrReviewView, SessionView, SubagentStateView, SubagentView,
+};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -159,18 +161,16 @@ fn subagent_line(subagent: &SubagentView, width: usize) -> Line<'static> {
         "{}: {} · {} tools",
         subagent.agent_type, subagent.description, subagent.tool_count
     );
-    let marker = match subagent.done {
-        true => "      ✓ ",
-        false => "    ↳ ",
+    let marker = match subagent.state {
+        SubagentStateView::Working => Span::raw("    ↳ ").dark_gray(),
+        SubagentStateView::Done => Span::raw("      ✓ ").dark_gray(),
+        SubagentStateView::Errored => Span::raw("      ✗ ").red(),
     };
-    let room = width.saturating_sub(marker.chars().count()).max(1);
-    let line = Line::from(vec![
-        Span::raw(marker).dark_gray(),
-        Span::raw(truncate(&text, room)),
-    ]);
-    match subagent.done {
-        true => line.dark_gray(),
-        false => line,
+    let room = width.saturating_sub(marker.width()).max(1);
+    let text = Span::raw(truncate(&text, room));
+    match subagent.state {
+        SubagentStateView::Working => Line::from(vec![marker, text]),
+        _ => Line::from(vec![marker, text.dark_gray()]),
     }
 }
 
