@@ -1,6 +1,6 @@
 use crossterm::event::KeyCode;
 use orch_protocol::{AgentStateView, FromDaemon, SessionView};
-use orch_tui::Event;
+use orch_tui::{Event, ReviewScope, SubagentName};
 use ratatui::style::Color;
 
 use crate::common::*;
@@ -290,7 +290,10 @@ fn d_on_a_subagent_with_its_own_worktree_reviews_only_that_subagent() {
     tui.keys("d");
     let targets = review_loads(&mut tui);
     assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0].subagent.as_deref(), Some("agent-a"));
+    assert_eq!(
+        targets[0].scope,
+        ReviewScope::Subagent(SubagentName::new("agent-a").unwrap())
+    );
     assert_eq!(
         targets[0].worktree,
         std::path::PathBuf::from("/home/me/webshop/.orchestrator/worktrees/parent")

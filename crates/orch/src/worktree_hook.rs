@@ -23,7 +23,14 @@ pub fn run(worktree: &Path, agent: &str) -> ExitCode {
         WorktreeRequest::Create { name } => repo
             .create_subagent_worktree(worktree, &name)
             .map(|path| println!("{}", path.display())),
-        WorktreeRequest::Remove { path } => repo.remove_subagent_worktree(worktree, &path),
+        WorktreeRequest::Remove { path } => {
+            repo.remove_subagent_worktree(worktree, &path)
+                .map(|tip_error| {
+                    if let Some(err) = tip_error {
+                        eprintln!("orch worktree-hook: Subagent tip not recorded: {err}");
+                    }
+                })
+        }
     });
     match done {
         Ok(()) => ExitCode::SUCCESS,
