@@ -426,7 +426,9 @@ fn the_statusline_lists_the_subagent_keys_for_the_focused_side() {
 
     let status = statusline(&mut tui);
     assert!(
-        status.contains("Enter/l focus · J/K subagents · o full results · Esc/h back · i insert"),
+        status.contains(
+            "Enter/l focus · J/K subagents · o full results · d review · Esc/h back · i insert"
+        ),
         "{status}"
     );
 

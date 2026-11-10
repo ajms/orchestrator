@@ -51,6 +51,7 @@ fn target() -> ReviewTarget {
         slug: "first".into(),
         branch: "orch/first".into(),
         base: "main".into(),
+        subagent: None,
     }
 }
 
@@ -178,5 +179,95 @@ fn the_default_external_review_diffs_the_merge_base_against_the_snapshot() {
     assert_eq!(
         TuiConfig::default().review_command,
         r#"git -p diff "$ORCH_MERGE_BASE" "$ORCH_REVIEW_TREE""#
+    );
+}
+
+fn subagent_session() -> orch_protocol::SessionView {
+    let mut view = session("webshop", "first");
+    let mut child = subagent("a", "Explore", "find callers", false);
+    child.worktree = Some(orch_protocol::SubagentWorktreeView {
+        path: Some("/home/me/webshop/.orchestrator/subagents/first/agent-a".into()),
+        ..Default::default()
+    });
+    view.subagents = vec![child];
+    view
+}
+
+fn reviewing_subagent() -> Harness {
+    let mut tui = Harness::new();
+    tui.sessions(vec![subagent_session()]);
+    tui.keys("J");
+    tui.keys("d");
+    assert!(tui.take_effects().contains(&Effect::LoadReview {
+        session: id("first"),
+        target: ReviewTarget {
+            subagent: Some("agent-a".into()),
+            ..target()
+        },
+        purpose: ReviewPurpose::BuiltIn,
+    }));
+    tui.send(Event::Review {
+        session: id("first"),
+        purpose: ReviewPurpose::BuiltIn,
+        result: Ok(data(vec![FileDiff {
+            path: "src/a.rs".into(),
+            lines: vec!["@@ -0,0 +1 @@".into(), "+a".into()],
+            deleted: false,
+        }])),
+    });
+    tui
+}
+
+#[test]
+fn a_subagent_review_names_the_subagent_in_its_header() {
+    let mut tui = reviewing_subagent();
+    let screen = tui.screen();
+    assert!(screen.contains("Review of Subagent agent-a"), "{screen}");
+    assert!(screen.contains("src/a.rs"), "{screen}");
+}
+
+#[test]
+fn landing_cannot_start_from_a_subagent_review() {
+    let mut tui = reviewing_subagent();
+    tui.take_effects();
+    tui.command("land");
+    assert!(!tui.screen().contains("push + PR"));
+    assert!(statusline(&mut tui).contains("only Subagent agent-a"));
+}
+
+#[test]
+fn capital_d_on_a_subagent_hands_its_base_and_head_to_the_external_tool() {
+    let mut tui = Harness::with_config(TuiConfig {
+        review_command: "delta-review".into(),
+        ..TuiConfig::default()
+    });
+    tui.sessions(vec![subagent_session()]);
+    tui.keys("J");
+    tui.keys("D");
+    assert!(tui.take_effects().contains(&Effect::LoadReview {
+        session: id("first"),
+        target: ReviewTarget {
+            subagent: Some("agent-a".into()),
+            ..target()
+        },
+        purpose: ReviewPurpose::External,
+    }));
+    tui.send(Event::Review {
+        session: id("first"),
+        purpose: ReviewPurpose::External,
+        result: Ok(data(Vec::new())),
+    });
+    let effects = tui.take_effects();
+    assert!(
+        effects.contains(&Effect::RunExternal {
+            command: "delta-review".into(),
+            cwd: PathBuf::from("/home/me/webshop/.orchestrator/subagents/first/agent-a"),
+            env: vec![
+                ("ORCH_BASE".into(), "main".into()),
+                ("ORCH_MERGE_BASE".into(), "b45e".into()),
+                ("ORCH_REVIEW_TREE".into(), "7ree".into()),
+            ],
+        }),
+        "{effects:?}"
     );
 }

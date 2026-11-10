@@ -37,7 +37,8 @@ fn mode_line(app: &App) -> Line<'static> {
         (Mode::Visual(_), None) => "h/j/k/l extend · y yank · Esc cancel".into(),
         (Mode::Normal, None) if app.on_subagent() => match app.focus {
             Focus::Sidebar => {
-                "Enter/l focus · J/K subagents · o full results · Esc/h back · i insert".into()
+                "Enter/l focus · J/K subagents · o full results · d review · Esc/h back · i insert"
+                    .into()
             }
             Focus::Pane => {
                 "j/k Ctrl-d/u gg/G scroll · o full results · Esc/h back · i insert".into()
