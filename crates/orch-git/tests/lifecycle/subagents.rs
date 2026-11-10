@@ -199,3 +199,134 @@ fn repairing_a_moved_sessions_worktree_repairs_its_subagent_worktrees() {
         "worktree-agent-1"
     );
 }
+
+fn show(fixture: &Fixture, oid: &str, file: &str) -> String {
+    git(&fixture.root, &["show", &format!("{oid}:{file}")])
+}
+
+fn has_ref(fixture: &Fixture, name: &str) -> bool {
+    !git(&fixture.root, &["for-each-ref", name]).is_empty()
+}
+
+#[test]
+fn diff_refs_cover_a_subagents_committed_work_live_and_after_removal() {
+    let fixture = Fixture::new();
+    let worktree = fixture.session("work");
+    let repo = fixture.repo();
+    let base = rev(&worktree.path, "HEAD");
+    let path = repo
+        .create_subagent_worktree(&worktree.path, "agent-1")
+        .unwrap();
+    commit(&path, "b.txt", "b\n", "subagent work");
+
+    let (live_base, live_head) = repo
+        .subagent_diff_refs(&worktree.path, "agent-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(live_base, base);
+    assert_eq!(show(&fixture, &live_head, "b.txt"), "b");
+
+    repo.remove_subagent_worktree(&worktree.path, &path)
+        .unwrap();
+    let (old_base, old_head) = repo
+        .subagent_diff_refs(&worktree.path, "agent-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(old_base, base);
+    assert_eq!(show(&fixture, &old_head, "b.txt"), "b");
+}
+
+#[test]
+fn diff_refs_include_uncommitted_and_untracked_work() {
+    let fixture = Fixture::new();
+    let worktree = fixture.session("work");
+    let repo = fixture.repo();
+    let path = repo
+        .create_subagent_worktree(&worktree.path, "agent-1")
+        .unwrap();
+    commit(&path, "tracked.txt", "one\n", "subagent work");
+    write(&path, "tracked.txt", "two\n");
+    write(&path, "new.txt", "untracked\n");
+
+    repo.remove_subagent_worktree(&worktree.path, &path)
+        .unwrap();
+    let (_, head) = repo
+        .subagent_diff_refs(&worktree.path, "agent-1")
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(show(&fixture, &head, "tracked.txt"), "two");
+    assert_eq!(show(&fixture, &head, "new.txt"), "untracked");
+}
+
+#[test]
+fn a_merged_subagent_branch_is_deleted_but_its_diff_refs_are_kept() {
+    let fixture = Fixture::new();
+    let worktree = fixture.session("work");
+    let repo = fixture.repo();
+    let path = repo
+        .create_subagent_worktree(&worktree.path, "agent-1")
+        .unwrap();
+    commit(&path, "b.txt", "b\n", "subagent work");
+    git(&worktree.path, &["merge", "--ff-only", "worktree-agent-1"]);
+
+    repo.remove_subagent_worktree(&worktree.path, &path)
+        .unwrap();
+
+    assert!(!repo.branch_exists("worktree-agent-1"));
+    let (_, head) = repo
+        .subagent_diff_refs(&worktree.path, "agent-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(show(&fixture, &head, "b.txt"), "b");
+}
+
+#[test]
+fn removing_a_session_drops_its_subagent_refs() {
+    let fixture = Fixture::new();
+    let worktree = fixture.session("work");
+    let other = fixture.session("work2");
+    let repo = fixture.repo();
+    repo.create_subagent_worktree(&worktree.path, "agent-1")
+        .unwrap();
+    repo.create_subagent_worktree(&other.path, "agent-2")
+        .unwrap();
+
+    repo.remove_session_worktree(&worktree, None).unwrap();
+
+    assert!(!has_ref(&fixture, "refs/orch/subagents/work/"));
+    assert!(has_ref(&fixture, "refs/orch/subagents/work2/"));
+}
+
+#[test]
+fn forged_or_garbage_subagent_refs_are_ignored() {
+    let fixture = Fixture::new();
+    let worktree = fixture.session("work");
+    let repo = fixture.repo();
+    let path = repo
+        .create_subagent_worktree(&worktree.path, "agent-1")
+        .unwrap();
+    repo.remove_subagent_worktree(&worktree.path, &path)
+        .unwrap();
+    let tree = git(&fixture.root, &["rev-parse", "HEAD^{tree}"]);
+    let orphan = git(&fixture.root, &["commit-tree", &tree, "-m", "forged"]);
+
+    git(
+        &fixture.root,
+        &[
+            "update-ref",
+            "refs/orch/subagents/work/agent-1/base",
+            &orphan,
+        ],
+    );
+    assert_eq!(repo.subagent_diff_refs(&worktree.path, "agent-1"), Ok(None));
+
+    git(
+        &fixture.root,
+        &["update-ref", "refs/orch/subagents/work/agent-1/base", &tree],
+    );
+    assert_eq!(repo.subagent_diff_refs(&worktree.path, "agent-1"), Ok(None));
+
+    assert_eq!(repo.subagent_diff_refs(&worktree.path, "missing"), Ok(None));
+    assert!(repo.subagent_diff_refs(&worktree.path, "../x").is_err());
+}
