@@ -22,16 +22,32 @@ pub(super) fn dirs(lookup: &dyn Fn(&str) -> Option<String>) -> Option<profile::D
     profile::Dirs::resolve(lookup, "claude", |_| super::settings::config_dir(lookup))
 }
 
-pub(super) fn user_config(lookup: &dyn Fn(&str) -> Option<String>, home: &Path) -> PathBuf {
-    lookup("CLAUDE_CONFIG_DIR")
-        .filter(|dir| !dir.is_empty())
-        .map_or_else(|| home.to_path_buf(), PathBuf::from)
-        .join(CONFIG)
+pub(super) struct Sources {
+    pub(super) user: PathBuf,
+    pub(super) user_config: PathBuf,
+    pub(super) profile: PathBuf,
+}
+
+pub(super) fn sources(lookup: &dyn Fn(&str) -> Option<String>) -> Option<Sources> {
+    let profile::Dirs {
+        home,
+        user,
+        profile,
+    } = dirs(lookup)?;
+    let user_config = super::settings::config_dir_override(lookup)
+        .unwrap_or(home)
+        .join(CONFIG);
+    Some(Sources {
+        user,
+        user_config,
+        profile,
+    })
 }
 
 /// Builds the Agent profile a Claude run on the host reads: links to the
 /// user's carve-outs and credentials, the state dirs and `.claude.json`.
-pub(super) fn build(user: &Path, user_config: &Path, profile: &Path) -> io::Result<()> {
+pub(super) fn build(sources: &Sources) -> io::Result<()> {
+    let Sources { user, profile, .. } = sources;
     let _building = BUILDING.lock().unwrap_or_else(PoisonError::into_inner);
     open_root(profile)?;
     for name in CONFIG_CARVE_OUTS.into_iter().chain(CREDENTIALS) {
@@ -45,12 +61,12 @@ pub(super) fn build(user: &Path, user_config: &Path, profile: &Path) -> io::Resu
     for dir in WRITABLE_DIRS {
         std::fs::create_dir_all(profile.join(dir))?;
     }
-    write_config(user_config, profile, None)
+    write_config(sources, None)
 }
 
-pub(super) fn render_config(user_config: &Path, profile: &Path, cwd: &Path) -> io::Result<()> {
+pub(super) fn render_config(sources: &Sources, cwd: &Path) -> io::Result<()> {
     let _building = BUILDING.lock().unwrap_or_else(PoisonError::into_inner);
-    write_config(user_config, profile, Some(cwd))
+    write_config(sources, Some(cwd))
 }
 
 /// Copies a Conversation from before the Agent profile into it, once.
@@ -110,19 +126,21 @@ fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn write_config(user_config: &Path, profile: &Path, cwd: Option<&Path>) -> io::Result<()> {
+fn write_config(sources: &Sources, cwd: Option<&Path>) -> io::Result<()> {
+    let profile = &sources.profile;
     let mut projects = trusted_projects(&profile.join(CONFIG))?;
     if let Some(cwd) = cwd {
         projects.insert(path_text(cwd), json!({ TRUSTED: true }));
     }
     let mut config = json!({ "hasCompletedOnboarding": true, "projects": projects });
-    if let Some(servers) = user_mcp_servers(user_config) {
+    if let Some(servers) = user_mcp_servers(&sources.user_config) {
         config[MCP_SERVERS] = servers;
     }
     write_file(profile, CONFIG, &serde_json::to_vec_pretty(&config)?)
 }
 
 fn user_mcp_servers(user_config: &Path) -> Option<Value> {
+    // The user's own file, out of the Agent's reach, so a dotfile link is followed.
     let bytes = std::fs::read(user_config).ok()?;
     let mut config = serde_json::from_slice::<Value>(&bytes).ok()?;
     Some(config.get_mut(MCP_SERVERS)?.take()).filter(Value::is_object)

@@ -53,8 +53,20 @@ impl Home {
     }
 
     fn lookup(&self) -> impl Fn(&str) -> Option<String> {
-        let home = self.path().to_string_lossy().into_owned();
-        move |key: &str| (key == "HOME").then(|| home.clone())
+        self.lookup_with(&[])
+    }
+
+    fn lookup_with(&self, extra: &[(&str, &Path)]) -> impl Fn(&str) -> Option<String> {
+        let mut vars: Vec<(String, String)> = extra
+            .iter()
+            .map(|(key, path)| (key.to_string(), path.to_string_lossy().into_owned()))
+            .collect();
+        vars.push(("HOME".into(), self.path().to_string_lossy().into_owned()));
+        move |key: &str| {
+            vars.iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.clone())
+        }
     }
 
     fn prepare(&self) {
@@ -246,15 +258,18 @@ fn the_mcp_servers_come_from_a_custom_config_dir() {
         &home.path().join(".claude.json"),
         &json!({ "mcpServers": { "wrong": {} } }).to_string(),
     );
-    let root = home.path().to_string_lossy().into_owned();
-    let dir = custom.to_string_lossy().into_owned();
-    let lookup = move |key: &str| match key {
-        "HOME" => Some(root.clone()),
-        "CLAUDE_CONFIG_DIR" => Some(dir.clone()),
-        _ => None,
-    };
-    ClaudeCode::default().prepare(&lookup).unwrap();
+    ClaudeCode::default()
+        .prepare(&home.lookup_with(&[("CLAUDE_CONFIG_DIR", &custom)]))
+        .unwrap();
     assert_eq!(home.config()["mcpServers"], servers);
+}
+
+#[test]
+fn a_missing_user_config_carries_no_mcp_servers() {
+    let home = Home::new();
+    home.prepare();
+    home.render("/work/tree");
+    assert!(home.config()["mcpServers"].is_null());
 }
 
 #[test]

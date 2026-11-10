@@ -15,10 +15,17 @@ pub(super) fn user_statusline_command(
 }
 
 pub(super) fn config_dir(lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let var = |key| lookup(key).filter(|value: &String| !value.is_empty());
-    var("CLAUDE_CONFIG_DIR")
+    config_dir_override(&lookup).or_else(|| {
+        lookup("HOME")
+            .filter(|home| !home.is_empty())
+            .map(|home| Path::new(&home).join(".claude"))
+    })
+}
+
+pub(super) fn config_dir_override(lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    lookup("CLAUDE_CONFIG_DIR")
+        .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
-        .or_else(|| var("HOME").map(|home| Path::new(&home).join(".claude")))
 }
 
 fn settings_files(cwd: &Path, lookup: impl Fn(&str) -> Option<String>) -> Vec<PathBuf> {

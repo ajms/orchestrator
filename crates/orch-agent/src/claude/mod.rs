@@ -221,18 +221,13 @@ impl AgentAdapter for ClaudeCode {
     }
 
     fn prepare(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
-        let Some(Dirs {
-            home,
-            user,
-            profile,
-        }) = profile::dirs(lookup)
-        else {
+        let Some(sources) = profile::sources(lookup) else {
             return Err(NO_HOME.into());
         };
-        profile::build(&user, &profile::user_config(lookup, &home), &profile).map_err(|err| {
+        profile::build(&sources).map_err(|err| {
             format!(
                 "building claude's Agent profile {}: {err}",
-                profile.display()
+                sources.profile.display()
             )
         })
     }
@@ -242,20 +237,15 @@ impl AgentAdapter for ClaudeCode {
         lookup: &dyn Fn(&str) -> Option<String>,
         render: &ProfileRender<'_>,
     ) -> Result<(), String> {
-        let Some(Dirs {
-            home,
-            user,
-            profile,
-        }) = profile::dirs(lookup)
-        else {
+        let Some(sources) = profile::sources(lookup) else {
             return Err(NO_HOME.into());
         };
-        let user_config = profile::user_config(lookup, &home);
+        let profile = &sources.profile;
         let adopted = render.conversation.map_or(Ok(()), |conversation| {
-            profile::adopt_conversation(&user, &profile, render.worktree, conversation)
+            profile::adopt_conversation(&sources.user, profile, render.worktree, conversation)
         });
         adopted
-            .and_then(|()| profile::render_config(&user_config, &profile, render.worktree))
+            .and_then(|()| profile::render_config(&sources, render.worktree))
             .map_err(|err| {
                 format!(
                     "rendering claude's Agent profile {}: {err}",

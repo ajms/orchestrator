@@ -12,7 +12,7 @@ _Contradicts ADR 0014's rule that the profile holds its read-only resources itse
 
 - `settings.json`, `settings.local.json`, `hooks/`, `skills/`, `agents/`, `commands/`, `rules/`, `plugins/`, `CLAUDE.md` and `.credentials.json` are links to the user's, when those exist.
 - `projects/`, `todos/`, `shell-snapshots/` and `plans/` are created and kept, so resume finds the Session's Conversations.
-- `.claude.json` is rendered with only what orch owns: `hasCompletedOnboarding`, and `projects["<cwd>"].hasTrustDialogAccepted` for each Worktree. Without that trust Claude silently ignores `permissions.allow`. The user-scope `mcpServers` are copied in from the user's `.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), so servers such as Mattermost still reach the Agent. A missing or malformed user file carries none. Anything else in the file is dropped at every render, and the Daemon doesn't follow a link there.
+- `.claude.json` is rendered with only what orch owns, plus the user-scope `mcpServers`. orch owns `hasCompletedOnboarding`, and `projects["<cwd>"].hasTrustDialogAccepted` for each Worktree. Without that trust Claude silently ignores `permissions.allow`. The `mcpServers` are copied from the user's `.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), so servers such as Mattermost still reach the Agent. A missing or malformed user file carries none. The Daemon follows a link at the user's file, which the Agent can't reach, so a dotfile manager's link works. Anything else in the profile's file is dropped at every render, and the Daemon doesn't follow a link there.
 
 ## In the Sandbox
 
