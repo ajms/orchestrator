@@ -94,7 +94,7 @@ A helper the Agent spawns inside its own Session; it shares the Session's Worktr
 _Avoid_: Child session, worker, sub-session
 
 **Subagent worktree**:
-A git worktree the Agent asks for to isolate one Subagent. It branches from the Session's HEAD, lives under `.orchestrator/subagents/<slug>/`, counts as inside the Session for Guards, and is removed with the Session.
+A git worktree the Agent asks for to isolate one Subagent. It branches from the Session's HEAD, lives under `.orchestrator/subagents/<slug>/`, counts as inside the Session for Guards, and is removed with the Session. The Orchestrator records its base when it is created and its tip when it is removed, for the Subagent's Review.
 _Avoid_: Agent worktree, child worktree
 
 **Subagent transcript**:
@@ -198,7 +198,7 @@ The Daemon bringing its records back in line with what actually exists on disk, 
 _Avoid_: Sync, repair, recovery
 
 **Review**:
-Inspecting a Session's changes against its Base branch, usually right before Landing.
+Inspecting a Session's changes against its Base branch, usually right before Landing. A Subagent's Review shows only that Subagent's work in its Subagent worktree, from its base to its tip.
 _Avoid_: Diff view, inspection
 
 **Whole review**:
