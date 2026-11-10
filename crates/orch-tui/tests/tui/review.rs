@@ -13,6 +13,7 @@ fn reviewing() -> Harness {
     tui.take_effects();
     tui.send(Event::Review {
         session: id("first"),
+        subagent: None,
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(data(vec![
             FileDiff {
@@ -110,6 +111,7 @@ fn an_empty_diff_says_so() {
     tui.keys("d");
     tui.send(Event::Review {
         session: id("first"),
+        subagent: None,
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(data(Vec::new())),
     });
@@ -123,6 +125,7 @@ fn a_failed_diff_is_reported() {
     tui.keys("d");
     tui.send(Event::Review {
         session: id("first"),
+        subagent: None,
         purpose: ReviewPurpose::BuiltIn,
         result: Err(orch_git::Error::Git {
             command: "git merge-base".into(),
@@ -148,6 +151,7 @@ fn capital_d_runs_the_external_review_on_the_same_change_set() {
 
     tui.send(Event::Review {
         session: id("first"),
+        subagent: None,
         purpose: ReviewPurpose::External,
         result: Ok(data(Vec::new())),
     });
@@ -208,6 +212,7 @@ fn reviewing_subagent() -> Harness {
     }));
     tui.send(Event::Review {
         session: id("first"),
+        subagent: Some("agent-a".into()),
         purpose: ReviewPurpose::BuiltIn,
         result: Ok(data(vec![FileDiff {
             path: "src/a.rs".into(),
@@ -254,6 +259,7 @@ fn capital_d_on_a_subagent_hands_its_base_and_head_to_the_external_tool() {
     }));
     tui.send(Event::Review {
         session: id("first"),
+        subagent: None,
         purpose: ReviewPurpose::External,
         result: Ok(data(Vec::new())),
     });
@@ -270,4 +276,30 @@ fn capital_d_on_a_subagent_hands_its_base_and_head_to_the_external_tool() {
         }),
         "{effects:?}"
     );
+}
+
+#[test]
+fn a_subagent_review_arriving_after_a_session_review_was_requested_keeps_its_label() {
+    let mut tui = Harness::new();
+    tui.sessions(vec![subagent_session()]);
+    tui.keys("J");
+    tui.keys("d");
+    tui.keys("K");
+    tui.keys("d");
+    tui.take_effects();
+    tui.send(Event::Review {
+        session: id("first"),
+        subagent: Some("agent-a".into()),
+        purpose: ReviewPurpose::BuiltIn,
+        result: Ok(data(vec![FileDiff {
+            path: "src/a.rs".into(),
+            lines: vec!["@@ -0,0 +1 @@".into(), "+a".into()],
+            deleted: false,
+        }])),
+    });
+    let screen = tui.screen();
+    assert!(screen.contains("Review of Subagent agent-a"), "{screen}");
+    tui.command("land");
+    assert!(!tui.screen().contains("push + PR"));
+    assert!(statusline(&mut tui).contains("only Subagent agent-a"));
 }

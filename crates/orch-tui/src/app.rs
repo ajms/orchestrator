@@ -258,7 +258,6 @@ pub(crate) struct App {
     next_pane: u64,
     external_review_command: Option<String>,
     /// The Subagent the in-flight Review load is for, if any.
-    loading_subagent: Option<String>,
     pending: HashMap<RequestId, (Request, Pending)>,
     calls: Vec<Call>,
 }
@@ -298,7 +297,6 @@ impl App {
             next_request: 0,
             next_pane: 0,
             external_review_command: None,
-            loading_subagent: None,
             pending: HashMap::new(),
             calls: Vec::new(),
         }
@@ -313,9 +311,10 @@ impl App {
             Event::EditorClosed(result) => self.editor_closed(result),
             Event::Review {
                 session,
+                subagent,
                 purpose,
                 result,
-            } => self.review_loaded(session, purpose, result),
+            } => self.review_loaded(session, subagent, purpose, result),
             Event::VersionMismatch { message } => self.mismatch = Some(message),
             Event::Notice(text) => self.message = Some(text.into()),
             Event::Tick => {
@@ -1688,7 +1687,6 @@ impl App {
             Some(name) => format!("diffing Subagent {name} of {}…", view.slug),
             None => format!("diffing {} against {}…", view.slug, view.base),
         };
-        self.loading_subagent = subagent.clone();
         let effect = Effect::LoadReview {
             session: view.id.clone(),
             target: ReviewTarget {
@@ -1708,10 +1706,10 @@ impl App {
     fn review_loaded(
         &mut self,
         session: SessionId,
+        subagent: Option<String>,
         purpose: ReviewPurpose,
         result: Result<ReviewData, orch_git::Error>,
     ) {
-        let subagent = self.loading_subagent.take();
         let Some(view) = self.sessions.get(&session) else {
             return;
         };
