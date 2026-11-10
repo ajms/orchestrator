@@ -53,8 +53,20 @@ impl Home {
     }
 
     fn lookup(&self) -> impl Fn(&str) -> Option<String> {
-        let home = self.path().to_string_lossy().into_owned();
-        move |key: &str| (key == "HOME").then(|| home.clone())
+        self.lookup_with(&[])
+    }
+
+    fn lookup_with(&self, extra: &[(&str, &Path)]) -> impl Fn(&str) -> Option<String> {
+        let mut vars: Vec<(String, String)> = extra
+            .iter()
+            .map(|(key, path)| (key.to_string(), path.to_string_lossy().into_owned()))
+            .collect();
+        vars.push(("HOME".into(), self.path().to_string_lossy().into_owned()));
+        move |key: &str| {
+            vars.iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.clone())
+        }
     }
 
     fn prepare(&self) {
@@ -214,6 +226,58 @@ fn a_rebuild_keeps_only_the_config_orch_owns() {
         json!({ "hasTrustDialogAccepted": true })
     );
     assert!(config["projects"]["/b"].is_null());
+}
+
+#[test]
+fn the_users_mcp_servers_reach_the_profile() {
+    let home = Home::new();
+    let servers = json!({ "mattermost": { "command": "mm-mcp" } });
+    let user_config = json!({
+        "mcpServers": servers,
+        "projects": { "/a": { "mcpServers": { "project": {} } } },
+    });
+    home.seed(&home.path().join(".claude.json"), &user_config.to_string());
+    home.prepare();
+    assert_eq!(home.config()["mcpServers"], servers);
+    home.render("/work/tree");
+    let config = home.config();
+    assert_eq!(config["mcpServers"], servers);
+    assert!(config["projects"]["/a"].is_null());
+}
+
+#[test]
+fn the_mcp_servers_come_from_a_custom_config_dir() {
+    let home = Home::new();
+    let custom = home.path().join("custom");
+    let servers = json!({ "asana": { "url": "https://asana" } });
+    home.seed(
+        &custom.join(".claude.json"),
+        &json!({ "mcpServers": servers }).to_string(),
+    );
+    home.seed(
+        &home.path().join(".claude.json"),
+        &json!({ "mcpServers": { "wrong": {} } }).to_string(),
+    );
+    ClaudeCode::default()
+        .prepare(&home.lookup_with(&[("CLAUDE_CONFIG_DIR", &custom)]))
+        .unwrap();
+    assert_eq!(home.config()["mcpServers"], servers);
+}
+
+#[test]
+fn a_missing_user_config_carries_no_mcp_servers() {
+    let home = Home::new();
+    home.prepare();
+    home.render("/work/tree");
+    assert!(home.config()["mcpServers"].is_null());
+}
+
+#[test]
+fn a_malformed_user_config_carries_no_mcp_servers() {
+    let home = Home::new();
+    home.seed(&home.path().join(".claude.json"), "{ not json");
+    home.prepare();
+    assert!(home.config()["mcpServers"].is_null());
 }
 
 #[test]

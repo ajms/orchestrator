@@ -2,7 +2,7 @@
 
 Claude Sessions no longer run on the user's real `~/.claude`. orch builds an Agent profile in `$XDG_STATE_HOME/orchestrator/agent-profiles/claude` (falling back to `~/.local/state`) and points `CLAUDE_CONFIG_DIR` at it on every launch, sandboxed or not, the same way pi runs from one (ADR 0014). A Session can switch between sandboxed and unsandboxed Presets, so the Conversations have to stay in one place.
 
-This refines ADR 0009: the allowlist no longer binds `~/.claude` and `~/.claude.json` into the Sandbox. The Agent no longer sees every past Session's Conversations, the user's history and statsig, or the MCP servers and foreign-project state in `~/.claude.json`.
+This refines ADR 0009: the allowlist no longer binds `~/.claude` and `~/.claude.json` into the Sandbox. The Agent no longer sees every past Session's Conversations, the user's history and statsig, or the project-scoped MCP servers and foreign-project state in `~/.claude.json`.
 
 _Contradicts ADR 0014's rule that the profile holds its read-only resources itself, because Claude's profile can't: its carve-outs must sit at the root of `CLAUDE_CONFIG_DIR`, the root must stay writable for Claude's other state, and bwrap can't mount onto a link in it. So the Sandbox never shows the profile's root at all._
 
@@ -12,7 +12,7 @@ _Contradicts ADR 0014's rule that the profile holds its read-only resources itse
 
 - `settings.json`, `settings.local.json`, `hooks/`, `skills/`, `agents/`, `commands/`, `rules/`, `plugins/`, `CLAUDE.md` and `.credentials.json` are links to the user's, when those exist.
 - `projects/`, `todos/`, `shell-snapshots/` and `plans/` are created and kept, so resume finds the Session's Conversations.
-- `.claude.json` is rendered with only what orch owns: `hasCompletedOnboarding`, and `projects["<cwd>"].hasTrustDialogAccepted` for each Worktree. Without that trust Claude silently ignores `permissions.allow`. Anything else in the file is dropped at every render, and the Daemon doesn't follow a link there.
+- `.claude.json` is rendered with only what orch owns, plus the user-scope `mcpServers`. orch owns `hasCompletedOnboarding`, and `projects["<cwd>"].hasTrustDialogAccepted` for each Worktree. Without that trust Claude silently ignores `permissions.allow`. The `mcpServers` are copied from the user's `.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), so servers such as Mattermost still reach the Agent. A missing or malformed user file carries none. The Daemon follows a link at the user's file, which the Agent can't reach, so a dotfile manager's link works. Anything else in the profile's file is dropped at every render, and the Daemon doesn't follow a link there.
 
 ## In the Sandbox
 
@@ -45,6 +45,8 @@ They live in the real `~/.claude/projects`. On resume, a Conversation that's mis
 
 - An Agent can create a missing carve-out on its tmpfs. It's visible only to its own Session and is gone when the Agent stops.
 - Claude's up-arrow history and other root state last only as long as the Agent in the Sandbox.
+- Anything in a user-scope MCP server's config, secrets included, is readable by the Agent in the Sandbox.
+- A user-scope server changed on the host reaches a Session at its next launch, resume or restart. `claude mcp add` run inside a Session doesn't stick.
 - Claude's saves to `.claude.json` fail silently in the Sandbox (ADR 0009 records this for EROFS). Not confirmed against a live Session.
 - **Open risk:** Claude 2.1.319's credential writer appears to refuse to write through a symlink, going by its code; this hasn't been run. A Claude on the host would then read the token through the profile's link but fail to save a refreshed one. This applies to unsandboxed Sessions and Drafts, not to the Sandbox. If it's confirmed, those runs need a file that isn't a link.
 - A Claude run outside orch is unaffected.
