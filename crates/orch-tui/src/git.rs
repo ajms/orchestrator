@@ -14,6 +14,20 @@ pub fn load_review(target: &ReviewTarget) -> Result<ReviewData, orch_git::Error>
         base: target.base.clone(),
         existing_branch: false,
     };
+    if let Some(name) = &target.subagent {
+        let Some((base, head)) = repo.subagent_diff_refs(&target.worktree, name)? else {
+            return Err(orch_git::Error::Io {
+                context: format!("Subagent {name}"),
+                message: "no recorded base/head to diff".into(),
+            });
+        };
+        let diff = repo.diff(&base, &head)?;
+        return Ok(ReviewData {
+            merge_base: base,
+            tree: head,
+            files: parse_unified_diff(&diff),
+        });
+    }
     let snapshot = repo.review_snapshot(&worktree)?;
     let diff = repo.diff(&snapshot.merge_base, &snapshot.tree)?;
     Ok(ReviewData {

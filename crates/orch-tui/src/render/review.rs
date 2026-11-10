@@ -29,14 +29,20 @@ pub(super) fn draw(review: &ReviewView, frame: &mut Frame, area: Rect) {
         })
         .collect();
     let rows = match rows.is_empty() {
-        true => vec![Line::from(format!(" no changes against {}", review.base))],
+        true => vec![Line::from(match &review.subagent {
+            Some(name) => format!(" no changes in Subagent {name}"),
+            None => format!(" no changes against {}", review.base),
+        })],
         false => rows,
     };
     frame.render_widget(
         Paragraph::new(rows).scroll((review.list_scroll, 0)).block(
             Block::bordered()
                 .border_type(BorderType::Rounded)
-                .title(format!(" Review vs {} ", review.base)),
+                .title(match &review.subagent {
+                    Some(name) => format!(" Review of Subagent {name} "),
+                    None => format!(" Review vs {} ", review.base),
+                }),
         ),
         columns.files,
     );

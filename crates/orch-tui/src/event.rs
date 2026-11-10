@@ -75,6 +75,9 @@ pub struct ReviewTarget {
     pub slug: String,
     pub branch: String,
     pub base: String,
+    /// When set, the Review covers only this Subagent's worktree: its recorded
+    /// base against its head (live snapshot or final tip), not the Session's.
+    pub subagent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

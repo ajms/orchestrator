@@ -76,6 +76,8 @@ pub(crate) struct EditorTarget {
 pub(crate) struct ReviewView {
     pub base: String,
     pub worktree: PathBuf,
+    /// Set when this Review covers only one Subagent's worktree.
+    pub subagent: Option<String>,
     pub files: Vec<FileDiff>,
     pub file: usize,
     pub scroll: u16,
@@ -88,6 +90,7 @@ impl ReviewView {
         Self {
             base,
             worktree,
+            subagent: None,
             files,
             file: 0,
             scroll: 0,

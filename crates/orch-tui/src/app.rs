@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crossterm::event::{Event as TermEvent, KeyEventKind};
 use orch_core::SessionId;
+use orch_git::subagent_worktrees_dir;
 use orch_protocol::{
     AgentStateView, BranchLookup, CreateSession, Fix, FromDaemon, GuardChoice, GuardPrompt,
     LandingMode, LeftoverView, LookupDepth, PhaseView, ReconcileReport, Reply, Request,
@@ -128,7 +129,7 @@ pub(crate) enum Pending {
     Repos,
     FormSettings(PathBuf),
     BranchLookup(LookupKey, LookupDepth),
-    ReviewSettings(SessionId),
+    ReviewSettings(SessionId, Option<String>),
     Resume(SessionId),
     Create(PreparingId),
     Trust(Box<Retry>),
@@ -256,6 +257,8 @@ pub(crate) struct App {
     next_request: u64,
     next_pane: u64,
     external_review_command: Option<String>,
+    /// The Subagent the in-flight Review load is for, if any.
+    loading_subagent: Option<String>,
     pending: HashMap<RequestId, (Request, Pending)>,
     calls: Vec<Call>,
 }
@@ -295,6 +298,7 @@ impl App {
             next_request: 0,
             next_pane: 0,
             external_review_command: None,
+            loading_subagent: None,
             pending: HashMap::new(),
             calls: Vec::new(),
         }
@@ -434,7 +438,7 @@ impl App {
                 };
                 self.branch_looked_up(&asked, depth, lookup);
             }
-            (Pending::ReviewSettings(session), result) => {
+            (Pending::ReviewSettings(session, subagent), result) => {
                 let command = match result {
                     Ok(Reply::RepoSettings(settings)) => settings.review_command,
                     Err(err) => {
@@ -446,7 +450,7 @@ impl App {
                 };
                 self.external_review_command =
                     Some(command.unwrap_or_else(|| self.config.review_command.clone()));
-                self.start_review(&session, ReviewPurpose::External);
+                self.start_review(&session, subagent, ReviewPurpose::External);
             }
             (Pending::Create(preparing), Ok(Reply::Created { session })) => {
                 if let Some(preparing) = self.preparing_mut(preparing) {
@@ -1560,6 +1564,19 @@ impl App {
     }
 
     pub fn open_land(&mut self) {
+        if let Some(name) = self
+            .review
+            .as_ref()
+            .and_then(|review| review.subagent.as_ref())
+        {
+            self.message = Some(
+                format!(
+                    "this Review covers only Subagent {name}: close it (q) to land the Session"
+                )
+                .into(),
+            );
+            return;
+        }
         let Some(view) = self.selected_view() else {
             self.message = Some(NO_SESSION.into());
             return;
@@ -1638,21 +1655,40 @@ impl App {
             return;
         };
         let session = view.id.clone();
+        let repo = view.repo.clone();
+        let subagent = match self.cursor_subagent() {
+            Some((view, subagent)) => match subagent_review_name(view, subagent) {
+                Ok(name) => Some(name),
+                Err(refusal) => {
+                    self.message = Some(refusal.into());
+                    return;
+                }
+            },
+            None => None,
+        };
         match purpose {
-            ReviewPurpose::BuiltIn => self.start_review(&session, purpose),
+            ReviewPurpose::BuiltIn => self.start_review(&session, subagent, purpose),
             ReviewPurpose::External => {
-                let request = Request::RepoSettings {
-                    repo: view.repo.clone(),
-                };
-                self.request(request, Pending::ReviewSettings(session));
+                let request = Request::RepoSettings { repo };
+                self.request(request, Pending::ReviewSettings(session, subagent));
             }
         }
     }
 
-    fn start_review(&mut self, session: &SessionId, purpose: ReviewPurpose) {
+    fn start_review(
+        &mut self,
+        session: &SessionId,
+        subagent: Option<String>,
+        purpose: ReviewPurpose,
+    ) {
         let Some(view) = self.sessions.get(session) else {
             return;
         };
+        let message = match &subagent {
+            Some(name) => format!("diffing Subagent {name} of {}…", view.slug),
+            None => format!("diffing {} against {}…", view.slug, view.base),
+        };
+        self.loading_subagent = subagent.clone();
         let effect = Effect::LoadReview {
             session: view.id.clone(),
             target: ReviewTarget {
@@ -1661,10 +1697,11 @@ impl App {
                 slug: view.slug.clone(),
                 branch: view.branch.clone(),
                 base: view.base.clone(),
+                subagent,
             },
             purpose,
         };
-        self.message = Some(format!("diffing {} against {}…", view.slug, view.base).into());
+        self.message = Some(message.into());
         self.push(Call::Local(effect));
     }
 
@@ -1674,6 +1711,7 @@ impl App {
         purpose: ReviewPurpose,
         result: Result<ReviewData, orch_git::Error>,
     ) {
+        let subagent = self.loading_subagent.take();
         let Some(view) = self.sessions.get(&session) else {
             return;
         };
@@ -1688,16 +1726,25 @@ impl App {
         match purpose {
             ReviewPurpose::BuiltIn => {
                 let (base, worktree) = (view.base.clone(), view.worktree.clone());
-                self.review = Some(ReviewView::new(base, worktree, data.files));
+                let mut review = ReviewView::new(base, worktree, data.files);
+                if let Some(name) = subagent {
+                    review.worktree = subagent_worktrees_dir(&view.worktree).join(&name);
+                    review.subagent = Some(name);
+                }
+                self.review = Some(review);
             }
             ReviewPurpose::External => {
                 let command = self
                     .external_review_command
                     .take()
                     .unwrap_or_else(|| self.config.review_command.clone());
+                let cwd = match &subagent {
+                    Some(name) => subagent_worktrees_dir(&view.worktree).join(name),
+                    None => view.worktree.clone(),
+                };
                 let effect = Effect::RunExternal {
                     command,
-                    cwd: view.worktree.clone(),
+                    cwd,
                     env: vec![
                         ("ORCH_BASE".into(), view.base.clone()),
                         ("ORCH_MERGE_BASE".into(), data.merge_base),
@@ -1857,5 +1904,28 @@ fn landing_refusal(view: &SessionView) -> Option<String> {
             Some("Landing is blocked: the Agent Needs input".into())
         }
         _ => Some("Landing is blocked until the Agent settles".into()),
+    }
+}
+
+/// The Subagent name a Review of `subagent` diffs, or why it cannot be reviewed.
+/// Only worktrees directly inside the Session's `subagents/<slug>/` dir qualify.
+fn subagent_review_name(
+    view: &SessionView,
+    subagent: &SubagentView,
+) -> Result<String, &'static str> {
+    let path = subagent
+        .worktree
+        .as_ref()
+        .and_then(|worktree| worktree.path.as_deref())
+        .ok_or("this Subagent has no worktree of its own to review")?;
+    let path = Path::new(path);
+    let inside = path.parent() == Some(subagent_worktrees_dir(&view.worktree).as_path())
+        && !path
+            .components()
+            .any(|part| part == std::path::Component::ParentDir);
+    let name = path.file_name().and_then(|name| name.to_str());
+    match name {
+        Some(name) if inside => Ok(name.to_owned()),
+        _ => Err("this Subagent's worktree is not one the Session manages; nothing to review"),
     }
 }
