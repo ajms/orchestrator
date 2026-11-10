@@ -104,6 +104,15 @@ test("nothing is forwarded without an orch Session", async () => {
 	assert.deepEqual(await pi.payloads(), []);
 });
 
+test("session_start points subagent worktree hooks at orch only within an orch Session", () => {
+	delete process.env.ORCH_BIN;
+	new FakePi({}).emit("session_start", { reason: "startup" });
+	assert.equal(process.env.ORCH_BIN, undefined);
+	new FakePi().emit("session_start", { reason: "startup" });
+	assert.equal(process.env.ORCH_BIN, "/opt/orch");
+	delete process.env.ORCH_BIN;
+});
+
 test("each payload goes to orch hook or tap for pi and the Session", async () => {
 	const pi = new FakePi();
 	pi.emit("session_start", { reason: "startup" });

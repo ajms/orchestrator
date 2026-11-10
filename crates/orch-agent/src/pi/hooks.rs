@@ -4,8 +4,8 @@ use orch_core::{
 };
 use serde::Deserialize;
 
-use crate::PayloadError;
 use crate::bounded::{NAME_CHARS, REASON_CHARS, SUMMARY_CHARS, bounded, bounded_line};
+use crate::{PayloadError, WorktreeRequest};
 
 const QUESTION_TOOL: &str = "question";
 pub(super) const SUBAGENT_TOOL: &str = "subagent";
@@ -326,4 +326,18 @@ fn status_code(message: &str) -> Option<&str> {
         let named = at == 0 || STATUS_WORDS.contains(&words[at - 1]);
         (numbered && named).then_some(*word)
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+enum WorktreeHook {
+    WorktreeCreate { name: String },
+    WorktreeRemove { path: std::path::PathBuf },
+}
+
+pub(super) fn worktree_request(payload: &str) -> Option<WorktreeRequest> {
+    match serde_json::from_str(payload).ok()? {
+        WorktreeHook::WorktreeCreate { name } => Some(WorktreeRequest::Create { name }),
+        WorktreeHook::WorktreeRemove { path } => Some(WorktreeRequest::Remove { path }),
+    }
 }

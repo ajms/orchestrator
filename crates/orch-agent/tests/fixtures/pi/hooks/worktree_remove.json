@@ -1,0 +1,4 @@
+{
+  "event": "worktree_remove",
+  "path": "/repo/.orch/worktrees/builder"
+}

@@ -374,3 +374,23 @@ fn a_payload_that_isnt_an_event_is_refused() {
         Err(PayloadError(_))
     ));
 }
+
+#[test]
+fn worktree_hooks_ask_for_subagent_worktrees() {
+    use orch_agent::WorktreeRequest;
+    let pi = Pi::default();
+    assert_eq!(
+        pi.worktree_request(&fixture("worktree_create")),
+        Some(WorktreeRequest::Create {
+            name: "builder".into()
+        })
+    );
+    assert_eq!(
+        pi.worktree_request(&fixture("worktree_remove")),
+        Some(WorktreeRequest::Remove {
+            path: "/repo/.orch/worktrees/builder".into()
+        })
+    );
+    assert_eq!(pi.worktree_request(&fixture("agent_start")), None);
+    assert_eq!(pi.worktree_request("not json"), None);
+}

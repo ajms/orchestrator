@@ -88,6 +88,7 @@ export default function orch(
 		const bin = pi.getFlag("orch-bin");
 		const session = pi.getFlag("orch-session");
 		if (typeof bin !== "string" || typeof session !== "string" || !session) return;
+		process.env.ORCH_BIN = bin;
 		if (!forwarder?.serves(bin, session)) forwarder = new Forwarder(bin, session, spawn);
 		outcome = {};
 		const name = pi.getSessionName();
