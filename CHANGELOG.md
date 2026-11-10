@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0](https://github.com/ajms/orchestrator/compare/v0.17.0...v0.18.0) - 2026-11-10
+
+### Added
+
+- *(subagents)* report a conflicted or abandoned merge-back
+- *(pi)* route pi subagent worktree hooks through orch worktree-hook
+- *(subagents)* show how a Subagent ended ([#239](https://github.com/ajms/orchestrator/pull/239))
+- *(subagents)* record base/head diff refs for subagent worktrees
+- *(tui)* review a single Subagent's worktree with d/D
+
+### Fixed
+
+- *(tui)* carry Subagent name with Review results instead of App state
+- *(tui)* size the Subagent outcome rule to the pane width
+- *(tui)* show the Subagent's branch under its Review's file list
+
+### Other
+
+- *(subagents)* record the Subagent tip loudly and review via a validated ReviewScope
+- *(subagents)* address review of #243
+- *(tui)* send the Subagent name with the external Review result
+
 ## [0.17.0](https://github.com/ajms/orchestrator/compare/v0.16.1...v0.17.0) - 2026-11-09
 
 ### Added
