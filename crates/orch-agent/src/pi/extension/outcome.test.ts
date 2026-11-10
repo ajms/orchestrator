@@ -46,3 +46,18 @@ test("a result with no details is just its error flag", () => {
 	assert.deepEqual(subagentOutcome(undefined, false), { isError: false });
 	assert.deepEqual(subagentOutcome("nonsense", true), { isError: true });
 });
+
+test("a conflicted or discarded cleanup keeps a bounded list of files and its flag", () => {
+	const files = [...Array.from({ length: 60 }, (_, i) => `src/${i}.rs`), 7, ""];
+	const conflict = subagentOutcome(
+		{ details: { worktreeCleanup: { merged: false, skipped: false, conflictFiles: files } } },
+		true,
+	);
+	assert.equal(conflict.worktreeCleanup?.conflictFiles?.length, 50);
+	assert.equal(conflict.worktreeCleanup?.conflictFiles?.[0], "src/0.rs");
+	const discarded = subagentOutcome(
+		{ details: { worktreeCleanup: { merged: false, skipped: true, discarded: true, conflictFiles: "a.rs" } } },
+		true,
+	);
+	assert.deepEqual(discarded.worktreeCleanup, { merged: false, skipped: true, discarded: true });
+});

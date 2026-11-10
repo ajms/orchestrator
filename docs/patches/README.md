@@ -20,6 +20,7 @@ The patched extension:
 - creates the worktree with `$ORCH_BIN worktree-hook --agent pi --worktree $ORCH_WORKTREE` and `{"event":"worktree_create","name":"<agent>-<stamp>"}` on stdin, uses the printed path, and reads the branch and base from it;
 - still merges or applies the Subagent's work, then removes the worktree with one `{"event":"worktree_remove","path":…}` hook call. A failed hook is reported in the cleanup message, not thrown;
 - reports unmerged commits as kept on orch's branch until the orch Session is removed;
+- adds `conflictFiles` (the files a failed merge-back conflicted on) and `discarded: true` (a failed attempt discarded without merging) to `worktreeCleanup`, so orch can tell a conflict and an abandoned run from other outcomes;
 - on exit or a signal, removes orch's worktrees through the hook and never deletes them itself.
 
 If `git apply --check` fails, the extension has changed since the patch was made; apply the hunks by hand.

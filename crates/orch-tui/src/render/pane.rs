@@ -279,6 +279,14 @@ fn subagent_outcome(subagent: &SubagentView, area: Rect) -> Vec<Line<'static>> {
     }
     if let Some(worktree) = &subagent.worktree {
         lines.push(worktree_line(worktree));
+        if let Some(SubagentMergeView::Conflict { files }) = &worktree.merge
+            && !files.is_empty()
+        {
+            lines.push(Line::from(vec![
+                Span::raw("conflicts: ").dark_gray(),
+                Span::raw(files.join(", ")).red(),
+            ]));
+        }
     }
     if let Some(summary) = &subagent.summary {
         let label = "result";
@@ -314,10 +322,12 @@ fn worktree_line(worktree: &SubagentWorktreeView) -> Line<'static> {
     if let Some(branch) = &worktree.branch {
         spans.push(Span::raw(branch.clone()));
     }
-    let merge = worktree.merge.map(|merge| match merge {
+    let merge = worktree.merge.as_ref().map(|merge| match merge {
         SubagentMergeView::Merged => Span::raw(" · merged").green(),
         SubagentMergeView::NothingToMerge => Span::raw(" · nothing to merge").dark_gray(),
         SubagentMergeView::NotMerged => Span::raw(" · not merged").red(),
+        SubagentMergeView::Conflict { .. } => Span::raw(" · conflict").red(),
+        SubagentMergeView::Abandoned => Span::raw(" · abandoned").yellow(),
     });
     spans.extend(merge);
     if let Some(kept) = &worktree.preserved_branch {

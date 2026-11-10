@@ -394,3 +394,45 @@ fn worktree_hooks_ask_for_subagent_worktrees() {
     assert_eq!(pi.worktree_request(&fixture("agent_start")), None);
     assert_eq!(pi.worktree_request("not json"), None);
 }
+
+fn merge_of(cleanup: serde_json::Value) -> Option<SubagentMerge> {
+    let payload = serde_json::json!({
+        "event": "tool_execution_end",
+        "toolName": "subagent",
+        "toolCallId": "call_1",
+        "isError": true,
+        "worktreeCleanup": cleanup,
+    });
+    let Some(AgentEvent::SubagentFinished { outcome, .. }) =
+        Pi::default().map_hook(&payload.to_string()).unwrap().pop()
+    else {
+        panic!("no Subagent finished");
+    };
+    outcome.worktree.and_then(|worktree| worktree.merge)
+}
+
+#[test]
+fn a_conflicted_merge_back_names_its_files_and_a_discarded_run_is_abandoned() {
+    let files: Vec<String> = (0..30).map(|at| format!("src/{at}.rs")).collect();
+    let conflict = merge_of(serde_json::json!({
+        "merged": false, "skipped": false, "conflictFiles": files,
+    }));
+    let Some(SubagentMerge::Conflict { files: kept }) = conflict else {
+        panic!("not a conflict: {conflict:?}");
+    };
+    assert_eq!(kept.len(), 20);
+    assert_eq!(kept[0], "src/0.rs");
+
+    assert_eq!(
+        merge_of(serde_json::json!({ "merged": false, "skipped": true, "discarded": true })),
+        Some(SubagentMerge::Abandoned)
+    );
+    assert_eq!(
+        merge_of(serde_json::json!({ "merged": false, "skipped": false, "conflictFiles": [] })),
+        Some(SubagentMerge::NotMerged)
+    );
+    assert_eq!(
+        merge_of(serde_json::json!({ "merged": false, "skipped": true })),
+        Some(SubagentMerge::NothingToMerge)
+    );
+}

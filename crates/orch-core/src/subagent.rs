@@ -20,11 +20,19 @@ pub struct SubagentUsage {
 }
 
 /// What became of a Subagent's work when its worktree was cleaned up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubagentMerge {
     Merged,
     NothingToMerge,
+    /// Merging back failed for a reason other than a conflict.
     NotMerged,
+    /// Merging back conflicted on these files (empty if none were reported).
+    Conflict {
+        files: Vec<String>,
+    },
+    /// The run failed and its work was discarded, or kept on a branch,
+    /// without a merge being attempted.
+    Abandoned,
 }
 
 /// The worktree a Subagent ran in, and whether its work was merged back.
