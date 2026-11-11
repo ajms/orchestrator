@@ -4,23 +4,13 @@ use std::fmt;
 pub enum StoreError {
     Sqlite(rusqlite::Error),
     Io(std::io::Error),
-    NewerSchema {
-        found: usize,
-        supported: usize,
-    },
+    NewerSchema { found: usize, supported: usize },
     UnknownRepo,
     UnknownSession,
     PortsExhausted,
     NoConversation,
     RepoPathTaken,
-    LiveSessions {
-        count: usize,
-    },
-    /// A stored Plan that no longer decodes; it is kept, never overwritten.
-    CorruptPlan {
-        session: String,
-        reason: String,
-    },
+    LiveSessions { count: usize },
 }
 
 impl fmt::Display for StoreError {
@@ -39,12 +29,6 @@ impl fmt::Display for StoreError {
             StoreError::RepoPathTaken => f.write_str("another Repo is already registered there"),
             StoreError::LiveSessions { count } => {
                 write!(f, "the Repo still has {count} live Session(s)")
-            }
-            StoreError::CorruptPlan { session, reason } => {
-                write!(
-                    f,
-                    "the stored Plan of Session {session} does not decode: {reason}"
-                )
             }
         }
     }

@@ -498,6 +498,11 @@ impl Daemon {
         if op == PlanOp::Show {
             let state = self.lock();
             let live = state.sessions.get(id).ok_or("the Session has ended")?;
+            if let Some(reason) = &live.record.plan.unreadable {
+                return Err(format!(
+                    "this Session's stored Plan can't be read: {reason}"
+                ));
+            }
             return Ok(BrokerReply::Plan {
                 plan: live.record.plan.clone(),
                 said: String::new(),

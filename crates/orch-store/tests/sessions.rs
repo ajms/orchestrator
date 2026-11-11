@@ -2,8 +2,8 @@ mod common;
 
 use common::{Fixture, new_session};
 use orch_core::{
-    ChecksState, ConversationId, Flags, PermissionMode, Phase, PrState, PrStatus, ReviewDecision,
-    SessionId,
+    ChecksState, ConversationId, Flags, PermissionMode, Phase, PlanOp, PrState, PrStatus,
+    ReviewDecision, SessionId,
 };
 use orch_store::{NewSession, StoreError};
 
@@ -463,7 +463,7 @@ fn a_plan_persists_with_its_session_until_the_session_is_removed() {
 }
 
 #[test]
-fn an_undecodable_plan_is_reported_and_never_overwritten() {
+fn an_undecodable_plan_is_marked_unreadable_and_never_overwritten() {
     let mut fx = Fixture::new();
     let repo = fx.register("proj");
     let mut session = fx.session(&repo, "corrupt");
@@ -474,15 +474,34 @@ fn an_undecodable_plan_is_reported_and_never_overwritten() {
     )
     .unwrap();
 
-    assert!(matches!(
-        fx.store.session(&session.id),
-        Err(StoreError::CorruptPlan { .. })
-    ));
-    session.phase = Phase::Active;
-    assert!(matches!(
-        fx.store.save_session(&session),
-        Err(StoreError::CorruptPlan { .. })
-    ));
+    let mut loaded = fx.store.session(&session.id).unwrap().unwrap();
+    assert!(loaded.plan.unreadable.is_some());
+    assert!(loaded.plan.is_empty());
+    assert!(
+        fx.store
+            .sessions()
+            .unwrap()
+            .iter()
+            .any(|listed| listed.id == session.id && listed.plan.unreadable.is_some())
+    );
+    loaded.phase = Phase::Active;
+    let saved = fx.store.save_session(&loaded).unwrap();
+    assert_eq!(saved.phase, Phase::Active);
+    assert!(saved.plan.unreadable.is_some());
+    let refused = loaded
+        .plan
+        .clone()
+        .apply(PlanOp::Add {
+            title: "x".into(),
+            after: None,
+            blocked_by: vec![],
+            link: None,
+        })
+        .unwrap_err();
+    assert!(refused.starts_with("this Session's stored Plan can't be read: "));
+    // A record carrying a readable (empty) Plan doesn't clobber the row either.
+    session.phase = Phase::Landed;
+    fx.store.save_session(&session).unwrap();
     let kept: String = conn
         .query_row(
             "SELECT plan FROM plans WHERE session_id = ?1",

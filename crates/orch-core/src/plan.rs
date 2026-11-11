@@ -76,6 +76,10 @@ pub struct Plan {
     /// Ids are never reused, so a stale reference can't land on a new Task.
     #[serde(default)]
     pub next_id: TaskId,
+    /// Set when the stored Plan couldn't be decoded: the reason it can't be
+    /// read. Such a Plan is shown as unreadable and never written back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unreadable: Option<String>,
 }
 
 /// Where an unsettled Task stands against its blockers.
@@ -129,13 +133,24 @@ impl Plan {
 
     /// No Task was ever added: nothing worth storing.
     pub fn is_untouched(&self) -> bool {
-        self.tasks.is_empty() && self.next_id == 0
+        self.tasks.is_empty() && self.next_id == 0 && self.unreadable.is_none()
+    }
+
+    /// A Plan standing in for a stored one that couldn't be decoded.
+    pub fn unreadable(reason: impl Into<String>) -> Self {
+        Plan {
+            unreadable: Some(reason.into()),
+            ..Plan::default()
+        }
     }
 
     /// Attaches `subagent` to the Task its description names (see
     /// [`task_marker`]), if that Task exists and doesn't have it yet.
     /// Returns whether the Plan changed.
     pub fn attach_named(&mut self, subagent: &str, description: &str) -> bool {
+        if self.unreadable.is_some() {
+            return false;
+        }
         let Some(task) = task_marker(description) else {
             return false;
         };
@@ -197,6 +212,11 @@ impl Plan {
     /// Applies `op`, or says why it was refused and leaves the Plan unchanged.
     /// Returns what was done, for the Agent.
     pub fn apply(&mut self, op: PlanOp) -> Result<String, String> {
+        if let Some(reason) = &self.unreadable {
+            return Err(format!(
+                "this Session's stored Plan can't be read: {reason}"
+            ));
+        }
         let mut next = self.clone();
         let said = next.apply_in_place(op)?;
         *self = next;

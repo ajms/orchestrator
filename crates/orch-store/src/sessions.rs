@@ -328,34 +328,44 @@ impl Store {
                 })
             })
             .collect();
-        session.plan = self.plan(&session.id)?;
+        session.plan = self.plan(&session.id)?.unwrap_or_else(|reason| {
+            eprintln!(
+                "orch: warning: the stored Plan of Session {} can't be read, keeping it untouched: {reason}",
+                session.id.as_str()
+            );
+            Plan::unreadable(reason)
+        });
         Ok(session)
     }
 
-    fn plan(&self, id: &SessionId) -> Result<Plan, StoreError> {
+    fn plan(&self, id: &SessionId) -> Result<Result<Plan, String>, StoreError> {
         stored_plan(&self.conn, id)
     }
 }
 
-/// The Session's stored Plan, or an error if the stored JSON doesn't decode:
-/// an undecodable Plan must surface, not quietly read as empty.
-fn stored_plan(conn: &rusqlite::Connection, id: &SessionId) -> Result<Plan, StoreError> {
+/// The Session's stored Plan, or (inner `Err`) why the stored JSON doesn't
+/// decode: an undecodable Plan must surface, not quietly read as empty — but
+/// only on the Plan, never failing the Session around it.
+fn stored_plan(
+    conn: &rusqlite::Connection,
+    id: &SessionId,
+) -> Result<Result<Plan, String>, StoreError> {
     let stored: Option<String> = conn
         .prepare_cached("SELECT plan FROM plans WHERE session_id = ?1")?
         .query_row(params![id.as_str()], |row| row.get(0))
         .optional()?;
     match stored {
-        None => Ok(Plan::default()),
-        Some(json) => serde_json::from_str(&json).map_err(|err| StoreError::CorruptPlan {
-            session: id.as_str().to_string(),
-            reason: err.to_string(),
-        }),
+        None => Ok(Ok(Plan::default())),
+        Some(json) => Ok(serde_json::from_str(&json).map_err(|err| err.to_string())),
     }
 }
 
 fn save_plan(tx: &Transaction, id: &SessionId, plan: &Plan) -> Result<(), StoreError> {
-    // Never overwrite or delete a row we couldn't read back.
-    stored_plan(tx, id)?;
+    // Never overwrite or delete a row we couldn't read back; the rest of the
+    // Session still saves.
+    if plan.unreadable.is_some() || stored_plan(tx, id)?.is_err() {
+        return Ok(());
+    }
     if plan.is_untouched() {
         tx.execute(
             "DELETE FROM plans WHERE session_id = ?1",
