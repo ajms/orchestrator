@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Subcommand;
-use orch_core::{Attachment, Plan, PlanOp, TaskId, TaskStatus};
+use orch_core::{Attachment, Plan, PlanOp, Readiness, TaskId, TaskStatus, join_ids};
 use orch_holder::{BrokerReply, BrokerRequest, HOLDER_SOCKET_ENV, request_broker};
 
 /// Writes the Plan of the Session this runs in. Only the Session's Agent
@@ -129,11 +129,11 @@ fn render(plan: &Plan) -> String {
     let mut out = format!("Plan: {done}/{total} done\n");
     for task in &plan.tasks {
         let mut line = format!("{:>3}. [{}] {}", task.id, task.status.name(), task.title);
-        let open = plan.open_blockers(task);
-        if !task.status.settled() {
-            match open.is_empty() {
-                true => line.push_str(" (ready)"),
-                false => line.push_str(&format!(" (blocked by {})", join(&open))),
+        match plan.readiness(task) {
+            Readiness::Settled => {}
+            Readiness::Ready => line.push_str(" (ready)"),
+            Readiness::BlockedBy(open) => {
+                line.push_str(&format!(" (blocked by {})", join_ids(&open)))
             }
         }
         if let Some(link) = &task.link {
@@ -151,11 +151,6 @@ fn render(plan: &Plan) -> String {
         out.push('\n');
     }
     out
-}
-
-fn join(ids: &[TaskId]) -> String {
-    let ids: Vec<_> = ids.iter().map(ToString::to_string).collect();
-    ids.join(", ")
 }
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ Plan: keep this Session's Plan in orch with \`orch plan\` (the user sees it in o
 - \`orch plan add "<title>" [--after <id>] [--blocked-by <id>]... [--link <issue URL or #123>]\` prints the new Task's id.
 - \`orch plan status <id> pending|in-progress|done|dropped\`, \`orch plan block <id> --by <id>...\` (\`unblock\` undoes it), \`orch plan link <id> <ref>\`, \`orch plan attach <id> <subagent-id>\`.
 - \`orch plan show [--json]\` lists the Tasks and which are ready (every blocker Done or Dropped).
+- When a subagent serves a Task, put \`[task:<id>]\` in its task name; orch attaches it to that Task.
 - For multi-step work, write the Plan first and keep statuses current as you go.
 
 GitHub goes through orch's Broker, for this Repo's origin only:

@@ -78,6 +78,15 @@ pub struct Plan {
     pub next_id: TaskId,
 }
 
+/// Where an unsettled Task stands against its blockers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Readiness {
+    /// Done or Dropped.
+    Settled,
+    Ready,
+    BlockedBy(Vec<TaskId>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum PlanOp {
@@ -118,6 +127,25 @@ impl Plan {
         self.tasks.is_empty()
     }
 
+    /// No Task was ever added: nothing worth storing.
+    pub fn is_untouched(&self) -> bool {
+        self.tasks.is_empty() && self.next_id == 0
+    }
+
+    /// Attaches `subagent` to the Task its description names (see
+    /// [`task_marker`]), if that Task exists and doesn't have it yet.
+    /// Returns whether the Plan changed.
+    pub fn attach_named(&mut self, subagent: &str, description: &str) -> bool {
+        let Some(task) = task_marker(description) else {
+            return false;
+        };
+        let attachment = Attachment::Subagent(subagent.to_string());
+        let attached = self
+            .task(task)
+            .is_none_or(|known| known.attachments.contains(&attachment));
+        !attached && self.apply(PlanOp::Attach { task, attachment }).is_ok()
+    }
+
     pub fn task(&self, id: TaskId) -> Option<&Task> {
         self.tasks.iter().find(|task| task.id == id)
     }
@@ -147,6 +175,18 @@ impl Plan {
                     .is_some_and(|blocker| !blocker.status.settled())
             })
             .collect()
+    }
+
+    /// Whether `task` is settled, ready, or blocked (and by which Tasks).
+    pub fn readiness(&self, task: &Task) -> Readiness {
+        if task.status.settled() {
+            return Readiness::Settled;
+        }
+        let open = self.open_blockers(task);
+        match open.is_empty() {
+            true => Readiness::Ready,
+            false => Readiness::BlockedBy(open),
+        }
     }
 
     /// A Task is ready when every Task it is blocked by is Done or Dropped.
@@ -297,6 +337,23 @@ impl Plan {
     }
 }
 
+/// The Task a Subagent's description names with a `[task:N]` marker, the way
+/// an Agent names the Task a Subagent serves when it spawns it.
+pub fn task_marker(description: &str) -> Option<TaskId> {
+    let lower = description.to_ascii_lowercase();
+    lower.match_indices("[task:").find_map(|(at, marker)| {
+        let rest = &lower[at + marker.len()..];
+        let (id, _) = rest.split_once(']')?;
+        id.trim().parse().ok()
+    })
+}
+
+/// Task ids as a comma-separated list: `1, 2, 3`.
+pub fn join_ids(ids: &[TaskId]) -> String {
+    let ids: Vec<_> = ids.iter().map(ToString::to_string).collect();
+    ids.join(", ")
+}
+
 fn ids(ids: &[TaskId]) -> String {
     let named: Vec<_> = ids.iter().map(|id| format!("Task {id}")).collect();
     named.join(", ")
@@ -389,6 +446,24 @@ mod tests {
         assert_eq!(plan.open_blockers(plan.task(3).unwrap()), [2]);
         status(&mut plan, 2, TaskStatus::Dropped);
         assert!(c(&plan));
+    }
+
+    #[test]
+    fn a_subagent_naming_a_task_in_its_description_is_attached_once() {
+        let mut plan = Plan::default();
+        add(&mut plan, "build", &[]).unwrap();
+        assert_eq!(task_marker("Fix it [Task: 1]"), Some(1));
+        assert_eq!(task_marker("[task:x] then [task:7]"), Some(7));
+        assert_eq!(task_marker("no task"), None);
+
+        assert!(plan.attach_named("sub-1", "[task:1] build it"));
+        assert!(!plan.attach_named("sub-1", "[task:1] build it"));
+        assert!(!plan.attach_named("sub-2", "[task:9] unknown"));
+        assert!(!plan.attach_named("sub-3", "unnamed"));
+        assert_eq!(
+            plan.task(1).unwrap().attachments,
+            [Attachment::Subagent("sub-1".into())]
+        );
     }
 
     #[test]

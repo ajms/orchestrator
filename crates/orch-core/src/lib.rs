@@ -21,7 +21,7 @@ pub use gate::{DiscardPlan, GateRefusal};
 pub use phase::{InvalidTransition, Phase, PhaseEvent};
 pub use plan::{
     Attachment, MAX_ATTACHMENT_ID, MAX_ATTACHMENTS, MAX_BLOCKERS, MAX_LINK, MAX_TASKS, MAX_TITLE,
-    Plan, PlanOp, Task, TaskId, TaskStatus,
+    Plan, PlanOp, Readiness, Task, TaskId, TaskStatus, join_ids, task_marker,
 };
 pub use stacking::{Retarget, retarget};
 pub use status::SessionStatus;

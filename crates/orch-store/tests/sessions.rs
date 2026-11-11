@@ -461,3 +461,34 @@ fn a_plan_persists_with_its_session_until_the_session_is_removed() {
     recreated.phase = Phase::Active;
     assert!(fx.store.save_session(&recreated).unwrap().plan.is_empty());
 }
+
+#[test]
+fn an_undecodable_plan_is_reported_and_never_overwritten() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut session = fx.session(&repo, "corrupt");
+    let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
+    conn.execute(
+        "INSERT INTO plans (session_id, plan) VALUES (?1, 'not json')",
+        [session.id.as_str()],
+    )
+    .unwrap();
+
+    assert!(matches!(
+        fx.store.session(&session.id),
+        Err(StoreError::CorruptPlan { .. })
+    ));
+    session.phase = Phase::Active;
+    assert!(matches!(
+        fx.store.save_session(&session),
+        Err(StoreError::CorruptPlan { .. })
+    ));
+    let kept: String = conn
+        .query_row(
+            "SELECT plan FROM plans WHERE session_id = ?1",
+            [session.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, "not json");
+}

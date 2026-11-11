@@ -25,4 +25,6 @@ orch saw what a Session spawned (Subagents) but not what it meant to do. A Sessi
 
 - "Task" is no longer an _Avoid_ term for Session; Plan and Task join CONTEXT.md.
 - `orch plan` reaches the Daemon from inside the Sandbox, so its input is untrusted and scoped to the caller's own Session.
-- Subagent spawns need a way to name a Task (e.g. a field the orch extension/hook forwards), per Agent adapter.
+- A Subagent names its Task with a `[task:<id>]` marker in its description, which both adapters already forward (Claude's Task tool `description`, read from the Subagent's transcript metadata; pi's `taskName`, or its `task` when it has none). The Daemon attaches it to that Task if it exists; `orch plan attach` covers everything else, such as a description without the marker. Neither Agent lets orch add a dedicated field to its subagent tool, so the marker is the one convention that works for both.
+- `orch` is on the Agent's PATH in every Session, sandboxed or not, and the Broker serves `orch plan` for unsandboxed Sessions while refusing their other requests.
+- The progress marker counts Tasks Done out of the Tasks not Dropped, so dropping a Task takes it out of the total.

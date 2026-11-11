@@ -53,6 +53,17 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 | `env` | Variables every launch of the Agent sets, sandboxed or not. The Daemon passes them to the Holder. |
 | `sandbox_needs` | What the Agent needs from the Sandbox, as `SandboxNeeds { scratch, writable, read_only, carve_outs, projected, hidden, env, env_prefixes }`. The Agent-agnostic `sandbox_args` (`crates/orch-agent/src/sandbox.rs`) turns these and the Session's paths into bwrap args. `scratch` paths are a tmpfs for the life of the Agent, `writable` paths are bound back read-write, `read_only` paths read-only, and `carve_outs` are read-only again inside a writable path. `projected` entries bind a `source` at a different `target`, and `hidden` paths are covered with a tmpfs. Missing paths are skipped, except carve-outs, which `orch` creates empty first so the Agent can't create them. These paths beat the user's `[sandbox]` config: a configured `readable`, `writable` or `hidden` entry at or inside one of them is ignored, and they come back inside a hidden directory. Claude: its Agent profile is `scratch`, with `projects/`, `todos/`, `shell-snapshots/` and `plans/` writable in it. `settings.json`, `settings.local.json`, `hooks/`, `skills/`, `agents/`, `commands/`, `rules/`, `plugins/` and `CLAUDE.md` are projected read-only from `~/.claude` (or `$CLAUDE_CONFIG_DIR`), `.credentials.json` writable, and the profile's rendered `.claude.json` read-only. A `$CLAUDE_CONFIG_DIR` outside `$HOME` is `hidden`. `~/.local/share/claude` and `~/.local/bin` are read-only, with `DISABLE_AUTOUPDATER=1` and `CLAUDE_CONFIG_DIR` set (ADR 0018). The rest of `~/.claude` and the user's `~/.claude.json` never enter the Sandbox. The default needs nothing, so such an Agent sees only the shipped allowlist. |
 
+## `orch` in the Session and the Plan
+
+Every Session's Agent can run `orch` itself: the Daemon puts an `orch` shim (a script that `exec`s the Daemon's own `orch` program) in the Session's `shims/` dir, puts that dir first on the Agent's `PATH` and sets `ORCH_BIN` to the program. A sandboxed Session gets it with the Broker's other shims; a Session whose Preset has `sandbox = false` gets just this one. The Holder sets `ORCH_HOLDER_SOCKET`, so `orch plan` reaches the Daemon through the Session's own Holder and writes only that Session's Plan (ADR 0021). The Broker serves `orch plan` for unsandboxed Sessions too; every other Broker request is still sandboxed-only.
+
+Each adapter tells its Agent about `orch plan`:
+
+- **Claude** gets `PLAN_GUIDANCE` (`crates/orch-agent/src/claude/mod.rs`) with `--append-system-prompt` on launch and resume, so nothing is written to the user's `CLAUDE.md`.
+- **pi** gets the same lines in the `Plan:` section of `UNDER_ORCH` (`prompt.ts`, below).
+
+Both say how to name the Task a Subagent serves: a `[task:<id>]` marker in its description (Claude's Task tool `description`, pi's `taskName`, or the start of pi's `task`). When the Daemon learns a Subagent's description it attaches the Subagent to that Task if it exists (`Plan::attach_named`); an unknown id or no marker leaves it unattached, and `orch plan attach <id> <subagent-id>` still works. Claude's description is read from the Subagent's transcript metadata, so the attachment can lag the spawn until the transcript appears.
+
 ## Choosing a Session's Agent
 
 A Session's Agent is stored on the Session when it is created (`sessions.agent`) and never changes (ADR 0006). A Session stored before that column existed has `NULL` there, which means `claude`.
