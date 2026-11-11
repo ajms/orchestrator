@@ -1,3 +1,4 @@
+mod agent_call;
 mod broker;
 mod client;
 mod daemon;

@@ -63,6 +63,10 @@ impl Attachment {
             Attachment::Subagent(id) | Attachment::ChildSession(id) => id,
         }
     }
+
+    pub fn is_child_session(&self) -> bool {
+        matches!(self, Attachment::ChildSession(_))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

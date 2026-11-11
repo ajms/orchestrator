@@ -1,9 +1,10 @@
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Subcommand;
 use orch_core::{Attachment, Plan, PlanOp, Readiness, TaskId, TaskStatus, join_ids};
-use orch_holder::{BrokerReply, BrokerRequest, HOLDER_SOCKET_ENV, request_broker};
+use orch_holder::{BrokerReply, BrokerRequest};
+
+use crate::agent_call;
 
 /// Writes the Plan of the Session this runs in. Only the Session's Agent
 /// reaches it: the request goes through the Session's Holder socket.
@@ -56,41 +57,19 @@ fn parse_status(text: &str) -> Result<TaskStatus, String> {
 }
 
 pub fn run(command: PlanCommand) -> ExitCode {
-    let Some(socket) = std::env::var_os(HOLDER_SOCKET_ENV).map(PathBuf::from) else {
-        eprintln!("orch plan: run this inside an orch Session");
-        return ExitCode::FAILURE;
-    };
     let json = matches!(command, PlanCommand::Show { json: true });
-    match request_broker(&socket, BrokerRequest::Plan { op: op(command) }) {
-        Ok(BrokerReply::Plan { plan, said }) => {
-            if json {
-                match serde_json::to_string_pretty(&plan) {
-                    Ok(text) => println!("{text}"),
-                    Err(err) => {
-                        eprintln!("orch plan: {err}");
-                        return ExitCode::FAILURE;
-                    }
-                }
-            } else if said.is_empty() {
-                print!("{}", render(&plan));
-            } else {
-                println!("{said}");
+    let request = BrokerRequest::Plan { op: op(command) };
+    agent_call::call("plan", request, |reply| match reply {
+        BrokerReply::Plan { plan, .. } if json => Ok(agent_call::print_json("plan", &plan)),
+        BrokerReply::Plan { plan, said } => {
+            match said.is_empty() {
+                true => print!("{}", render(&plan)),
+                false => println!("{said}"),
             }
-            ExitCode::SUCCESS
+            Ok(ExitCode::SUCCESS)
         }
-        Ok(BrokerReply::Refused { reason }) => {
-            eprintln!("orch plan: {reason}");
-            ExitCode::FAILURE
-        }
-        Ok(other) => {
-            eprintln!("orch plan: the Daemon answered out of turn: {other:?}");
-            ExitCode::FAILURE
-        }
-        Err(err) => {
-            eprintln!("orch plan: {err}");
-            ExitCode::FAILURE
-        }
-    }
+        other => Err(other),
+    })
 }
 
 fn op(command: PlanCommand) -> PlanOp {
@@ -139,18 +118,15 @@ fn render(plan: &Plan) -> String {
         if let Some(link) = &task.link {
             line.push_str(&format!(" link: {link}"));
         }
-        let attached = |child: bool| {
-            task.attachments
-                .iter()
-                .filter(|attachment| matches!(attachment, Attachment::ChildSession(_)) == child)
-                .map(Attachment::id)
-                .collect::<Vec<_>>()
-        };
-        let subagents = attached(false);
+        let (children, subagents): (Vec<_>, Vec<_>) = task
+            .attachments
+            .iter()
+            .partition(|attachment| attachment.is_child_session());
+        let subagents: Vec<_> = subagents.into_iter().map(Attachment::id).collect();
+        let children: Vec<_> = children.into_iter().map(Attachment::id).collect();
         if !subagents.is_empty() {
             line.push_str(&format!(" subagents: {}", subagents.join(", ")));
         }
-        let children = attached(true);
         if !children.is_empty() {
             line.push_str(&format!(" child sessions: {}", children.join(", ")));
         }

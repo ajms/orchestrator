@@ -1,9 +1,10 @@
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Subcommand;
 use orch_core::{SessionOp, TaskId};
-use orch_holder::{BrokerReply, BrokerRequest, HOLDER_SOCKET_ENV, request_broker};
+use orch_holder::{BrokerReply, BrokerRequest};
+
+use crate::agent_call;
 
 /// Starts and finishes Child Sessions of the Session this runs in. Only the
 /// Session's Agent reaches it, through its Holder socket, and it can act only
@@ -46,23 +47,15 @@ pub enum SessionCommand {
 }
 
 pub fn run(command: SessionCommand) -> ExitCode {
-    let Some(socket) = std::env::var_os(HOLDER_SOCKET_ENV).map(PathBuf::from) else {
-        eprintln!("orch session: run this inside an orch Session");
-        return ExitCode::FAILURE;
-    };
     let json = matches!(command, SessionCommand::Status { json: true, .. });
     let spawn = matches!(command, SessionCommand::Spawn { .. });
-    match request_broker(&socket, BrokerRequest::Session { op: op(command) }) {
-        Ok(BrokerReply::Session { said, children }) => {
-            if json {
-                match serde_json::to_string_pretty(&children) {
-                    Ok(text) => println!("{text}"),
-                    Err(err) => {
-                        eprintln!("orch session: {err}");
-                        return ExitCode::FAILURE;
-                    }
-                }
-            } else if spawn {
+    let request = BrokerRequest::Session { op: op(command) };
+    agent_call::call("session", request, |reply| match reply {
+        BrokerReply::Session { children, .. } if json => {
+            Ok(agent_call::print_json("session", &children))
+        }
+        BrokerReply::Session { said, children } => {
+            if spawn {
                 // The id alone on stdout, so scripts can capture it.
                 if let Some(child) = children.first() {
                     println!("{}", child.id);
@@ -71,21 +64,10 @@ pub fn run(command: SessionCommand) -> ExitCode {
             } else {
                 println!("{said}");
             }
-            ExitCode::SUCCESS
+            Ok(ExitCode::SUCCESS)
         }
-        Ok(BrokerReply::Refused { reason }) => {
-            eprintln!("orch session: {reason}");
-            ExitCode::FAILURE
-        }
-        Ok(other) => {
-            eprintln!("orch session: the Daemon answered out of turn: {other:?}");
-            ExitCode::FAILURE
-        }
-        Err(err) => {
-            eprintln!("orch session: {err}");
-            ExitCode::FAILURE
-        }
-    }
+        other => Err(other),
+    })
 }
 
 fn op(command: SessionCommand) -> SessionOp {
