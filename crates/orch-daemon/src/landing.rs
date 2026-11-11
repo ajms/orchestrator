@@ -57,7 +57,70 @@ fn skipped_teardown(reason: impl std::fmt::Display) -> String {
     format!("the Teardown script was skipped: {reason}")
 }
 
+/// Holds a Parent Session open for a Child Session being spawned, so the
+/// parent can't be claimed for Landing or Discarding until the child is
+/// listed (and so seen by the open-children checks).
+pub(crate) struct Spawning {
+    daemon: Arc<Daemon>,
+    id: SessionId,
+}
+
+impl Drop for Spawning {
+    fn drop(&mut self) {
+        if let Some(live) = self.daemon.lock().sessions.get_mut(&self.id) {
+            live.spawning = live.spawning.saturating_sub(1);
+        }
+    }
+}
+
+/// Refuses a Landing or Discard while a Child Session is being spawned.
+pub(crate) fn no_spawning(live: &Live) -> Result<(), String> {
+    match live.spawning {
+        0 => Ok(()),
+        _ => Err(
+            "a Child Session of this Session is being spawned; try again once it is listed".into(),
+        ),
+    }
+}
+
 impl Daemon {
+    /// Refuses spawning a child under a Session claimed for Landing or
+    /// Discarding; otherwise holds the parent until the child is listed.
+    pub(crate) fn reserve_child(
+        self: &Arc<Self>,
+        id: &SessionId,
+    ) -> Result<Spawning, RequestError> {
+        let mut state = self.lock();
+        let live = state
+            .sessions
+            .get_mut(id)
+            .filter(|live| !live.status.phase().is_terminal())
+            .ok_or_else(|| refused("the Parent Session has ended"))?;
+        if live.exclusive {
+            return Err(refused(
+                "the Parent Session is being Landed, Discarded or changed; try again once that is done",
+            ));
+        }
+        live.spawning += 1;
+        Ok(Spawning {
+            daemon: self.clone(),
+            id: id.clone(),
+        })
+    }
+
+    /// Run after claiming: no child can be spawned while the Session is
+    /// claimed, so this catches any spawned since the earlier check.
+    pub(crate) fn refuse_open_children(&self, id: &SessionId) -> Result<(), RequestError> {
+        let open = self.open_children_names(id);
+        match open.is_empty() {
+            true => Ok(()),
+            false => Err(refused(format!(
+                "this Session still has open Child Sessions ({}); Land or Discard them first",
+                open.join(", ")
+            ))),
+        }
+    }
+
     pub(crate) fn claim(
         self: &Arc<Self>,
         id: &SessionId,
@@ -89,13 +152,7 @@ impl Daemon {
         skip_teardown: bool,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
-        let open = self.open_children_names(id);
-        if !open.is_empty() {
-            return Err(refused(format!(
-                "this Session still has open Child Sessions ({}); Land or Discard them first",
-                open.join(", ")
-            )));
-        }
+        self.refuse_open_children(id)?;
         let child = self.snapshot(id).and_then(|(record, _)| record.parent);
         if let Some(parent) = child {
             return match landing {
@@ -110,6 +167,7 @@ impl Daemon {
         }
         let mut recorded = None;
         let (_claim, record, repo) = self.claim(id, |live| {
+            no_spawning(live)?;
             if live.status.flags().base_missing {
                 return Err(format!(
                     "the Base branch {} is gone; retarget the Session first",
@@ -124,6 +182,7 @@ impl Daemon {
             };
             gate.map_err(|refusal| gate_message("Landing", refusal))
         })?;
+        self.refuse_open_children(id)?;
         let pr = match recorded {
             Some(number) => Some(PrToPush::Recorded(number)),
             None => single_open_pr(&repo, &record.branch)
@@ -191,10 +250,12 @@ impl Daemon {
         skip_teardown: bool,
     ) -> Result<Reply, RequestError> {
         let (_claim, record, repo) = self.claim(id, |live| {
+            no_spawning(live)?;
             live.status
                 .check_landing()
                 .map_err(|refusal| gate_message("Landing", refusal))
         })?;
+        self.refuse_open_children(id)?;
         let parent_worktree = self
             .snapshot(parent)
             .map(|(parent, _)| parent.worktree)
@@ -220,10 +281,19 @@ impl Daemon {
             }
             Err(err) => {
                 let reason = err.to_string();
-                let _ = self.update(id, |live| {
-                    live.record.land_failed = Some(reason.clone());
-                    Ok(())
-                });
+                // Only failures the parent must act on mark the child;
+                // nothing to land or a transient git error is just reported.
+                if matches!(
+                    err,
+                    LandingError::Conflict { .. }
+                        | LandingError::ParentDirty { .. }
+                        | LandingError::BaseMoved
+                ) {
+                    let _ = self.update(id, |live| {
+                        live.record.land_failed = Some(reason.clone());
+                        Ok(())
+                    });
+                }
                 match err {
                     LandingError::Conflict { paths } => Err(RequestError::Conflict { paths }),
                     _ => Err(refused(reason)),

@@ -405,3 +405,24 @@ fn offers_only_pushing(phase: orch_protocol::PhaseView) {
         }]
     );
 }
+
+#[test]
+fn a_failed_child_landing_says_the_child_stays_open_not_that_the_agent_rebases() {
+    let mut tui = Harness::new();
+    let mut child = session("webshop", "done");
+    child.parent = Some(id("lead"));
+    tui.sessions(vec![child]);
+    tui.daemon().script_reply(drafted("draft", ""));
+    tui.daemon().script_reply(Err(RequestError::Conflict {
+        paths: vec!["src/a.rs".into()],
+    }));
+    tui.command("land");
+    tui.press(KeyCode::Enter);
+    let status = statusline(&mut tui);
+    assert!(status.contains("src/a.rs"), "{status}");
+    assert!(
+        status.contains("stays open, marked Land failed"),
+        "{status}"
+    );
+    assert!(!status.contains("handed to the Agent"), "{status}");
+}

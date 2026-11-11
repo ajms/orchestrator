@@ -334,6 +334,23 @@ async fn a_conflicting_land_leaves_the_child_open_as_land_failed() {
 }
 
 #[tokio::test]
+async fn a_child_with_nothing_to_land_is_refused_without_marking_it_land_failed() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (parent, _parent_pane) = idle_session(&env, &mut client, "Lead").await;
+    let child = spawn(&env, &mut client, &parent, "Part").await;
+    let _pane = make_idle(&env, &mut client, &child).await;
+
+    let landed = orch_session(&env, &parent, &["land", child.as_str()]).await;
+    assert!(!landed.status.success());
+
+    let reports = status(&env, &parent, &[child.as_str()]).await;
+    assert_ne!(reports[0].state, ChildState::LandFailed);
+    assert!(client.sessions[&child].land_failed.is_none());
+}
+
+#[tokio::test]
 async fn discarding_a_parent_discards_its_open_children_after_listing_them() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;

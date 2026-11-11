@@ -134,7 +134,9 @@ pub(crate) enum Pending {
     Create(PreparingId),
     Trust(Box<Retry>),
     Draft(SessionId, LandingMode),
-    Land,
+    Land {
+        child: bool,
+    },
     DiscardPreview(SessionId),
     Usage,
     Reconcile,
@@ -474,7 +476,7 @@ impl App {
             }
             (Pending::Trust(retry), Ok(_)) => self.request(retry.request, retry.pending),
             (Pending::Draft(session, mode), result) => self.drafted(&session, mode, result),
-            (Pending::Land, Ok(Reply::Landed { commit, warning })) => {
+            (Pending::Land { .. }, Ok(Reply::Landed { commit, warning })) => {
                 self.message = Some(
                     match warning {
                         Some(warning) => format!("Landed as {commit}; warning: {warning}"),
@@ -484,7 +486,7 @@ impl App {
                 );
             }
             (
-                Pending::Land,
+                Pending::Land { .. },
                 Ok(Reply::PrOpened {
                     number,
                     committed_changes,
@@ -498,7 +500,7 @@ impl App {
                 }.into());
             }
             (
-                Pending::Land,
+                Pending::Land { .. },
                 Ok(Reply::Pushed {
                     number,
                     committed_changes,
@@ -511,7 +513,13 @@ impl App {
                     false => format!("pushed to PR #{number}"),
                 }.into());
             }
-            (Pending::Land, Err(RequestError::Conflict { paths })) => {
+            (Pending::Land { child: true }, Err(err)) => {
+                self.message = Some(
+                    format!("Land failed: {err}; the Child Session stays open, marked Land failed")
+                        .into(),
+                );
+            }
+            (Pending::Land { child: false }, Err(RequestError::Conflict { paths })) => {
                 let conflict = RequestError::Conflict { paths };
                 self.message =
                     Some(format!("{conflict}; the rebase was handed to the Agent").into());
@@ -1688,13 +1696,17 @@ impl App {
 
     pub fn land(&mut self, session: SessionId, landing: orch_protocol::Landing) {
         self.message = Some("Landing…".into());
+        let child = self
+            .sessions
+            .get(&session)
+            .is_some_and(|view| view.parent.is_some());
         self.request(
             Request::Land {
                 session,
                 landing,
                 skip_teardown: false,
             },
-            Pending::Land,
+            Pending::Land { child },
         );
     }
 
