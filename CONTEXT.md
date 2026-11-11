@@ -126,11 +126,11 @@ The branch a Session's work is reviewed against and Landed into. A Branch the Or
 _Avoid_: Parent, target, trunk
 
 **Child Session**:
-A Session started from another Session, its Parent Session, by that Session's Agent or by the user. Its Base branch is the Parent Session's Branch, it has its own Worktree that the parent can't write to (nor it to the parent's), and it inherits the parent's Agent and Preset unless others are picked, never a looser Preset without the user's approval. It is Done when its Agent says so with a summary, and is then Landed onto the parent's Branch automatically. Children nest at most two levels deep by default.
+A Session started from another Session, its Parent Session, by that Session's Agent or by the user. Its Base branch is the Parent Session's Branch, it has its own Worktree that the parent can't write to (nor it to the parent's), and it inherits the parent's Agent and Preset unless others are picked, never a looser Preset without the user's approval. It is Done when its Agent says so with a summary; the Parent Session's Agent (or the user) then decides whether to Land it onto the parent's Branch. Children nest at most two levels deep by default.
 _Avoid_: Subagent, sub-session, worker
 
 **Parent Session**:
-The Session a Child Session was started from. It can't be Landed while any of its Child Sessions is open, and Discarding it Discards them too.
+The Session a Child Session was started from. Its Agent decides when to Land each Done child. It can't be Landed while any of its Child Sessions is open, and Discarding it Discards them too.
 _Avoid_: Root session, owner
 
 **Landing**:
