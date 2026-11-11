@@ -115,6 +115,9 @@ fn first_line(view: &SessionView, width: usize) -> Line<'static> {
             Style::new().fg(style::context(percent)),
         ));
     }
+    if let Some(progress) = crate::sidebar::plan_progress(view) {
+        tail.push(Span::raw(format!(" {progress}")).cyan());
+    }
     tail.push(Span::raw(format!(" {}", view.agent)).dark_gray());
     let used: usize = tail.iter().map(|span| span.content.chars().count()).sum();
     let room = width.saturating_sub(marker.content.chars().count() + 1 + used);

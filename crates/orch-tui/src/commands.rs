@@ -70,6 +70,10 @@ const COMMANDS: &[Command] = &[
         run: mute,
     },
     Command {
+        names: &["plan"],
+        run: |app, _| app.show_plan(),
+    },
+    Command {
         names: &["u", "usage"],
         run: |app, _| app.request_usage(),
     },

@@ -1315,6 +1315,7 @@ dependencies = [
  "orch-core",
  "orch-git",
  "rusqlite",
+ "serde_json",
  "tempfile",
 ]
 

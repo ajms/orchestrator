@@ -93,6 +93,9 @@ pub enum BrokerRequest {
     Mirror {
         url: String,
     },
+    Plan {
+        op: orch_core::PlanOp,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +116,7 @@ pub enum BrokerReply {
     Gh { said: String, output: GhOutput },
     Signed { signature: String },
     Mirrored { path: String, said: String },
+    Plan { plan: orch_core::Plan, said: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

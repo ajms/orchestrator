@@ -433,6 +433,7 @@ impl Live {
                     worktree: subagent.outcome.worktree.as_deref().map(Into::into),
                 })
                 .collect(),
+            plan: record.plan.clone(),
         }
     }
 }

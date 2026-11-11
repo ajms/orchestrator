@@ -162,6 +162,7 @@ fn normal(app: &mut App, key: KeyEvent) {
         KeyCode::Char('i') | KeyCode::Char('a') => enter_insert(app),
         KeyCode::Char('d') => app.load_review(ReviewPurpose::BuiltIn),
         KeyCode::Char('D') => app.load_review(ReviewPurpose::External),
+        KeyCode::Char('p') => app.show_plan(),
         KeyCode::Char(':') => app.mode = Mode::CommandLine(String::new()),
         _ => {}
     }

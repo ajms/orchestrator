@@ -1,5 +1,7 @@
+use orch_core::{Attachment, TaskStatus};
 use orch_protocol::{
-    GuardKindView, GuardPrompt, LandingMode, RepoUsage, SessionView, UsageReport, UsageTotalsView,
+    GuardKindView, GuardPrompt, LandingMode, RepoUsage, SessionView, SubagentStateView,
+    UsageReport, UsageTotalsView,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
@@ -30,6 +32,11 @@ pub(super) fn draw(app: &App, frame: &mut Frame) {
         Some(Popup::Discard(confirm)) => discard(frame, confirm),
         Some(Popup::Usage(report)) => usage(frame, report),
         Some(Popup::Retarget(picker)) => retarget(frame, picker),
+        Some(Popup::Plan(session)) => {
+            if let Some(view) = app.sessions.get(session) {
+                plan(frame, view);
+            }
+        }
         None => {}
     }
     if let Some((_, prompt)) = app.guard_prompt() {
@@ -117,6 +124,81 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
     lines.push(Line::default());
     lines.push(Line::from(" y discard · any other key cancels").dark_gray());
     show(frame, " :discard ", Color::Red, lines, 76);
+}
+
+fn plan(frame: &mut Frame, view: &SessionView) {
+    let plan = &view.plan;
+    let mut lines = vec![Line::from(format!(" {}", view.title_or_slug())).bold()];
+    if plan.is_empty() {
+        lines.push(Line::default());
+        lines.push(
+            Line::from(" The Agent has no Plan yet (it writes one with `orch plan`).").dark_gray(),
+        );
+    } else {
+        let (done, total) = plan.progress();
+        lines.push(Line::from(format!(" {done}/{total} done")).dark_gray());
+        lines.push(Line::default());
+    }
+    for task in &plan.tasks {
+        let (mark, colour) = match task.status {
+            TaskStatus::Done => ("✓", Color::Green),
+            TaskStatus::InProgress => ("▶", Color::Cyan),
+            TaskStatus::Dropped => ("–", Color::DarkGray),
+            TaskStatus::Pending => ("○", Color::Reset),
+        };
+        let open = plan.open_blockers(task);
+        let readiness = match (task.status.settled(), open.is_empty()) {
+            (true, _) => Span::raw(""),
+            (false, true) => Span::raw("  ready").green(),
+            (false, false) => Span::raw(format!(
+                "  blocked by {}",
+                open.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+            .yellow(),
+        };
+        let title = match task.status {
+            TaskStatus::Dropped => Span::raw(task.title.clone()).dark_gray().crossed_out(),
+            TaskStatus::Done => Span::raw(task.title.clone()).dark_gray(),
+            _ => Span::raw(task.title.clone()),
+        };
+        lines.push(Line::from(vec![
+            Span::raw(format!(" {:>3} ", task.id)).dark_gray(),
+            Span::styled(format!("{mark} "), Style::new().fg(colour)),
+            title,
+            readiness,
+        ]));
+        if let Some(link) = &task.link {
+            lines.push(Line::from(format!("       {link}")).blue());
+        }
+        for attachment in &task.attachments {
+            let Attachment::Subagent(id) = attachment;
+            let subagent = view.subagents.iter().find(|subagent| &subagent.id == id);
+            let line = match subagent {
+                Some(subagent) => {
+                    let (state, colour) = match subagent.state {
+                        SubagentStateView::Working => ("working", Color::Cyan),
+                        SubagentStateView::Done => ("done", Color::Green),
+                        SubagentStateView::Errored => ("errored", Color::Red),
+                    };
+                    Line::from(vec![
+                        Span::raw(format!(
+                            "       ↳ {}: {} ",
+                            subagent.agent_type, subagent.description
+                        )),
+                        Span::styled(state, Style::new().fg(colour)),
+                    ])
+                }
+                None => Line::from(format!("       ↳ Subagent {id}")).dark_gray(),
+            };
+            lines.push(line);
+        }
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(" Esc / p close").dark_gray());
+    show(frame, " Plan ", Color::Cyan, lines, 84);
 }
 
 fn usage(frame: &mut Frame, report: &UsageReport) {
