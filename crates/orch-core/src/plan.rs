@@ -78,6 +78,15 @@ pub struct Plan {
     pub next_id: TaskId,
 }
 
+/// Where an unsettled Task stands against its blockers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Readiness {
+    /// Done or Dropped.
+    Settled,
+    Ready,
+    BlockedBy(Vec<TaskId>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum PlanOp {
@@ -118,6 +127,11 @@ impl Plan {
         self.tasks.is_empty()
     }
 
+    /// No Task was ever added: nothing worth storing.
+    pub fn is_untouched(&self) -> bool {
+        self.tasks.is_empty() && self.next_id == 0
+    }
+
     pub fn task(&self, id: TaskId) -> Option<&Task> {
         self.tasks.iter().find(|task| task.id == id)
     }
@@ -147,6 +161,18 @@ impl Plan {
                     .is_some_and(|blocker| !blocker.status.settled())
             })
             .collect()
+    }
+
+    /// Whether `task` is settled, ready, or blocked (and by which Tasks).
+    pub fn readiness(&self, task: &Task) -> Readiness {
+        if task.status.settled() {
+            return Readiness::Settled;
+        }
+        let open = self.open_blockers(task);
+        match open.is_empty() {
+            true => Readiness::Ready,
+            false => Readiness::BlockedBy(open),
+        }
     }
 
     /// A Task is ready when every Task it is blocked by is Done or Dropped.
@@ -295,6 +321,12 @@ impl Plan {
         }
         false
     }
+}
+
+/// Task ids as a comma-separated list: `1, 2, 3`.
+pub fn join_ids(ids: &[TaskId]) -> String {
+    let ids: Vec<_> = ids.iter().map(ToString::to_string).collect();
+    ids.join(", ")
 }
 
 fn ids(ids: &[TaskId]) -> String {
