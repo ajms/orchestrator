@@ -17,7 +17,7 @@ use orch_core::{
 use orch_holder::{BrokerReply, GuardId};
 use orch_protocol::{CreateSession, Landing, Reply, RequestError};
 
-use crate::lifecycle::select_preset;
+use crate::lifecycle::{refused, select_preset};
 use crate::state::{Daemon, Live};
 
 /// Parent links are walked at most this far, so a corrupt cycle can't hang.
@@ -164,12 +164,17 @@ fn render(reports: &[ChildReport]) -> String {
 struct Waiting<'a> {
     daemon: &'a Daemon,
     id: SessionId,
+    on: Vec<SessionId>,
 }
 
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
         if let Some(live) = self.daemon.lock().sessions.get_mut(&self.id) {
-            live.waiting = live.waiting.saturating_sub(1);
+            for child in &self.on {
+                if let Some(at) = live.waiting_on.iter().position(|id| id == child) {
+                    live.waiting_on.swap_remove(at);
+                }
+            }
         }
     }
 }
@@ -290,7 +295,7 @@ impl Daemon {
         live.record.land_failed = None;
         state.changed(id);
         if let Some(parent_live) = state.sessions.get_mut(&parent)
-            && parent_live.waiting == 0
+            && !parent_live.waiting_on.contains(id)
         {
             queue_prompt(
                 parent_live,
@@ -356,12 +361,13 @@ impl Daemon {
         let mut ticks = {
             let mut state = self.lock();
             let live = state.sessions.get_mut(id).ok_or("the Session has ended")?;
-            live.waiting += 1;
+            live.waiting_on.extend(ids.iter().cloned());
             state.ticks.subscribe()
         };
         let _waiting = Waiting {
             daemon: self,
             id: id.clone(),
+            on: ids.clone(),
         };
         loop {
             {
@@ -410,6 +416,12 @@ impl Daemon {
                 .sessions
                 .get(&child)
                 .ok_or("the Child Session has ended")?;
+            if live.record.done_summary.is_none() {
+                return Err(format!(
+                    "Child Session {} isn't Done yet; it Lands once it runs `orch session done`",
+                    child.as_str()
+                ));
+            }
             let title = live
                 .record
                 .title
@@ -497,6 +509,40 @@ impl Daemon {
             }
             state.changed(&id);
         }
+    }
+
+    /// Run after claiming: no child can be spawned while the Session is
+    /// claimed, so this catches any spawned since the earlier check.
+    pub(crate) fn refuse_open_children(&self, id: &SessionId) -> Result<(), RequestError> {
+        let open = self.open_children_names(id);
+        match open.is_empty() {
+            true => Ok(()),
+            false => Err(refused(format!(
+                "this Session still has open Child Sessions ({}); Land or Discard them first",
+                open.join(", ")
+            ))),
+        }
+    }
+    /// Muting a Session mutes its descendants too.
+    pub(crate) fn set_muted(&self, id: &SessionId, muted: bool) -> Result<Reply, RequestError> {
+        self.update(id, |live| {
+            live.status.set_muted(muted);
+            Ok(())
+        })?;
+        let descendants = open_descendants(&self.lock().sessions, id);
+        for child in &descendants {
+            let _ = self.update(child, |live| {
+                live.status.set_muted(muted);
+                Ok(())
+            });
+        }
+        if muted {
+            let state = self.lock();
+            for session in std::iter::once(id).chain(&descendants) {
+                state.dismiss(session);
+            }
+        }
+        Ok(Reply::Done)
     }
 
     /// Names of the open descendants, for the Discard confirmation.

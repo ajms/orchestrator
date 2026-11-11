@@ -18,7 +18,7 @@ use orch_store::{NewSession, RepoRoot, SessionRecord};
 
 use crate::agents::{Adapter, adapter_for, resolve_env};
 use crate::branch::{BranchRequest, BranchTarget};
-use crate::children::{depth, open_descendants};
+use crate::children::depth;
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message, store_conversations};
 
@@ -536,28 +536,6 @@ impl Daemon {
         }
         if restart {
             self.launch_agent(id, true).await;
-        }
-        Ok(Reply::Done)
-    }
-
-    /// Muting a Session mutes its descendants too.
-    pub(crate) fn set_muted(&self, id: &SessionId, muted: bool) -> Result<Reply, RequestError> {
-        self.update(id, |live| {
-            live.status.set_muted(muted);
-            Ok(())
-        })?;
-        let descendants = open_descendants(&self.lock().sessions, id);
-        for child in &descendants {
-            let _ = self.update(child, |live| {
-                live.status.set_muted(muted);
-                Ok(())
-            });
-        }
-        if muted {
-            let state = self.lock();
-            for session in std::iter::once(id).chain(&descendants) {
-                state.dismiss(session);
-            }
         }
         Ok(Reply::Done)
     }
