@@ -17,7 +17,7 @@ use orch_core::{
 use orch_holder::{BrokerReply, GuardId};
 use orch_protocol::{CreateSession, Landing, Reply, RequestError};
 
-use crate::lifecycle::select_preset;
+use crate::lifecycle::{refused, select_preset};
 use crate::state::{Daemon, Live};
 
 /// Parent links are walked at most this far, so a corrupt cycle can't hang.
@@ -509,6 +509,40 @@ impl Daemon {
             }
             state.changed(&id);
         }
+    }
+
+    /// Run after claiming: no child can be spawned while the Session is
+    /// claimed, so this catches any spawned since the earlier check.
+    pub(crate) fn refuse_open_children(&self, id: &SessionId) -> Result<(), RequestError> {
+        let open = self.open_children_names(id);
+        match open.is_empty() {
+            true => Ok(()),
+            false => Err(refused(format!(
+                "this Session still has open Child Sessions ({}); Land or Discard them first",
+                open.join(", ")
+            ))),
+        }
+    }
+    /// Muting a Session mutes its descendants too.
+    pub(crate) fn set_muted(&self, id: &SessionId, muted: bool) -> Result<Reply, RequestError> {
+        self.update(id, |live| {
+            live.status.set_muted(muted);
+            Ok(())
+        })?;
+        let descendants = open_descendants(&self.lock().sessions, id);
+        for child in &descendants {
+            let _ = self.update(child, |live| {
+                live.status.set_muted(muted);
+                Ok(())
+            });
+        }
+        if muted {
+            let state = self.lock();
+            for session in std::iter::once(id).chain(&descendants) {
+                state.dismiss(session);
+            }
+        }
+        Ok(Reply::Done)
     }
 
     /// Names of the open descendants, for the Discard confirmation.

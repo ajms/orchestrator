@@ -108,19 +108,6 @@ impl Daemon {
         })
     }
 
-    /// Run after claiming: no child can be spawned while the Session is
-    /// claimed, so this catches any spawned since the earlier check.
-    pub(crate) fn refuse_open_children(&self, id: &SessionId) -> Result<(), RequestError> {
-        let open = self.open_children_names(id);
-        match open.is_empty() {
-            true => Ok(()),
-            false => Err(refused(format!(
-                "this Session still has open Child Sessions ({}); Land or Discard them first",
-                open.join(", ")
-            ))),
-        }
-    }
-
     pub(crate) fn claim(
         self: &Arc<Self>,
         id: &SessionId,
