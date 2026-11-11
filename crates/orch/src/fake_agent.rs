@@ -87,6 +87,9 @@ fn announce(agent_args: &[String]) {
                     say(&format!("worktree-hook> {command}"));
                 }
             }
+            "--append-system-prompt" => {
+                args.next();
+            }
             "--" => {
                 let prompt: Vec<&str> = args.by_ref().map(String::as_str).collect();
                 say(&format!("prompt> {}", prompt.join(" ")));

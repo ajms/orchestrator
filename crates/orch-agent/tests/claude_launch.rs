@@ -265,3 +265,17 @@ fn launch_without_a_worktree_leaves_subagent_worktrees_to_claude() {
     assert!(hook_commands(&settings, "WorktreeCreate").is_empty());
     assert!(hook_commands(&settings, "WorktreeRemove").is_empty());
 }
+
+#[test]
+fn launch_and_resume_tell_claude_about_orch_plan() {
+    let adapter = ClaudeCode::default();
+    let launched = adapter.launch(&spec(Preset::inherit()));
+    let resumed = adapter
+        .resume(&spec(Preset::inherit()), &ConversationId("c1".into()), None)
+        .unwrap();
+    for argv in [launched, resumed] {
+        let prompt = flag(&argv.args, "--append-system-prompt").expect("guidance passed");
+        assert!(prompt.contains("orch plan add"));
+        assert!(prompt.contains("[task:<id>]"));
+    }
+}
