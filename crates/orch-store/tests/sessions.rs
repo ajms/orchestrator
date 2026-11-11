@@ -397,3 +397,67 @@ fn a_deleted_session_is_gone_with_its_conversations_and_port_block() {
         20000
     );
 }
+
+#[test]
+fn a_plan_persists_with_its_session_until_the_session_is_removed() {
+    use orch_core::{Attachment, PlanOp, TaskStatus};
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut session = fx.session(&repo, "planned");
+    let other = fx.session(&repo, "other");
+    assert!(session.plan.is_empty());
+
+    for title in ["design", "build"] {
+        session
+            .plan
+            .apply(PlanOp::Add {
+                title: title.into(),
+                after: None,
+                blocked_by: vec![],
+                link: Some("#241".into()),
+            })
+            .unwrap();
+    }
+    session
+        .plan
+        .apply(PlanOp::Block {
+            task: 2,
+            by: vec![1],
+        })
+        .unwrap();
+    session
+        .plan
+        .apply(PlanOp::Attach {
+            task: 2,
+            attachment: Attachment::Subagent("sub-1".into()),
+        })
+        .unwrap();
+    session
+        .plan
+        .apply(PlanOp::Status {
+            task: 1,
+            status: TaskStatus::Done,
+        })
+        .unwrap();
+    session.phase = Phase::Landed;
+    fx.store.save_session(&session).unwrap();
+    fx.reopen();
+
+    let loaded = fx.store.session(&session.id).unwrap().unwrap();
+    assert_eq!(loaded.plan, session.plan);
+    assert_eq!(loaded.plan.progress(), (1, 2));
+    assert!(
+        fx.store
+            .session(&other.id)
+            .unwrap()
+            .unwrap()
+            .plan
+            .is_empty()
+    );
+
+    fx.store.delete_session(&session.id).unwrap();
+    let mut recreated = fx.session(&repo, "planned");
+    assert!(recreated.plan.is_empty());
+    recreated.phase = Phase::Active;
+    assert!(fx.store.save_session(&recreated).unwrap().plan.is_empty());
+}

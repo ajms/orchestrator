@@ -18,6 +18,7 @@ mod lifecycle;
 mod notifications;
 mod panes;
 mod pi;
+mod plan;
 mod pr;
 mod preset;
 mod reconcile;

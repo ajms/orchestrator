@@ -167,6 +167,12 @@ ALTER TABLE sessions ADD COLUMN pr_base TEXT;
     "
 ALTER TABLE sessions ADD COLUMN agent TEXT;
 ",
+    "
+CREATE TABLE IF NOT EXISTS plans (
+    session_id TEXT PRIMARY KEY REFERENCES sessions (id) ON DELETE CASCADE,
+    plan TEXT NOT NULL
+);
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {

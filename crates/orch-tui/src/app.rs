@@ -201,6 +201,7 @@ pub(crate) enum Popup {
     Discard(DiscardConfirm),
     Usage(UsageReport),
     Retarget(RetargetPicker),
+    Plan(SessionId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -813,6 +814,13 @@ impl App {
 
     pub fn findings(&self) -> usize {
         self.reconcile_report.findings().count()
+    }
+
+    pub fn show_plan(&mut self) {
+        match self.selected.clone() {
+            Some(session) => self.popup = Some(Popup::Plan(session)),
+            None => self.message = Some(NO_SESSION.into()),
+        }
     }
 
     pub fn request_usage(&mut self) {

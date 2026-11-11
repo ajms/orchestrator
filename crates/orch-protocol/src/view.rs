@@ -36,6 +36,8 @@ pub struct SessionView {
     pub context_used_percent: Option<f64>,
     pub cost_usd: Option<f64>,
     pub subagents: Vec<SubagentView>,
+    #[serde(default)]
+    pub plan: orch_core::Plan,
 }
 
 impl SessionView {

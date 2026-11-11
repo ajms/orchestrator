@@ -3,6 +3,7 @@ mod event;
 mod flags;
 mod gate;
 mod phase;
+mod plan;
 mod stacking;
 mod status;
 mod subagent;
@@ -18,6 +19,10 @@ pub use flags::{
 };
 pub use gate::{DiscardPlan, GateRefusal};
 pub use phase::{InvalidTransition, Phase, PhaseEvent};
+pub use plan::{
+    Attachment, MAX_ATTACHMENT_ID, MAX_ATTACHMENTS, MAX_BLOCKERS, MAX_LINK, MAX_TASKS, MAX_TITLE,
+    Plan, PlanOp, Task, TaskId, TaskStatus,
+};
 pub use stacking::{Retarget, retarget};
 pub use status::SessionStatus;
 pub use subagent::{

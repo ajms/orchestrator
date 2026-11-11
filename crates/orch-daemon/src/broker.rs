@@ -5,8 +5,9 @@ use std::time::Instant;
 
 use orch_agent::{GuardAnswer, GuardHit, GuardKind};
 use orch_config::ReadableOwners;
-use orch_core::{Observation, PermissionMode, SessionId};
+use orch_core::{Observation, PermissionMode, PlanOp, SessionId};
 use orch_holder::{BrokerReply, BrokerRequest, GuardId, RefUpdate, RemoteRef, ToHolder};
+use orch_protocol::RequestError;
 use orch_store::SessionRecord;
 use tokio::sync::oneshot;
 
@@ -22,6 +23,8 @@ pub(crate) const SHIMS_DIR: &str = "shims";
 const REMOTE_HELPER: &str = "git-remote-orch";
 const GH_SHIM: &str = "gh";
 const SIGN_SHIM: &str = "orch-ssh-keygen";
+/// Puts `orch` itself on the Sandbox's PATH, for `orch plan`.
+const ORCH_SHIM: &str = "orch";
 const HELPER_URL: &str = "orch::origin";
 const DENIED: &str = "the user denied this in the Orchestrator";
 
@@ -179,6 +182,10 @@ pub(crate) fn install_shims(
             .and_then(|()| std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)))
             .map_err(|err| format!("installing the Broker's {name} shim: {err}"))?;
     }
+    let shim = dir.join(ORCH_SHIM);
+    std::fs::write(&shim, format!("#!/bin/sh\nexec '{quoted}' \"$@\"\n"))
+        .and_then(|()| std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)))
+        .map_err(|err| format!("installing the orch shim: {err}"))?;
     let path = match std::env::var("PATH") {
         Ok(path) if !path.is_empty() => format!("{}:{path}", dir.display()),
         _ => dir.display().to_string(),
@@ -253,7 +260,7 @@ fn notice(reply: &BrokerReply) -> Option<(String, bool)> {
             code => Some((format!("Broker: {said} failed (exit {code})"), true)),
         },
         BrokerReply::Mirrored { said, .. } => Some((format!("Broker: {said}"), false)),
-        BrokerReply::Refs { .. } | BrokerReply::Signed { .. } => None,
+        BrokerReply::Refs { .. } | BrokerReply::Signed { .. } | BrokerReply::Plan { .. } => None,
     }
 }
 
@@ -276,12 +283,13 @@ impl Daemon {
         broker: GuardId,
         request: BrokerRequest,
     ) {
+        let planned = matches!(request, BrokerRequest::Plan { .. });
         let reply = self
             .serve_broker(&id, broker, request)
             .await
             .unwrap_or_else(|reason| BrokerReply::Refused { reason });
         let state = self.lock();
-        if let Some((text, warning)) = notice(&reply) {
+        if let Some((text, warning)) = notice(&reply).filter(|_| !planned) {
             state.relay_notice(&id, text, warning);
         }
         if let Some(live) = state.sessions.get(&id) {
@@ -300,11 +308,12 @@ impl Daemon {
             let live = state.sessions.get(id).ok_or("the Session has ended")?;
             (live.record.clone(), live.repo.clone(), live.sandboxed)
         };
-        if !sandboxed {
+        if !sandboxed && !matches!(request, BrokerRequest::Plan { .. }) {
             return Err("the Broker acts only for sandboxed Sessions".into());
         }
         let branch = record.branch.clone();
         match request {
+            BrokerRequest::Plan { op } => self.plan(id, op),
             BrokerRequest::Refs => {
                 let listed = with_git(repo, move |git| git.branch_on_origin(&branch))
                     .await
@@ -459,6 +468,33 @@ impl Daemon {
                 })
             }
         }
+    }
+
+    /// Applies the Agent's `orch plan` call to its own Session's Plan: the
+    /// Holder socket it came through names the Session, so no other is reachable.
+    fn plan(&self, id: &SessionId, op: PlanOp) -> Result<BrokerReply, String> {
+        if op == PlanOp::Show {
+            let state = self.lock();
+            let live = state.sessions.get(id).ok_or("the Session has ended")?;
+            return Ok(BrokerReply::Plan {
+                plan: live.record.plan.clone(),
+                said: String::new(),
+            });
+        }
+        let mut answer = None;
+        self.update(id, |live| {
+            let said = live.record.plan.apply(op)?;
+            answer = Some(BrokerReply::Plan {
+                plan: live.record.plan.clone(),
+                said,
+            });
+            Ok(())
+        })
+        .map_err(|err| match err {
+            RequestError::Refused { message } => message,
+            other => other.to_string(),
+        })?;
+        answer.ok_or_else(|| "the Session has ended".into())
     }
 
     async fn readable_owners(&self) -> ReadableOwners {

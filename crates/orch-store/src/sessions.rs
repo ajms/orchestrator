@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use orch_agent::{GuardHit, implied_agent};
-use orch_core::{AgentState, ConversationId, Flags, PermissionMode, Phase, PrStatus, SessionId};
+use orch_core::{
+    AgentState, ConversationId, Flags, PermissionMode, Phase, Plan, PrStatus, SessionId,
+};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
 use crate::codec::Stored;
@@ -47,6 +49,7 @@ pub struct SessionRecord {
     pub port_block: Option<PortBlock>,
     pub queued_prompt: Option<String>,
     pub holder_seq: u64,
+    pub plan: Plan,
     pub created_at: SystemTime,
     pub updated_at: SystemTime,
 }
@@ -115,6 +118,7 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         port_block: port_block_from(row)?,
         queued_prompt: row.get("queued_prompt")?,
         holder_seq: row.get::<_, i64>("holder_seq")? as u64,
+        plan: Plan::default(),
         created_at: from_millis(row.get("created_at")?),
         updated_at: from_millis(row.get("updated_at")?),
     })
@@ -202,6 +206,7 @@ impl Store {
                 params![session.id.as_str(), position, Stored(hit.kind), hit.target],
             )?;
         }
+        save_plan(&tx, &session.id, &session.plan)?;
         tx.commit()?;
         self.existing_session(&session.id)
     }
@@ -323,8 +328,38 @@ impl Store {
                 })
             })
             .collect();
+        session.plan = self.plan(&session.id)?;
         Ok(session)
     }
+
+    fn plan(&self, id: &SessionId) -> Result<Plan, StoreError> {
+        let stored: Option<String> = self
+            .conn
+            .prepare_cached("SELECT plan FROM plans WHERE session_id = ?1")?
+            .query_row(params![id.as_str()], |row| row.get(0))
+            .optional()?;
+        Ok(stored
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default())
+    }
+}
+
+fn save_plan(tx: &Transaction, id: &SessionId, plan: &Plan) -> Result<(), StoreError> {
+    if plan.is_empty() && plan.next_id == 0 {
+        tx.execute(
+            "DELETE FROM plans WHERE session_id = ?1",
+            params![id.as_str()],
+        )?;
+        return Ok(());
+    }
+    let json =
+        serde_json::to_string(plan).map_err(|err| StoreError::Io(std::io::Error::other(err)))?;
+    tx.execute(
+        "INSERT INTO plans (session_id, plan) VALUES (?1, ?2)
+         ON CONFLICT (session_id) DO UPDATE SET plan = excluded.plan",
+        params![id.as_str(), json],
+    )?;
+    Ok(())
 }
 
 pub(crate) fn touch(tx: &Transaction, session: &SessionId) -> rusqlite::Result<()> {

@@ -13,6 +13,7 @@ mod mouse;
 mod navigation;
 mod new_form;
 mod new_session;
+mod plan;
 mod preparing;
 mod reconcile;
 mod repo_picker;

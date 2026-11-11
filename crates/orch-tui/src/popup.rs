@@ -73,6 +73,14 @@ pub(crate) fn key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
+        Popup::Plan(_) => {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('p') | KeyCode::Enter
+            ) {
+                app.popup = None;
+            }
+        }
         Popup::Usage(_) => {
             if matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter) {
                 app.popup = None;

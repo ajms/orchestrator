@@ -11,6 +11,12 @@ Sandbox (unless the user's Preset turns it off):
 - Package downloads into those caches may fail. Dependencies belong in the Repo's Setup script, which runs outside the Sandbox.
 - Do not work around a permission error (no alternate paths, env tricks or disabling checks). Stop and tell the user the fix: a \`[sandbox]\` table for the Repo (\`readable\`/\`writable\` paths), the Setup script, or a Preset with \`sandbox = false\`.
 
+Plan: keep this Session's Plan in orch with \`orch plan\` (the user sees it in orch, read-only):
+- \`orch plan add "<title>" [--after <id>] [--blocked-by <id>]... [--link <issue URL or #123>]\` prints the new Task's id.
+- \`orch plan status <id> pending|in-progress|done|dropped\`, \`orch plan block <id> --by <id>...\` (\`unblock\` undoes it), \`orch plan link <id> <ref>\`, \`orch plan attach <id> <subagent-id>\`.
+- \`orch plan show [--json]\` lists the Tasks and which are ready (every blocker Done or Dropped).
+- For multi-step work, write the Plan first and keep statuses current as you go.
+
 GitHub goes through orch's Broker, for this Repo's origin only:
 - git: \`fetch\`/\`pull\` of any ref; \`push\` of this Session's Branch only (\`--force-with-lease\` ok). Plain \`--force\`, other branches, tags, deletions and the Base branch are refused.
 - gh reads: \`issue view/list\`, \`pr view/list/diff/checks\`, \`run view/list\`, \`repo view\`, GET-only \`gh api repos/<owner>/<repo>/...\`.
