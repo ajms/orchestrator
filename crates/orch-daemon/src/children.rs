@@ -500,6 +500,19 @@ impl Daemon {
     }
 
     /// Names of the open descendants, for the Discard confirmation.
+    pub(crate) fn session_name(&self, id: &SessionId) -> String {
+        self.lock()
+            .sessions
+            .get(id)
+            .map(|live| {
+                live.record
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| live.record.slug.clone())
+            })
+            .unwrap_or_else(|| id.as_str().to_string())
+    }
+
     pub(crate) fn open_children_names(&self, id: &SessionId) -> Vec<String> {
         let state = self.lock();
         open_descendants(&state.sessions, id)

@@ -202,6 +202,10 @@ impl Daemon {
                 .ok_or_else(|| refused("the Parent Session has ended"))?;
             create.repo = repo;
         }
+        let _spawning = match &create.parent {
+            Some(parent) => Some(self.reserve_child(parent)?),
+            None => None,
+        };
         let inside = create.repo.clone();
         let root = tokio::task::spawn_blocking(move || RepoRoot::resolve(&inside))
             .await

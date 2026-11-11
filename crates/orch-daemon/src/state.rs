@@ -95,6 +95,8 @@ pub(crate) struct Live {
     pub(crate) last_error: Option<String>,
     pub(crate) panes: PaneSizes,
     pub(crate) exclusive: bool,
+    /// Child Sessions being spawned under this Session right now.
+    pub(crate) spawning: usize,
     pub(crate) comments: CommentCursor,
     pub(crate) recheck: Recheck,
     pub(crate) launching: bool,
@@ -218,6 +220,7 @@ impl Live {
             last_error: None,
             panes: PaneSizes::default(),
             exclusive: false,
+            spawning: 0,
             comments: CommentCursor::default(),
             recheck: Recheck::default(),
             launching: false,
