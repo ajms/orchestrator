@@ -1,4 +1,4 @@
-use orch_core::{Attachment, TaskStatus};
+use orch_core::{Attachment, Readiness, TaskStatus, join_ids};
 use orch_protocol::{
     GuardKindView, GuardPrompt, LandingMode, RepoUsage, SessionView, SubagentStateView,
     UsageReport, UsageTotalsView,
@@ -140,29 +140,19 @@ fn plan(frame: &mut Frame, view: &SessionView) {
         lines.push(Line::default());
     }
     for task in &plan.tasks {
-        let (mark, colour) = match task.status {
-            TaskStatus::Done => ("✓", Color::Green),
-            TaskStatus::InProgress => ("▶", Color::Cyan),
-            TaskStatus::Dropped => ("–", Color::DarkGray),
-            TaskStatus::Pending => ("○", Color::Reset),
+        let plain = Span::raw(task.title.clone());
+        let (mark, colour, title) = match task.status {
+            TaskStatus::Done => ("✓", Color::Green, plain.dark_gray()),
+            TaskStatus::InProgress => ("▶", Color::Cyan, plain),
+            TaskStatus::Dropped => ("–", Color::DarkGray, plain.dark_gray().crossed_out()),
+            TaskStatus::Pending => ("○", Color::Reset, plain),
         };
-        let open = plan.open_blockers(task);
-        let readiness = match (task.status.settled(), open.is_empty()) {
-            (true, _) => Span::raw(""),
-            (false, true) => Span::raw("  ready").green(),
-            (false, false) => Span::raw(format!(
-                "  blocked by {}",
-                open.iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
-            .yellow(),
-        };
-        let title = match task.status {
-            TaskStatus::Dropped => Span::raw(task.title.clone()).dark_gray().crossed_out(),
-            TaskStatus::Done => Span::raw(task.title.clone()).dark_gray(),
-            _ => Span::raw(task.title.clone()),
+        let readiness = match plan.readiness(task) {
+            Readiness::Settled => Span::raw(""),
+            Readiness::Ready => Span::raw("  ready").green(),
+            Readiness::BlockedBy(open) => {
+                Span::raw(format!("  blocked by {}", join_ids(&open))).yellow()
+            }
         };
         lines.push(Line::from(vec![
             Span::raw(format!(" {:>3} ", task.id)).dark_gray(),

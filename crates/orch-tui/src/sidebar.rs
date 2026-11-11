@@ -394,14 +394,14 @@ fn wrap(flags: Vec<Flag>, width: usize) -> Vec<Vec<Flag>> {
     lines
 }
 
-/// Done Subagents fold into the "n done" row; running and errored ones stay
-/// in view, so a failure is seen without unfolding.
 /// The Plan's progress for the Session's sidebar row: Done out of not Dropped.
 pub(crate) fn plan_progress(view: &SessionView) -> Option<String> {
     let (done, total) = view.plan.progress();
     (total > 0).then(|| format!("{done}/{total}"))
 }
 
+/// Done Subagents fold into the "n done" row; running and errored ones stay
+/// in view, so a failure is seen without unfolding.
 pub(crate) fn collapses(subagent: &SubagentView) -> bool {
     subagent.state == SubagentStateView::Done
 }
