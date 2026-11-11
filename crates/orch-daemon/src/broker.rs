@@ -25,6 +25,8 @@ const GH_SHIM: &str = "gh";
 const SIGN_SHIM: &str = "orch-ssh-keygen";
 /// Puts `orch` itself on the Sandbox's PATH, for `orch plan`.
 const ORCH_SHIM: &str = "orch";
+/// The `orch` program the Agent can call, also reachable as `orch` on PATH.
+pub(crate) const ORCH_BIN_ENV: &str = "ORCH_BIN";
 const HELPER_URL: &str = "orch::origin";
 const DENIED: &str = "the user denied this in the Orchestrator";
 
@@ -160,6 +162,28 @@ fn change_asks(mode: Option<PermissionMode>) -> bool {
     matches!(mode, Some(PermissionMode::Plan | PermissionMode::Default))
 }
 
+/// Puts `orch` itself on the Agent's PATH (and names it in `ORCH_BIN`), so
+/// `orch plan` works in every Session, sandboxed or not.
+pub(crate) fn install_orch_shim(dir: &Path, orch: &Path) -> Result<EnvVars, String> {
+    let quoted = orch.to_string_lossy().replace('\'', r"'\''");
+    std::fs::create_dir_all(dir).map_err(|err| format!("installing the orch shim: {err}"))?;
+    let shim = dir.join(ORCH_SHIM);
+    std::fs::write(&shim, format!("#!/bin/sh\nexec '{quoted}' \"$@\"\n"))
+        .and_then(|()| std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)))
+        .map_err(|err| format!("installing the orch shim: {err}"))?;
+    let path = match std::env::var("PATH") {
+        Ok(path) if !path.is_empty() => format!("{}:{path}", dir.display()),
+        _ => dir.display().to_string(),
+    };
+    Ok(vec![
+        ("PATH".to_string(), path),
+        (
+            ORCH_BIN_ENV.to_string(),
+            orch.to_string_lossy().into_owned(),
+        ),
+    ])
+}
+
 pub(crate) fn install_shims(
     dir: &Path,
     orch: &Path,
@@ -182,14 +206,7 @@ pub(crate) fn install_shims(
             .and_then(|()| std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)))
             .map_err(|err| format!("installing the Broker's {name} shim: {err}"))?;
     }
-    let shim = dir.join(ORCH_SHIM);
-    std::fs::write(&shim, format!("#!/bin/sh\nexec '{quoted}' \"$@\"\n"))
-        .and_then(|()| std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)))
-        .map_err(|err| format!("installing the orch shim: {err}"))?;
-    let path = match std::env::var("PATH") {
-        Ok(path) if !path.is_empty() => format!("{}:{path}", dir.display()),
-        _ => dir.display().to_string(),
-    };
+    let mut env = install_orch_shim(dir, orch)?;
     let mut config: Vec<(String, String)> = match (&origin.push_urls[..], &origin.url) {
         ([], None) => vec![("remote.origin.pushurl".into(), HELPER_URL.into())],
         (push_urls, url) => url
@@ -213,7 +230,6 @@ pub(crate) fn install_shims(
             }
         }
     }
-    let mut env = vec![("PATH".to_string(), path)];
     env.extend(identity.map(identity_env).unwrap_or_default());
     match signing_with.filter(|_| identity.is_some()) {
         Some(public) => config.extend([
@@ -308,8 +324,14 @@ impl Daemon {
             let live = state.sessions.get(id).ok_or("the Session has ended")?;
             (live.record.clone(), live.repo.clone(), live.sandboxed)
         };
+        // An unsandboxed Agent has the user's own credentials, so it needs no
+        // Broker for git or gh; but its Plan lives in the daemon, so `orch
+        // plan` is served for every Session.
         if !sandboxed && !matches!(request, BrokerRequest::Plan { .. }) {
-            return Err("the Broker acts only for sandboxed Sessions".into());
+            return Err(
+                "only sandboxed Sessions use the Broker for git and gh; this Session runs them directly"
+                    .into(),
+            );
         }
         let branch = record.branch.clone();
         match request {
@@ -650,6 +672,22 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn an_unsandboxed_session_finds_orch_on_its_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join("shims");
+        let env = install_orch_shim(&shims, Path::new("/opt/it's/orch")).unwrap();
+
+        let path = &env.iter().find(|(key, _)| key == "PATH").unwrap().1;
+        assert!(path.starts_with(&format!("{}", shims.display())));
+        assert!(env.contains(&(ORCH_BIN_ENV.into(), "/opt/it's/orch".into())));
+        let shim = shims.join(ORCH_SHIM);
+        let script = std::fs::read_to_string(&shim).unwrap();
+        assert_eq!(script, "#!/bin/sh\nexec '/opt/it'\\''s/orch' \"$@\"\n");
+        let mode = std::fs::metadata(&shim).unwrap().permissions().mode();
+        assert_eq!(mode & 0o111, 0o111);
     }
 
     #[test]

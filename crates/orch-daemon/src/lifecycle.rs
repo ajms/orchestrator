@@ -701,7 +701,7 @@ impl Daemon {
                 .arg("--port-size")
                 .arg(block.size.to_string());
         }
-        let mut broker_env = Vec::new();
+        let broker_env;
         let mut display = self.lock().display.pairs();
         if let Some(SandboxLaunch { args, warning, env }) = sandbox {
             display.clear();
@@ -711,6 +711,9 @@ impl Daemon {
                 command.arg("--warning").arg(warning);
             }
             broker_env = env;
+        } else {
+            let shims = self.session_dir(&record.id).join(crate::broker::SHIMS_DIR);
+            broker_env = crate::broker::install_orch_shim(&shims, &self.config.orch_program)?;
         }
         let env = session_env(record)
             .into_iter()
