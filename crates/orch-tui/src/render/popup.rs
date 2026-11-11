@@ -129,7 +129,11 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
 fn plan(frame: &mut Frame, view: &SessionView) {
     let plan = &view.plan;
     let mut lines = vec![Line::from(format!(" {}", view.title_or_slug())).bold()];
-    if plan.is_empty() {
+    if let Some(reason) = &plan.unreadable {
+        lines.push(Line::default());
+        lines.push(Line::from(" The stored Plan can't be read; it is kept untouched.").red());
+        lines.push(Line::from(format!(" {reason}")).dark_gray());
+    } else if plan.is_empty() {
         lines.push(Line::default());
         lines.push(
             Line::from(" The Agent has no Plan yet (it writes one with `orch plan`).").dark_gray(),

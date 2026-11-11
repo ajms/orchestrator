@@ -396,6 +396,9 @@ fn wrap(flags: Vec<Flag>, width: usize) -> Vec<Vec<Flag>> {
 
 /// The Plan's progress for the Session's sidebar row: Done out of not Dropped.
 pub(crate) fn plan_progress(view: &SessionView) -> Option<String> {
+    if view.plan.unreadable.is_some() {
+        return Some("plan?".into());
+    }
     let (done, total) = view.plan.progress();
     (total > 0).then(|| format!("{done}/{total}"))
 }
