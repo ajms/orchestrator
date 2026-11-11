@@ -104,8 +104,10 @@ pub(crate) struct Live {
     pub(crate) preset_sandboxed: bool,
     pub(crate) repo_missing: bool,
     pub(crate) transcripts: Option<Box<dyn SubagentTranscripts>>,
-    /// How many `orch session wait` calls of this Session are blocked.
-    pub(crate) waiting: u32,
+    /// The Sessions its blocked `orch session wait` calls wait for, one
+    /// entry per call and id, so a Done child it waits for doesn't also get
+    /// its summary queued as a prompt.
+    pub(crate) waiting_on: Vec<SessionId>,
     end_noticed: bool,
     holder: Option<HolderLink>,
     generation: u64,
@@ -228,7 +230,7 @@ impl Live {
             preset_sandboxed: true,
             repo_missing: false,
             transcripts,
-            waiting: 0,
+            waiting_on: Vec::new(),
             end_noticed: false,
             holder: None,
             generation: 0,

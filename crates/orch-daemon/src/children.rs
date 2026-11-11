@@ -164,12 +164,17 @@ fn render(reports: &[ChildReport]) -> String {
 struct Waiting<'a> {
     daemon: &'a Daemon,
     id: SessionId,
+    on: Vec<SessionId>,
 }
 
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
         if let Some(live) = self.daemon.lock().sessions.get_mut(&self.id) {
-            live.waiting = live.waiting.saturating_sub(1);
+            for child in &self.on {
+                if let Some(at) = live.waiting_on.iter().position(|id| id == child) {
+                    live.waiting_on.swap_remove(at);
+                }
+            }
         }
     }
 }
@@ -290,7 +295,7 @@ impl Daemon {
         live.record.land_failed = None;
         state.changed(id);
         if let Some(parent_live) = state.sessions.get_mut(&parent)
-            && parent_live.waiting == 0
+            && !parent_live.waiting_on.contains(id)
         {
             queue_prompt(
                 parent_live,
@@ -356,12 +361,13 @@ impl Daemon {
         let mut ticks = {
             let mut state = self.lock();
             let live = state.sessions.get_mut(id).ok_or("the Session has ended")?;
-            live.waiting += 1;
+            live.waiting_on.extend(ids.iter().cloned());
             state.ticks.subscribe()
         };
         let _waiting = Waiting {
             daemon: self,
             id: id.clone(),
+            on: ids.clone(),
         };
         loop {
             {
@@ -410,6 +416,12 @@ impl Daemon {
                 .sessions
                 .get(&child)
                 .ok_or("the Child Session has ended")?;
+            if live.record.done_summary.is_none() {
+                return Err(format!(
+                    "Child Session {} isn't Done yet; it Lands once it runs `orch session done`",
+                    child.as_str()
+                ));
+            }
             let title = live
                 .record
                 .title

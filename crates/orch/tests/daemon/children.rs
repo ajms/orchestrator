@@ -246,6 +246,67 @@ async fn done_hands_the_summary_to_a_waiting_parent() {
 }
 
 #[tokio::test]
+async fn done_hands_the_summary_to_a_parent_waiting_on_another_child() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (parent, mut parent_pane) = idle_session(&env, &mut client, "Lead").await;
+    let slow = spawn(&env, &mut client, &parent, "Slow").await;
+    let quick = spawn(&env, &mut client, &parent, "Quick").await;
+    let _slow_pane = make_idle(&env, &mut client, &slow).await;
+    let _quick_pane = make_idle(&env, &mut client, &quick).await;
+
+    let waiting = {
+        let mut command = env.orch();
+        command
+            .args(["session", "wait", slow.as_str()])
+            .env("ORCH_HOLDER_SOCKET", env.holder_socket(&parent));
+        tokio::task::spawn_blocking(move || command.output().unwrap())
+    };
+    let done = orch_session(&env, &quick, &["done", "Quick part built"]).await;
+    assert!(done.status.success(), "{}", stderr(&done));
+    parent_pane.wait_for_text("Quick part built").await;
+
+    let done = orch_session(&env, &slow, &["done", "Slow part built"]).await;
+    assert!(done.status.success(), "{}", stderr(&done));
+    let waited = tokio::time::timeout(WAIT, waiting).await.unwrap().unwrap();
+    assert!(stdout(&waited).contains("Slow part built"));
+}
+
+#[tokio::test]
+async fn a_parent_cannot_land_a_child_that_isnt_done_but_the_user_can() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let (parent, _parent_pane) = idle_session(&env, &mut client, "Lead").await;
+    let child = spawn(&env, &mut client, &parent, "Part").await;
+    let _pane = make_idle(&env, &mut client, &child).await;
+    let child_view = client.sessions[&child].clone();
+    std::fs::write(child_view.worktree.join("part.txt"), "half\n").unwrap();
+
+    let landed = orch_session(&env, &parent, &["land", child.as_str()]).await;
+    assert!(!landed.status.success());
+    assert!(
+        stderr(&landed).contains("isn't Done"),
+        "{}",
+        stderr(&landed)
+    );
+    assert!(client.sessions[&child].land_failed.is_none());
+
+    client
+        .request(Request::Land {
+            session: child.clone(),
+            landing: Landing::Squash {
+                message: "Part".into(),
+            },
+            skip_teardown: false,
+        })
+        .await
+        .unwrap();
+    client.until_removed(&child).await;
+}
+
+#[tokio::test]
 async fn landing_a_child_squashes_it_onto_the_parent_and_keeps_the_parents_work() {
     let env = Env::new();
     let _daemon = env.start_daemon().await;
@@ -308,6 +369,12 @@ async fn a_conflicting_land_leaves_the_child_open_as_land_failed() {
     std::fs::write(child_view.worktree.join("shared.txt"), "child\n").unwrap();
     std::fs::write(parent_view.worktree.join("shared.txt"), "parent\n").unwrap();
     let parent_head = git(&parent_view.worktree, &["rev-parse", "HEAD"]);
+    assert!(
+        orch_session(&env, &child, &["done", "Wrote shared"])
+            .await
+            .status
+            .success()
+    );
 
     let landed = orch_session(&env, &parent, &["land", child.as_str()]).await;
     assert!(!landed.status.success());
@@ -341,6 +408,12 @@ async fn a_child_with_nothing_to_land_is_refused_without_marking_it_land_failed(
     let (parent, _parent_pane) = idle_session(&env, &mut client, "Lead").await;
     let child = spawn(&env, &mut client, &parent, "Part").await;
     let _pane = make_idle(&env, &mut client, &child).await;
+    assert!(
+        orch_session(&env, &child, &["done", "Nothing"])
+            .await
+            .status
+            .success()
+    );
 
     let landed = orch_session(&env, &parent, &["land", child.as_str()]).await;
     assert!(!landed.status.success());

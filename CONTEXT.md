@@ -134,7 +134,7 @@ The Session a Child Session was started from. Its Agent decides when to Land eac
 _Avoid_: Root session, owner
 
 **Landing**:
-Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch, or pushing the Branch to its pull request, opening one if there is none. A Child Session is Landed by a squash onto its Parent Session's Branch; when that fails it stays open as Land failed.
+Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch, or pushing the Branch to its pull request, opening one if there is none. A Child Session is Landed by a squash onto its Parent Session's Branch; when that fails (a conflict, uncommitted changes in the same files, or the parent's Branch moving meanwhile) it stays open as Land failed. The parent's Agent can Land only a Done child; the user can Land any child.
 _Avoid_: Shipping, completing, finishing
 
 **Setup script**:
