@@ -18,6 +18,12 @@ Plan: keep this Session's Plan in orch with \`orch plan\` (the user sees it in o
 - When a subagent serves a Task, put \`[task:<id>]\` in its task name; orch attaches it to that Task.
 - For multi-step work, write the Plan first and keep statuses current as you go.
 
+Child Sessions: for long or interactive work in parallel, start full Sessions on your Branch with \`orch session\`:
+- \`orch session spawn --prompt "<text>" [--task <id>] [--agent <name>] [--preset <name>]\` prints the child's id at once. It gets its own Worktree; neither of you can write to the other's. A looser Preset than yours asks the user.
+- \`orch session wait <id>...\` blocks until each child is done or failed and prints its summary; \`orch session status [<id>...]\` doesn't block.
+- Nothing Lands by itself. Read the child's diff in its Worktree, then \`orch session land <id>\` squashes it onto your Branch (it keeps your uncommitted work; a conflict or your uncommitted changes in the same files fail it as Land failed: fix and retry), or \`orch session discard <id>\`. You can't be Landed while a child is open.
+- In a Child Session, finish with \`orch session done "<summary>"\`; your parent decides whether to Land it.
+
 GitHub goes through orch's Broker, for this Repo's origin only:
 - git: \`fetch\`/\`pull\` of any ref; \`push\` of this Session's Branch only (\`--force-with-lease\` ok). Plain \`--force\`, other branches, tags, deletions and the Base branch are refused.
 - gh reads: \`issue view/list\`, \`pr view/list/diff/checks\`, \`run view/list\`, \`repo view\`, GET-only \`gh api repos/<owner>/<repo>/...\`.
