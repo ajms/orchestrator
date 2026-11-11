@@ -38,3 +38,15 @@ pub fn context(percent: f64) -> Color {
         _ => Color::DarkGray,
     }
 }
+
+/// A Child Session's status: Land failed and Done win over its Agent's state,
+/// since they are what its parent waits on.
+pub fn child_status(view: &SessionView) -> (&'static str, Color) {
+    if view.land_failed.is_some() {
+        ("Land failed", Color::Red)
+    } else if view.done_summary.is_some() {
+        ("Done", Color::Green)
+    } else {
+        status(view)
+    }
+}

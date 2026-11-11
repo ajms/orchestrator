@@ -247,6 +247,7 @@ fn discard_previews_what_would_be_lost_before_a_one_key_confirmation() {
             subject: "Read timeout from config".into(),
         }],
         branch_kept: false,
+        children: Vec::new(),
     }));
     tui.command("discard");
     assert_eq!(
@@ -284,6 +285,7 @@ fn discarding_a_session_on_an_existing_branch_says_the_branch_is_kept() {
         uncommitted: vec!["src/wip.rs".into()],
         unlanded: vec![],
         branch_kept: true,
+        children: Vec::new(),
     }));
 
     tui.command("discard");
@@ -304,6 +306,7 @@ fn any_other_key_cancels_the_discard() {
         uncommitted: vec![],
         unlanded: vec![],
         branch_kept: false,
+        children: Vec::new(),
     }));
     tui.command("discard");
     assert!(tui.screen().contains("nothing uncommitted"));

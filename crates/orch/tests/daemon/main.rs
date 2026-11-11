@@ -3,6 +3,7 @@ mod branch_lookup;
 mod broker;
 #[path = "../shared/bwrap.rs"]
 mod bwrap;
+mod children;
 mod cli;
 mod clipboard;
 mod common;

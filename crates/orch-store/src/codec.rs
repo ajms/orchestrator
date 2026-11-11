@@ -112,6 +112,7 @@ impl Named for GuardKind {
         GuardKind::PrReview,
         GuardKind::PrApproval,
         GuardKind::Issue,
+        GuardKind::ChildPreset,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -124,6 +125,7 @@ impl Named for GuardKind {
             GuardKind::PrReview => "pr_review",
             GuardKind::PrApproval => "pr_approval",
             GuardKind::Issue => "issue",
+            GuardKind::ChildPreset => "child_preset",
         }
     }
 }

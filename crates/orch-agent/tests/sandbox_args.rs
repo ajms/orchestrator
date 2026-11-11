@@ -548,3 +548,32 @@ fn a_masked_file_reads_as_empty_even_inside_a_readable_path() {
     let masked = at(&args, &["--ro-bind", "/dev/null", key]);
     assert_eq!(last_at(&args, &["--ro-bind"]), masked);
 }
+
+/// A Child Session's Worktree and its parent's are siblings under the main
+/// checkout, which is read-only: each Session binds only its own Worktree
+/// writable, so neither can write to the other's.
+#[test]
+fn a_parent_and_its_child_cannot_write_to_each_others_worktree() {
+    const CHILD: &str = "/home/dev/shop/.orchestrator/worktrees/fix-part";
+    let parent = sandbox_args(&layout(), &needs());
+    let child = sandbox_args(
+        &SandboxLayout {
+            worktree: CHILD.into(),
+            subagent_worktrees: "/home/dev/shop/.orchestrator/subagents/fix-part".into(),
+            ..layout()
+        },
+        &needs(),
+    );
+    let writable = |args: &[String], path: &str| {
+        args.windows(3).any(|window| {
+            matches!(window[0].as_str(), "--bind" | "--bind-try") && window[2] == path
+        })
+    };
+    assert!(writable(&parent, WORKTREE));
+    assert!(!writable(&parent, CHILD));
+    assert!(writable(&child, CHILD));
+    assert!(!writable(&child, WORKTREE));
+    for args in [&parent, &child] {
+        assert!(find(args, &["--ro-bind", REPO, REPO]).is_some());
+    }
+}

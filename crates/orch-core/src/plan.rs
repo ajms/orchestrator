@@ -49,11 +49,20 @@ impl TaskStatus {
     }
 }
 
-/// What works on a Task. Child Sessions will join Subagents here.
+/// What works on a Task: a Subagent or a Child Session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Attachment {
     Subagent(String),
+    ChildSession(String),
+}
+
+impl Attachment {
+    pub fn id(&self) -> &str {
+        match self {
+            Attachment::Subagent(id) | Attachment::ChildSession(id) => id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,9 +299,13 @@ impl Plan {
             }
             PlanOp::Attach { task, attachment } => {
                 let index = self.position(task)?;
-                let Attachment::Subagent(subagent) = &attachment;
-                checked_attachment_id(subagent)?;
-                let said = format!("Subagent {subagent} works on Task {task}");
+                checked_attachment_id(attachment.id())?;
+                let said = match &attachment {
+                    Attachment::Subagent(id) => format!("Subagent {id} works on Task {task}"),
+                    Attachment::ChildSession(id) => {
+                        format!("Child Session {id} works on Task {task}")
+                    }
+                };
                 let attachments = &mut self.tasks[index].attachments;
                 if !attachments.contains(&attachment) {
                     if attachments.len() >= MAX_ATTACHMENTS {

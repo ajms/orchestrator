@@ -1,5 +1,6 @@
 mod attention;
 mod branch_status;
+mod children;
 mod clipboard;
 mod commands;
 mod common;

@@ -20,6 +20,8 @@ pub(crate) struct DiscardConfirm {
     pub uncommitted: Vec<String>,
     pub unlanded: Vec<String>,
     pub branch_kept: bool,
+    /// Open Child Sessions Discarded along with it.
+    pub children: Vec<String>,
 }
 
 impl DiscardConfirm {
@@ -43,7 +45,13 @@ impl DiscardConfirm {
             uncommitted,
             unlanded,
             branch_kept,
+            children: Vec::new(),
         }
+    }
+
+    pub fn with_children(mut self, children: Vec<String>) -> Self {
+        self.children = children;
+        self
     }
 
     pub fn confirms(key: KeyEvent) -> bool {

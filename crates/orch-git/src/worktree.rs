@@ -112,6 +112,22 @@ impl Repo {
         Ok(worktree)
     }
 
+    /// A Child Session's Worktree: it branches from its Parent Session's
+    /// Branch as it is locally, never from origin.
+    pub fn create_child_worktree(
+        &self,
+        name: &SessionName,
+        parent_branch: &str,
+    ) -> Result<SessionWorktree, Error> {
+        self.exclude_orchestrator_dir()?;
+        let worktree = self.session_worktree(name, parent_branch);
+        self.git(["worktree", "add", "-q", "--no-track", "-b", &name.branch])
+            .arg(&worktree.path)
+            .arg(head_ref(parent_branch))
+            .run()?;
+        Ok(worktree)
+    }
+
     pub fn fast_forward_from_origin(&self, base: &str) -> Result<(), Error> {
         match self.compare_with_origin(base)? {
             Upstream::Absent | Upstream::Same => Ok(()),

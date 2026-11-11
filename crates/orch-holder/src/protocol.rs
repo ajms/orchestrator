@@ -96,6 +96,9 @@ pub enum BrokerRequest {
     Plan {
         op: orch_core::PlanOp,
     },
+    Session {
+        op: orch_core::SessionOp,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,13 +113,34 @@ pub struct RefUpdate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BrokerReply {
-    Refs { refs: Vec<RemoteRef> },
-    Done { said: String },
-    Refused { reason: String },
-    Gh { said: String, output: GhOutput },
-    Signed { signature: String },
-    Mirrored { path: String, said: String },
-    Plan { plan: orch_core::Plan, said: String },
+    Refs {
+        refs: Vec<RemoteRef>,
+    },
+    Done {
+        said: String,
+    },
+    Refused {
+        reason: String,
+    },
+    Gh {
+        said: String,
+        output: GhOutput,
+    },
+    Signed {
+        signature: String,
+    },
+    Mirrored {
+        path: String,
+        said: String,
+    },
+    Plan {
+        plan: orch_core::Plan,
+        said: String,
+    },
+    Session {
+        said: String,
+        children: Vec<orch_core::ChildReport>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

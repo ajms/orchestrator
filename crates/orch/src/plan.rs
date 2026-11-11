@@ -139,13 +139,20 @@ fn render(plan: &Plan) -> String {
         if let Some(link) = &task.link {
             line.push_str(&format!(" link: {link}"));
         }
-        let subagents: Vec<_> = task
-            .attachments
-            .iter()
-            .map(|Attachment::Subagent(id)| id.as_str())
-            .collect();
+        let attached = |child: bool| {
+            task.attachments
+                .iter()
+                .filter(|attachment| matches!(attachment, Attachment::ChildSession(_)) == child)
+                .map(Attachment::id)
+                .collect::<Vec<_>>()
+        };
+        let subagents = attached(false);
         if !subagents.is_empty() {
             line.push_str(&format!(" subagents: {}", subagents.join(", ")));
+        }
+        let children = attached(true);
+        if !children.is_empty() {
+            line.push_str(&format!(" child sessions: {}", children.join(", ")));
         }
         out.push_str(&line);
         out.push('\n');

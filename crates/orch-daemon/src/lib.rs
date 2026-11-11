@@ -3,6 +3,7 @@ mod branch;
 mod broker;
 mod broker_gh;
 mod broker_sign;
+mod children;
 mod cleanup;
 mod client;
 mod discard;
