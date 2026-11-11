@@ -254,6 +254,7 @@ impl Daemon {
                     preset: new.preset,
                     existing_branch: false,
                     agent: new.agent,
+                    parent: None,
                 })?;
                 match new.port_block {
                     Some(block) => drop(store.hold_port_block(&created.id, block)?),
@@ -912,7 +913,7 @@ impl Daemon {
         let preview = with_git(repo, move |git| git.leftover_preview(&leftover, &base))
             .await?
             .map_err(refused)?;
-        Ok(preview_reply(preview))
+        Ok(preview_reply(preview, Vec::new()))
     }
 
     async fn adopt_leftover(

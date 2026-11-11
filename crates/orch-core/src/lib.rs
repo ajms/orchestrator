@@ -1,4 +1,5 @@
 mod agent_state;
+mod child;
 mod event;
 mod flags;
 mod gate;
@@ -10,6 +11,10 @@ mod subagent;
 mod transcript;
 
 pub use agent_state::AgentState;
+pub use child::{
+    ChildReport, ChildState, DEFAULT_MAX_CHILD_DEPTH, MAX_CHILD_IDS, MAX_CHILD_PROMPT,
+    MAX_CHILD_SUMMARY, SessionOp, checked_text,
+};
 pub use event::{
     AgentEvent, ConversationId, FailureKind, InvalidSessionId, Observation, PermissionMode,
     RateLimit, SessionId, SubagentId, UsageSample,

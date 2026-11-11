@@ -83,6 +83,7 @@ impl Daemon {
     pub(crate) async fn forget_session(&self, id: &SessionId) {
         self.store.flush().await;
         self.lock().remove_session(id);
+        self.adopt_orphans();
     }
 
     pub(crate) async fn free_port_block(&self, id: &SessionId) -> Result<(), String> {

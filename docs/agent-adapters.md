@@ -57,10 +57,12 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 
 Every Session's Agent can run `orch` itself: the Daemon puts an `orch` shim (a script that `exec`s the Daemon's own `orch` program) in the Session's `shims/` dir, puts that dir first on the Agent's `PATH` and sets `ORCH_BIN` to the program. A sandboxed Session gets it with the Broker's other shims; a Session whose Preset has `sandbox = false` gets just this one. The Holder sets `ORCH_HOLDER_SOCKET`, so `orch plan` reaches the Daemon through the Session's own Holder and writes only that Session's Plan (ADR 0021). The Broker serves `orch plan` for unsandboxed Sessions too; every other Broker request is still sandboxed-only.
 
-Each adapter tells its Agent about `orch plan`:
+Each adapter tells its Agent about `orch plan` and `orch session`:
 
 - **Claude** gets `PLAN_GUIDANCE` (`crates/orch-agent/src/claude/mod.rs`) with `--append-system-prompt` on launch and resume, so nothing is written to the user's `CLAUDE.md`.
-- **pi** gets the same lines in the `Plan:` section of `UNDER_ORCH` (`prompt.ts`, below).
+- **pi** gets the same lines in the `Plan:` and `Child Sessions:` sections of `UNDER_ORCH` (`prompt.ts`, below).
+
+Both also explain `orch session` (ADR 0022): `spawn`, `wait`, `status`, `land` and `discard` for a parent, `done "<summary>"` for a child. These reach the Daemon through the same Holder socket as `orch plan` (`BrokerRequest::Session`, served for unsandboxed Sessions too), and their input is untrusted: every id must name the calling Session or one of its descendants, and `land` / `discard` only a strict descendant. `spawn` returns at once; a looser Preset than the parent's (`Preset::loosens_beyond`) is put to the user as a `ChildPreset` Guard prompt. `wait` blocks the call until each child is Done (and its Agent no longer working), failed or gone. A Done child whose parent isn't waiting has its summary queued to the parent's Agent as a prompt.
 
 Both say how to name the Task a Subagent serves: a `[task:<id>]` marker in its description (Claude's Task tool `description`, pi's `taskName`, or the start of pi's `task`). When the Daemon learns a Subagent's description it attaches the Subagent to that Task if it exists (`Plan::attach_named`); an unknown id or no marker leaves it unattached, and `orch plan attach <id> <subagent-id>` still works. Claude's description is read from the Subagent's transcript metadata, so the attachment can lag the spawn until the transcript appears.
 

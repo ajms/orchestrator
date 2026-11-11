@@ -173,6 +173,7 @@ fn removing_a_leftover_previews_what_is_lost_and_needs_confirmation() {
             subject: "Stray work".into(),
         }],
         branch_kept: false,
+        children: Vec::new(),
     }));
     tui.press(KeyCode::Enter);
     let leftover = LeftoverView::Branch {

@@ -276,7 +276,10 @@ fn notice(reply: &BrokerReply) -> Option<(String, bool)> {
             code => Some((format!("Broker: {said} failed (exit {code})"), true)),
         },
         BrokerReply::Mirrored { said, .. } => Some((format!("Broker: {said}"), false)),
-        BrokerReply::Refs { .. } | BrokerReply::Signed { .. } | BrokerReply::Plan { .. } => None,
+        BrokerReply::Refs { .. }
+        | BrokerReply::Signed { .. }
+        | BrokerReply::Plan { .. }
+        | BrokerReply::Session { .. } => None,
     }
 }
 
@@ -299,7 +302,10 @@ impl Daemon {
         broker: GuardId,
         request: BrokerRequest,
     ) {
-        let planned = matches!(request, BrokerRequest::Plan { .. });
+        let planned = matches!(
+            request,
+            BrokerRequest::Plan { .. } | BrokerRequest::Session { .. }
+        );
         let reply = self
             .serve_broker(&id, broker, request)
             .await
@@ -314,7 +320,7 @@ impl Daemon {
     }
 
     async fn serve_broker(
-        &self,
+        self: &Arc<Self>,
         id: &SessionId,
         broker: GuardId,
         request: BrokerRequest,
@@ -325,9 +331,13 @@ impl Daemon {
             (live.record.clone(), live.repo.clone(), live.sandboxed)
         };
         // An unsandboxed Agent has the user's own credentials, so it needs no
-        // Broker for git or gh; but its Plan lives in the daemon, so `orch
-        // plan` is served for every Session.
-        if !sandboxed && !matches!(request, BrokerRequest::Plan { .. }) {
+        // Broker for git or gh; but its Plan and Child Sessions live in the
+        // daemon, so `orch plan` and `orch session` are served for every Session.
+        let own = matches!(
+            request,
+            BrokerRequest::Plan { .. } | BrokerRequest::Session { .. }
+        );
+        if !sandboxed && !own {
             return Err(
                 "only sandboxed Sessions use the Broker for git and gh; this Session runs them directly"
                     .into(),
@@ -336,6 +346,7 @@ impl Daemon {
         let branch = record.branch.clone();
         match request {
             BrokerRequest::Plan { op } => self.plan(id, op),
+            BrokerRequest::Session { op } => self.session_op(id, broker, op).await,
             BrokerRequest::Refs => {
                 let listed = with_git(repo, move |git| git.branch_on_origin(&branch))
                     .await
@@ -539,7 +550,7 @@ impl Daemon {
             .map_or(true, |preset| change_asks(preset.mode))
     }
 
-    async fn ask(
+    pub(crate) async fn ask(
         &self,
         id: &SessionId,
         broker: GuardId,

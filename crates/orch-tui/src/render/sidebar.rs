@@ -14,7 +14,7 @@ use super::style;
 use crate::app::{App, Focus};
 use crate::preparing::{Preparing, PreparingState};
 use crate::sessions::repo_label;
-use crate::sidebar::{FLAG_INDENT, FLAG_SEPARATOR, Flag, Folded, Row, Urgency};
+use crate::sidebar::{FLAG_INDENT, FLAG_SEPARATOR, Flag, Folded, Nesting, Row, Urgency};
 
 const LABEL_WIDTH: usize = 20;
 const SELECTED: Color = Color::Rgb(50, 50, 70);
@@ -50,7 +50,10 @@ fn line(app: &App, row: &Row, width: usize) -> Line<'static> {
             missing,
             folded: Some(folded),
         } => highlighted(folded_heading(repo, *missing, folded), selected),
-        Row::Session(view) => highlighted(first_line(view, width), selected),
+        Row::Session(view) => {
+            let nesting = app.sidebar.nesting(&app.sessions, view);
+            highlighted(first_line(view, &nesting, width), selected)
+        }
         Row::Flags(_, flags) => flag_line(flags),
         Row::Subagent(_, subagent) => highlighted(subagent_line(subagent, width), selected),
         Row::SubagentsDone(_, done) => highlighted(
@@ -97,17 +100,31 @@ fn urgency(urgency: Urgency) -> Span<'static> {
     }
 }
 
-fn first_line(view: &SessionView, width: usize) -> Line<'static> {
+fn first_line(view: &SessionView, nesting: &Nesting, width: usize) -> Line<'static> {
     let marker = match view.flags.unseen {
         true => Span::styled("● ", UNSEEN),
         false => Span::raw("  "),
     };
-    let (label, colour) = style::status(view);
+    let indent = match nesting.depth {
+        0 => String::new(),
+        depth => format!("{}└ ", "  ".repeat(depth - 1)),
+    };
+    let fold = match (&nesting.collapsed, nesting.has_children) {
+        (Some(_), _) => "▸ ",
+        (None, true) => "▾ ",
+        (None, false) => "",
+    };
+    let marker = Span::styled(format!("{}{indent}{fold}", marker.content), marker.style);
+    let (label, colour) = style::child_status(view);
     let (name, colour) = match view.flags.repo_missing {
         true => (Style::new().fg(Color::DarkGray), Color::DarkGray),
         false => (Style::new(), colour),
     };
     let mut tail = vec![Span::styled(label, Style::new().fg(colour))];
+    if let Some(folded) = &nesting.collapsed {
+        tail.push(Span::raw(format!(" +{}", folded.count)).dark_gray());
+        tail.extend(folded.urgency.map(urgency));
+    }
     if let Some(percent) = view.context_used_percent {
         tail.push(Span::raw(" "));
         tail.push(Span::styled(

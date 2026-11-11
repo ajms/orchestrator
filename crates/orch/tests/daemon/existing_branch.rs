@@ -35,6 +35,7 @@ async fn a_session_continues_an_existing_branch_and_discarding_it_keeps_the_bran
             uncommitted: vec!["scratch.txt".into()],
             unlanded: Vec::new(),
             branch_kept: true,
+            children: Vec::new(),
         })
     );
     let reply = client

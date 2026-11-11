@@ -24,7 +24,7 @@ use crate::land::LandForm;
 use crate::layout::Areas;
 use crate::link::RequestId;
 use crate::mouse::Region;
-use crate::new_form::{Field, NewForm};
+use crate::new_form::{Field, NewForm, ParentChoice};
 use crate::pane::PaneMirror;
 use crate::preparing::{Preparing, PreparingId, PreparingState};
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
@@ -522,6 +522,7 @@ impl App {
                     uncommitted,
                     unlanded,
                     branch_kept,
+                    children,
                 }),
             ) => {
                 let question = match self.sessions.get(&session) {
@@ -530,7 +531,8 @@ impl App {
                 };
                 let target = DiscardTarget::Session(session);
                 let confirm =
-                    DiscardConfirm::new(target, question, uncommitted, unlanded, branch_kept);
+                    DiscardConfirm::new(target, question, uncommitted, unlanded, branch_kept)
+                        .with_children(children);
                 self.popup = Some(Popup::Discard(confirm));
             }
             (
@@ -539,6 +541,7 @@ impl App {
                     uncommitted,
                     unlanded,
                     branch_kept,
+                    ..
                 }),
             ) => {
                 let question = format!("Remove the Leftover {}?", leftover.label());
@@ -1105,7 +1108,41 @@ impl App {
             return;
         };
         let mut form = self.new_form();
+        let parent = create.parent.clone();
         form.restore(create);
+        if let Some(parent) = parent.and_then(|id| self.parent_choice(&id)) {
+            form.parent = Some(parent);
+        }
+        self.show_new_form(form);
+    }
+
+    fn parent_choice(&self, id: &SessionId) -> Option<ParentChoice> {
+        let view = self.sessions.get(id)?;
+        Some(ParentChoice {
+            id: view.id.clone(),
+            name: view.title_or_slug().to_string(),
+            branch: view.branch.clone(),
+        })
+    }
+
+    /// The new-Session form for a Child Session of the selected Session.
+    pub fn open_child_form(&mut self) {
+        let Some(view) = self.selected_view() else {
+            self.message = Some("select the Session to start a Child Session of".into());
+            return;
+        };
+        let (id, repo, preset, agent) = (
+            view.id.clone(),
+            view.repo.clone(),
+            view.preset.clone(),
+            view.agent.clone(),
+        );
+        let Some(parent) = self.parent_choice(&id) else {
+            return;
+        };
+        let mut form = self.new_form();
+        form.repo.set(repo);
+        form.child_of(parent, &preset, &agent);
         self.show_new_form(form);
     }
 
@@ -1207,7 +1244,15 @@ impl App {
         self.sidebar.heading.is_some()
     }
 
+    /// `za`: on a Parent Session, collapses or expands its Child Sessions;
+    /// elsewhere, folds the Repo.
     pub fn toggle_cursor_fold(&mut self) {
+        if let Some(Stop::Session(session)) = self.cursor()
+            && self.sessions.has_children(&session)
+        {
+            self.sidebar.toggle_collapsed(&session);
+            return;
+        }
         if let Some(repo) = self.cursor_repo() {
             self.toggle_fold(&repo);
         }
@@ -1230,6 +1275,19 @@ impl App {
         };
         if let Some(repo) = repo {
             self.sidebar.unfold(&repo);
+        }
+        let ancestors: Vec<SessionId> = self
+            .selected_view()
+            .map(|view| {
+                self.sessions
+                    .ancestors(view)
+                    .into_iter()
+                    .map(|ancestor| ancestor.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for ancestor in &ancestors {
+            self.sidebar.uncollapse(ancestor);
         }
         if let Some((view, subagent)) = self.cursor_subagent()
             && crate::sidebar::collapses(subagent)

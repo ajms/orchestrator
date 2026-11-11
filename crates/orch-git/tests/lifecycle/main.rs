@@ -1,3 +1,4 @@
+mod children;
 mod common;
 mod discard;
 mod existing_branch;

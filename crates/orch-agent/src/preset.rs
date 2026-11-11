@@ -41,6 +41,26 @@ impl Preset {
         );
         permissive_mode || !self.allow.is_empty() || self.sandbox == Some(false)
     }
+
+    /// Whether a Child Session on this Preset could do more than its parent
+    /// on `ceiling`: a more permissive mode, leaving the Sandbox, allowing a
+    /// tool the parent doesn't, or dropping one of the parent's denials. A
+    /// Preset that inherits the Agent's own mode counts as the most permissive,
+    /// since the Orchestrator can't see what it inherits.
+    pub fn loosens_beyond(&self, ceiling: &Preset) -> bool {
+        let rank = |mode: Option<PermissionMode>| match mode {
+            Some(PermissionMode::Plan | PermissionMode::DontAsk) => 0,
+            Some(PermissionMode::Default) => 1,
+            Some(PermissionMode::AcceptEdits) => 2,
+            Some(PermissionMode::Auto) => 3,
+            Some(PermissionMode::BypassPermissions) => 4,
+            None => 5,
+        };
+        rank(self.mode) > rank(ceiling.mode)
+            || (ceiling.sandboxed() && !self.sandboxed())
+            || self.allow.iter().any(|tool| !ceiling.allow.contains(tool))
+            || ceiling.deny.iter().any(|tool| !self.deny.contains(tool))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -109,5 +129,47 @@ impl Presets {
         self.get(name)
             .cloned()
             .ok_or_else(|| UnknownPreset(name.into()))
+    }
+}
+
+#[cfg(test)]
+mod ceiling_tests {
+    use super::*;
+
+    fn preset(mode: Option<PermissionMode>) -> Preset {
+        Preset::built_in("p", mode)
+    }
+
+    #[test]
+    fn a_child_preset_may_be_as_strict_or_stricter_than_its_parent() {
+        let ask = preset(Some(PermissionMode::Default));
+        assert!(!preset(Some(PermissionMode::Plan)).loosens_beyond(&ask));
+        assert!(!ask.loosens_beyond(&ask));
+        assert!(preset(Some(PermissionMode::Auto)).loosens_beyond(&ask));
+        assert!(preset(None).loosens_beyond(&ask));
+        assert!(!preset(Some(PermissionMode::Auto)).loosens_beyond(&preset(None)));
+    }
+
+    #[test]
+    fn leaving_the_sandbox_or_widening_tools_loosens() {
+        let parent = Preset {
+            deny: vec!["Bash(rm:*)".into()],
+            ..preset(Some(PermissionMode::Default))
+        };
+        let unsandboxed = Preset {
+            sandbox: Some(false),
+            ..parent.clone()
+        };
+        let allowing = Preset {
+            allow: vec!["Bash".into()],
+            ..parent.clone()
+        };
+        let undenied = Preset {
+            deny: Vec::new(),
+            ..parent.clone()
+        };
+        assert!(unsandboxed.loosens_beyond(&parent));
+        assert!(allowing.loosens_beyond(&parent));
+        assert!(undenied.loosens_beyond(&parent));
     }
 }

@@ -54,6 +54,8 @@ pub(crate) struct State {
     notifier: Notifier,
     rate_limits: RateLimits,
     use_clock: UseClock,
+    /// Bumped whenever a Session changes or goes, for `orch session wait`.
+    pub(crate) ticks: watch::Sender<u64>,
 }
 
 #[derive(Default)]
@@ -100,6 +102,8 @@ pub(crate) struct Live {
     pub(crate) preset_sandboxed: bool,
     pub(crate) repo_missing: bool,
     pub(crate) transcripts: Option<Box<dyn SubagentTranscripts>>,
+    /// How many `orch session wait` calls of this Session are blocked.
+    pub(crate) waiting: u32,
     end_noticed: bool,
     holder: Option<HolderLink>,
     generation: u64,
@@ -221,6 +225,7 @@ impl Live {
             preset_sandboxed: true,
             repo_missing: false,
             transcripts,
+            waiting: 0,
             end_noticed: false,
             holder: None,
             generation: 0,
@@ -434,6 +439,9 @@ impl Live {
                 })
                 .collect(),
             plan: record.plan.clone(),
+            parent: record.parent.clone(),
+            done_summary: record.done_summary.clone(),
+            land_failed: record.land_failed.clone(),
         }
     }
 }
@@ -449,6 +457,7 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::PrReview => GuardKindView::PrReview,
         GuardKind::PrApproval => GuardKindView::PrApproval,
         GuardKind::Issue => GuardKindView::Issue,
+        GuardKind::ChildPreset => GuardKindView::ChildPreset,
     }
 }
 
@@ -530,6 +539,7 @@ impl Daemon {
                 notifier,
                 rate_limits: RateLimits::default(),
                 use_clock: UseClock::default(),
+                ticks: watch::Sender::new(0),
             }),
             store,
             shutdown: Notify::new(),
@@ -849,6 +859,7 @@ impl State {
         for client in self.clients.values() {
             client.outbox.session_changed(view.clone());
         }
+        self.ticks.send_modify(|tick| *tick += 1);
     }
 
     pub(crate) fn remove_session(&mut self, id: &SessionId) {
@@ -858,6 +869,7 @@ impl State {
         for client in self.clients.values() {
             client.outbox.session_removed(id.clone());
         }
+        self.ticks.send_modify(|tick| *tick += 1);
     }
 
     pub(crate) fn publish_report(&mut self, report: &ReconcileReport) {

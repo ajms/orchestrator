@@ -34,7 +34,7 @@ pub(super) fn draw(app: &App, frame: &mut Frame) {
         Some(Popup::Retarget(picker)) => retarget(frame, picker),
         Some(Popup::Plan(session)) => {
             if let Some(view) = app.sessions.get(session) {
-                plan(frame, view);
+                plan(frame, view, &app.sessions);
             }
         }
         None => {}
@@ -115,6 +115,16 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
                 .map(|commit| Line::from(format!("   {commit}"))),
         );
     }
+    if !preview.children.is_empty() {
+        lines.push(Line::default());
+        lines.push(Line::from(" Its open Child Sessions are Discarded too:").red());
+        lines.extend(
+            preview
+                .children
+                .iter()
+                .map(|child| Line::from(format!("   {child}"))),
+        );
+    }
     if preview.branch_kept {
         lines.push(Line::default());
         lines.push(
@@ -126,7 +136,22 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
     show(frame, " :discard ", Color::Red, lines, 76);
 }
 
-fn plan(frame: &mut Frame, view: &SessionView) {
+/// A Child Session attached to a Task, with where it stands.
+fn child_line(sessions: &crate::sessions::Sessions, id: &str) -> Line<'static> {
+    let Some(child) = orch_core::SessionId::parse(id)
+        .ok()
+        .and_then(|id| sessions.get(&id))
+    else {
+        return Line::from(format!("       ⇲ Child Session {id} (ended)")).dark_gray();
+    };
+    let (state, colour) = super::style::child_status(child);
+    Line::from(vec![
+        Span::raw(format!("       ⇲ {} ", child.title_or_slug())),
+        Span::styled(state, Style::new().fg(colour)),
+    ])
+}
+
+fn plan(frame: &mut Frame, view: &SessionView, sessions: &crate::sessions::Sessions) {
     let plan = &view.plan;
     let mut lines = vec![Line::from(format!(" {}", view.title_or_slug())).bold()];
     if let Some(reason) = &plan.unreadable {
@@ -168,7 +193,13 @@ fn plan(frame: &mut Frame, view: &SessionView) {
             lines.push(Line::from(format!("       {link}")).blue());
         }
         for attachment in &task.attachments {
-            let Attachment::Subagent(id) = attachment;
+            let id = match attachment {
+                Attachment::Subagent(id) => id,
+                Attachment::ChildSession(id) => {
+                    lines.push(child_line(sessions, id));
+                    continue;
+                }
+            };
             let subagent = view.subagents.iter().find(|subagent| &subagent.id == id);
             let line = match subagent {
                 Some(subagent) => {
@@ -308,6 +339,7 @@ fn guard_kind(kind: GuardKindView) -> &'static str {
         GuardKindView::PrReview => "PR review on GitHub, through the Broker",
         GuardKindView::PrApproval => "PR approval as you, through the Broker",
         GuardKindView::Issue => "Issue on GitHub, through the Broker",
+        GuardKindView::ChildPreset => "Child Session on a looser Preset than this one",
     }
 }
 

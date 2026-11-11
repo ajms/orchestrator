@@ -7,6 +7,7 @@ mod hold;
 mod hook;
 mod plan;
 mod repo;
+mod session;
 mod subprocess;
 mod systemd;
 mod tap;
@@ -50,6 +51,10 @@ enum Command {
     Plan(plan::PlanCommand),
     #[command(subcommand)]
     Repo(repo::RepoCommand),
+    /// Start, wait for, Land and Discard Child Sessions (run by the Agent
+    /// inside a Session).
+    #[command(subcommand)]
+    Session(session::SessionCommand),
     Tap {
         #[arg(long)]
         session: String,
@@ -82,6 +87,7 @@ fn main() -> ExitCode {
         Some(Command::Hold(args)) => hold::run(args),
         Some(Command::Hook { session, agent }) => hook::run(&session, &agent),
         Some(Command::Plan(command)) => plan::run(command),
+        Some(Command::Session(command)) => session::run(command),
         Some(Command::Repo(command)) => repo::run(command),
         Some(Command::Tap { session, agent }) => tap::run(&session, &agent),
         Some(Command::Trust(args)) => trust::run(args),

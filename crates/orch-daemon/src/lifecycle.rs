@@ -18,6 +18,7 @@ use orch_store::{NewSession, RepoRoot, SessionRecord};
 
 use crate::agents::{Adapter, adapter_for, resolve_env};
 use crate::branch::{BranchRequest, BranchTarget};
+use crate::children::{depth, open_descendants};
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message, store_conversations};
 
@@ -187,9 +188,20 @@ impl Daemon {
 
     pub(crate) async fn create_session(
         self: &Arc<Self>,
-        create: CreateSession,
+        mut create: CreateSession,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
+        if let Some(parent) = &create.parent {
+            if create.branch.is_some() || create.base.is_some() {
+                return Err(refused(
+                    "a Child Session gets a new Branch on its Parent Session's Branch",
+                ));
+            }
+            let (_, repo) = self
+                .snapshot(parent)
+                .ok_or_else(|| refused("the Parent Session has ended"))?;
+            create.repo = repo;
+        }
         let inside = create.repo.clone();
         let root = tokio::task::spawn_blocking(move || RepoRoot::resolve(&inside))
             .await
@@ -230,12 +242,33 @@ impl Daemon {
             .loader
             .repo(root.path(), approval.as_ref())
             .map_err(refused)?;
-        let preset = select_preset(root.path(), &config, create.preset.as_deref())?;
+        let parent = match &create.parent {
+            Some(id) => Some(self.parent_of_child(id)?),
+            None => None,
+        };
+        let global = self.config.loader.global().map_err(refused)?;
+        if let Some(parent) = &parent
+            && parent.depth > global.max_child_depth
+        {
+            return Err(refused(format!(
+                "Child Sessions nest at most {} levels deep",
+                global.max_child_depth
+            )));
+        }
+        let inherited_preset = parent.as_ref().map(|parent| parent.preset.as_str());
+        let preset = select_preset(
+            root.path(),
+            &config,
+            create.preset.as_deref().or(inherited_preset),
+        )?;
         let preset_sandboxed = preset.sandboxed();
         if config.setup_script().is_err() {
             return Err(untrusted(root.path(), &config));
         }
-        let picked = create.agent.as_deref();
+        let picked = create
+            .agent
+            .as_deref()
+            .or(parent.as_ref().map(|parent| parent.agent.as_str()));
         let agent = config
             .agent(picked.unwrap_or(config.default_agent()))
             .map_err(|_| untrusted(root.path(), &config))?;
@@ -248,15 +281,15 @@ impl Daemon {
             self.probe_sandbox(None, root.path(), adapter.as_ref(), &configured)
                 .map_err(refused)?;
         }
-        let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
         let requested = match &target {
             Some(target) => target.base(create.base)?,
             None => create.base,
         };
-        let base = match requested {
-            Some(base) => base,
-            None => git.default_base(config.base_branch()).map_err(refused)?,
+        let base = match (&parent, requested) {
+            (Some(parent), _) => parent.branch.clone(),
+            (None, Some(base)) => base,
+            (None, None) => git.default_base(config.base_branch()).map_err(refused)?,
         };
         let (name, resolved) = match &target {
             Some(target) => {
@@ -280,9 +313,10 @@ impl Daemon {
         };
         let existing_branch = resolved.is_some();
         let id = new_session_id()?;
-        let worktree = match &resolved {
-            Some(resolved) => git.attach_existing_branch(&name, &base, resolved),
-            None => git.create_worktree(&name, &base),
+        let worktree = match (&resolved, &parent) {
+            (Some(resolved), _) => git.attach_existing_branch(&name, &base, resolved),
+            (None, Some(_)) => git.create_child_worktree(&name, &base),
+            (None, None) => git.create_worktree(&name, &base),
         }
         .map_err(refused)?;
         let rollback = SessionWorktree {
@@ -300,6 +334,7 @@ impl Daemon {
             preset: preset.name,
             existing_branch,
             agent: agent.name,
+            parent: create.parent.clone(),
         };
         let ports = global.ports;
         let stored = self.store.call_blocking(move |store| {
@@ -339,6 +374,21 @@ impl Daemon {
                 .map_err(refused)?;
         }
         Ok(live)
+    }
+
+    fn parent_of_child(&self, id: &SessionId) -> Result<ParentOfChild, RequestError> {
+        let state = self.lock();
+        let live = state
+            .sessions
+            .get(id)
+            .filter(|live| !live.status.phase().is_terminal())
+            .ok_or_else(|| refused("the Parent Session has ended"))?;
+        Ok(ParentOfChild {
+            branch: live.record.branch.clone(),
+            agent: live.record.agent.clone(),
+            preset: live.record.preset.clone(),
+            depth: depth(&state.sessions, id) + 1,
+        })
     }
 
     pub(crate) async fn check_launch(
@@ -486,13 +536,24 @@ impl Daemon {
         Ok(Reply::Done)
     }
 
+    /// Muting a Session mutes its descendants too.
     pub(crate) fn set_muted(&self, id: &SessionId, muted: bool) -> Result<Reply, RequestError> {
         self.update(id, |live| {
             live.status.set_muted(muted);
             Ok(())
         })?;
+        let descendants = open_descendants(&self.lock().sessions, id);
+        for child in &descendants {
+            let _ = self.update(child, |live| {
+                live.status.set_muted(muted);
+                Ok(())
+            });
+        }
         if muted {
-            self.lock().dismiss(id);
+            let state = self.lock();
+            for session in std::iter::once(id).chain(&descendants) {
+                state.dismiss(session);
+            }
         }
         Ok(Reply::Done)
     }
@@ -770,6 +831,7 @@ impl Daemon {
                 _ => {}
             }
         }
+        daemon.adopt_orphans();
         daemon
     }
 
@@ -828,6 +890,14 @@ impl Daemon {
         }
         known
     }
+}
+
+struct ParentOfChild {
+    branch: String,
+    agent: String,
+    preset: String,
+    /// The depth the child would have.
+    depth: usize,
 }
 
 struct SandboxLaunch {

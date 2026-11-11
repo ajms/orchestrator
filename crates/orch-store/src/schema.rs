@@ -173,6 +173,11 @@ CREATE TABLE IF NOT EXISTS plans (
     plan TEXT NOT NULL
 );
 ",
+    "
+ALTER TABLE sessions ADD COLUMN parent_id TEXT;
+ALTER TABLE sessions ADD COLUMN done_summary TEXT;
+ALTER TABLE sessions ADD COLUMN land_failed TEXT;
+",
 ];
 
 pub(crate) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {

@@ -130,6 +130,7 @@ fn a_session_keeps_the_agent_it_was_created_with() {
         .store
         .create_session(NewSession {
             agent: "pi".into(),
+            parent: None,
             ..new_session(&repo, "on-pi")
         })
         .unwrap();
@@ -148,7 +149,10 @@ fn a_session_stored_before_agents_were_recorded_resolves_to_claude() {
     let repo = fx.register("proj");
     let session = fx.session(&repo, "older");
     let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
-    conn.execute_batch("ALTER TABLE sessions DROP COLUMN agent; PRAGMA user_version = 11;")
+    conn.execute_batch(concat!(
+        "ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN done_summary; ALTER TABLE sessions DROP COLUMN land_failed; ",
+        "ALTER TABLE sessions DROP COLUMN agent; PRAGMA user_version = 11;"
+    ))
         .unwrap();
 
     fx.reopen();
@@ -166,7 +170,10 @@ fn a_session_stored_before_existing_branches_loads_as_on_a_branch_orch_created()
     let session = fx.session(&repo, "older");
     let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
     conn.execute_batch(
-        "ALTER TABLE sessions DROP COLUMN agent; ALTER TABLE sessions DROP COLUMN pr_base; ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;",
+        concat!(
+            "ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN done_summary; ALTER TABLE sessions DROP COLUMN land_failed; ",
+            "ALTER TABLE sessions DROP COLUMN agent; ALTER TABLE sessions DROP COLUMN pr_base; ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;"
+        ),
     )
     .unwrap();
 
@@ -510,4 +517,31 @@ fn an_undecodable_plan_is_marked_unreadable_and_never_overwritten() {
         )
         .unwrap();
     assert_eq!(kept, "not json");
+}
+
+#[test]
+fn a_child_session_keeps_its_parent_done_summary_and_land_failure() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let parent = fx.session(&repo, "parent");
+    let child = fx
+        .store
+        .create_session(NewSession {
+            parent: Some(parent.id.clone()),
+            base: parent.branch.clone(),
+            ..common::new_session(&repo, "child")
+        })
+        .unwrap();
+    assert_eq!(child.parent.as_ref(), Some(&parent.id));
+    assert_eq!(parent.parent, None);
+
+    let mut saved = child.clone();
+    saved.done_summary = Some("Built it".into());
+    saved.land_failed = Some("conflict in a.rs".into());
+    fx.store.save_session(&saved).unwrap();
+    fx.reopen();
+    let loaded = fx.store.session(&child.id).unwrap().unwrap();
+    assert_eq!(loaded.parent.as_ref(), Some(&parent.id));
+    assert_eq!(loaded.done_summary.as_deref(), Some("Built it"));
+    assert_eq!(loaded.land_failed.as_deref(), Some("conflict in a.rs"));
 }

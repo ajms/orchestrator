@@ -74,6 +74,7 @@ pub fn new_session(repo: &Repo, slug: &str) -> NewSession {
         preset: "inherit".into(),
         existing_branch: false,
         agent: "claude".into(),
+        parent: None,
     }
 }
 
