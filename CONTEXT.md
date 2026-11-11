@@ -91,7 +91,7 @@ _Avoid_: Chat, thread, transcript
 
 **Subagent**:
 A helper the Agent spawns inside its own Session; it shares the Session's Worktree or works in a worktree of its own, such as a Subagent worktree, and is not a Session itself. It is Working until it ends, then Done, or Errored when its Agent reports it failed.
-_Avoid_: Child session, worker, sub-session
+_Avoid_: worker, sub-session (a spawned Session is a Child Session)
 
 **Subagent worktree**:
 A git worktree the Agent asks for to isolate one Subagent. It branches from the Session's HEAD, lives under `.orchestrator/subagents/<slug>/`, counts as inside the Session for Guards, and is removed with the Session. The Orchestrator records its base when it is created and its tip when it is removed, for the Subagent's Review.
@@ -102,7 +102,7 @@ The ordered Tasks one Session's Agent is working through. Each Session has at mo
 _Avoid_: Todo list, roadmap, checklist
 
 **Task**:
-One step of a Plan: a title, a status (Pending, In progress, Done or Dropped), the Tasks it is blocked by, and optionally the Subagents working on it and a link to an issue in any tracker. A Task is ready when every Task it is blocked by is Done or Dropped. It needs no Subagent.
+One step of a Plan: a title, a status (Pending, In progress, Done or Dropped), the Tasks it is blocked by, and optionally the Subagents or Child Sessions working on it and a link to an issue in any tracker. A Task is ready when every Task it is blocked by is Done or Dropped. It needs no Subagent.
 _Avoid_: Step, todo, item, job
 
 **Subagent transcript**:
@@ -125,8 +125,16 @@ _Avoid_: Adopted branch (adopting is a Reconciliation fix for Leftovers), foreig
 The branch a Session's work is reviewed against and Landed into. A Branch the Orchestrator creates starts from it.
 _Avoid_: Parent, target, trunk
 
+**Child Session**:
+A Session started from another Session, its Parent Session, by that Session's Agent or by the user. Its Base branch is the Parent Session's Branch, it has its own Worktree that the parent can't write to (nor it to the parent's), and it inherits the parent's Agent and Preset unless others are picked, never a looser Preset without the user's approval. It is Done when its Agent says so with a summary, and is then Landed onto the parent's Branch automatically. Children nest at most two levels deep by default.
+_Avoid_: Subagent, sub-session, worker
+
+**Parent Session**:
+The Session a Child Session was started from. It can't be Landed while any of its Child Sessions is open, and Discarding it Discards them too.
+_Avoid_: Root session, owner
+
 **Landing**:
-Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch, or pushing the Branch to its pull request, opening one if there is none.
+Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch, or pushing the Branch to its pull request, opening one if there is none. A Child Session is Landed by a squash onto its Parent Session's Branch; when that fails it stays open as Land failed.
 _Avoid_: Shipping, completing, finishing
 
 **Setup script**:
