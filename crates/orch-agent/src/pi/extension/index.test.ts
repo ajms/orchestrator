@@ -523,7 +523,7 @@ test("an orch Session appends the Under orch section to pi's system prompt", () 
 	const [result] = pi.emit("before_agent_start", { prompt: "hi", systemPrompt: "You are pi." });
 	assert.deepEqual(result, { systemPrompt: `You are pi.\n\n${UNDER_ORCH}` });
 	assert.match(UNDER_ORCH, /^# Under orch/);
-	assert.ok(UNDER_ORCH.split("\n").length <= 25);
+	assert.ok(UNDER_ORCH.split("\n").length <= 32);
 });
 
 test("without an orch Session the system prompt is left alone", () => {

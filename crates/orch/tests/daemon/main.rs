@@ -3,6 +3,7 @@ mod branch_lookup;
 mod broker;
 #[path = "../shared/bwrap.rs"]
 mod bwrap;
+mod children;
 mod cli;
 mod clipboard;
 mod common;
@@ -18,6 +19,7 @@ mod lifecycle;
 mod notifications;
 mod panes;
 mod pi;
+mod plan;
 mod pr;
 mod preset;
 mod reconcile;

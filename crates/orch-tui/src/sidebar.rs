@@ -51,6 +51,12 @@ pub(crate) enum Urgency {
     Unseen,
 }
 
+pub(crate) struct Nesting {
+    pub depth: usize,
+    pub has_children: bool,
+    pub collapsed: Option<Folded>,
+}
+
 pub(crate) struct Folded {
     pub count: usize,
     pub urgency: Option<Urgency>,
@@ -141,6 +147,8 @@ impl Viewport {
 pub(crate) struct SidebarView {
     folded: HashSet<PathBuf>,
     expanded: HashSet<SessionId>,
+    /// Parent Sessions whose Child Sessions are hidden.
+    collapsed: HashSet<SessionId>,
     scroll: usize,
     pub heading: Option<PathBuf>,
     pub preparing_row: Option<PreparingId>,
@@ -159,6 +167,45 @@ impl SidebarView {
 
     pub fn unfold(&mut self, repo: &Path) {
         self.folded.remove(repo);
+    }
+
+    pub fn is_collapsed(&self, session: &SessionId) -> bool {
+        self.collapsed.contains(session)
+    }
+
+    pub fn toggle_collapsed(&mut self, session: &SessionId) {
+        if !self.collapsed.remove(session) {
+            self.collapsed.insert(session.clone());
+        }
+    }
+
+    pub fn uncollapse(&mut self, session: &SessionId) {
+        self.collapsed.remove(session);
+    }
+
+    /// A Child Session under a collapsed ancestor isn't shown.
+    pub fn hidden(&self, sessions: &Sessions, view: &SessionView) -> bool {
+        sessions
+            .ancestors(view)
+            .iter()
+            .any(|ancestor| self.is_collapsed(&ancestor.id))
+    }
+
+    /// How a Session's row nests: its depth, and for a collapsed parent the
+    /// number of hidden descendants and their most urgent mark.
+    pub fn nesting(&self, sessions: &Sessions, view: &SessionView) -> Nesting {
+        let collapsed = self.is_collapsed(&view.id).then(|| {
+            let hidden = sessions.descendants(&view.id);
+            Folded {
+                count: hidden.len(),
+                urgency: urgency(&hidden),
+            }
+        });
+        Nesting {
+            depth: sessions.ancestors(view).len(),
+            has_children: sessions.has_children(&view.id),
+            collapsed: collapsed.filter(|folded| folded.count > 0),
+        }
     }
 
     pub fn is_expanded(&self, session: &SessionId) -> bool {
@@ -214,6 +261,7 @@ impl SidebarView {
                     stops.extend(
                         sessions
                             .in_repo(repo)
+                            .filter(|view| !self.hidden(sessions, view))
                             .map(|view| Stop::Session(view.id.clone())),
                     );
                     stops.extend(
@@ -253,7 +301,10 @@ impl SidebarView {
                 folded,
             });
             if unfolded {
-                rows.extend(views.into_iter().flat_map(|view| {
+                let shown = views
+                    .into_iter()
+                    .filter(|view| !self.hidden(sessions, view));
+                rows.extend(shown.flat_map(|view| {
                     let expanded = self.is_expanded(&view.id);
                     session_rows(view, width, expanded)
                 }));
@@ -392,6 +443,15 @@ fn wrap(flags: Vec<Flag>, width: usize) -> Vec<Vec<Flag>> {
         lines.push(current);
     }
     lines
+}
+
+/// The Plan's progress for the Session's sidebar row: Done out of not Dropped.
+pub(crate) fn plan_progress(view: &SessionView) -> Option<String> {
+    if view.plan.unreadable.is_some() {
+        return Some("plan?".into());
+    }
+    let (done, total) = view.plan.progress();
+    (total > 0).then(|| format!("{done}/{total}"))
 }
 
 /// Done Subagents fold into the "n done" row; running and errored ones stay

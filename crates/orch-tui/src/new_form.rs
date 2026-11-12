@@ -57,6 +57,15 @@ pub struct NewForm {
     pub error: Option<String>,
     pub discarding: bool,
     pub(crate) check: BranchCheck,
+    /// Starting a Child Session of this Session, on its Branch.
+    pub parent: Option<ParentChoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParentChoice {
+    pub id: orch_core::SessionId,
+    pub name: String,
+    pub branch: String,
 }
 
 impl NewForm {
@@ -87,9 +96,20 @@ impl NewForm {
             error: None,
             discarding: false,
             check: BranchCheck::default(),
+            parent: None,
         };
         form.prefill_branch();
         form
+    }
+
+    /// Makes this a Child Session form: on the parent's Repo and Branch, with
+    /// its Preset and Agent unless others are picked.
+    pub fn child_of(&mut self, parent: ParentChoice, preset: &str, agent: &str) {
+        self.base.set(parent.branch.clone());
+        self.preset = self.presets.iter().position(|known| known == preset);
+        self.wanted_preset = Some(preset.to_string());
+        self.agent = Some(agent.to_string());
+        self.parent = Some(parent);
     }
 
     pub fn set_prompt(&mut self, prompt: String) {
@@ -363,6 +383,14 @@ impl NewForm {
             self.check.wait();
             return Outcome::Stay;
         }
+        if let Some(parent) = &self.parent {
+            return Outcome::Submit(CreateSession {
+                preset: self.preset.map(|at| self.presets[at].clone()),
+                agent: self.agent.clone(),
+                parent: Some(parent.id.clone()),
+                ..CreateSession::new(repo, self.prompt.text())
+            });
+        }
         let base = self.effective_base();
         let branch = self.branch.text().trim();
         Outcome::Submit(CreateSession {
@@ -372,6 +400,7 @@ impl NewForm {
             base: (!base.is_empty()).then(|| base.to_string()),
             preset: self.preset.map(|at| self.presets[at].clone()),
             agent: self.agent.clone(),
+            parent: None,
         })
     }
 }

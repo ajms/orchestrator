@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use orch_agent::{GuardHit, implied_agent};
-use orch_core::{AgentState, ConversationId, Flags, PermissionMode, Phase, PrStatus, SessionId};
+use orch_core::{
+    AgentState, ConversationId, Flags, PermissionMode, Phase, Plan, PrStatus, SessionId,
+};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
 use crate::codec::Stored;
@@ -22,6 +24,8 @@ pub struct NewSession {
     pub preset: String,
     pub existing_branch: bool,
     pub agent: String,
+    /// The Parent Session of a Child Session.
+    pub parent: Option<SessionId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +51,13 @@ pub struct SessionRecord {
     pub port_block: Option<PortBlock>,
     pub queued_prompt: Option<String>,
     pub holder_seq: u64,
+    pub plan: Plan,
+    /// The Parent Session of a Child Session.
+    pub parent: Option<SessionId>,
+    /// What the Child Session's Agent said with `orch session done`.
+    pub done_summary: Option<String>,
+    /// Why Landing this Child Session onto its parent's Branch last failed.
+    pub land_failed: Option<String>,
     pub created_at: SystemTime,
     pub updated_at: SystemTime,
 }
@@ -65,7 +76,7 @@ const COLUMNS: &str = "id, repo_id, slug, branch, base, worktree, phase, preset,
     unseen, stalled, needs_rebase, recovered, worktree_missing, base_missing, muted,
     pr_number, pr_checks, pr_review, pr_new_comments, pr_state,
     port_base, port_size, created_at, updated_at, agent_state, guards_enabled, queued_prompt, title,
-    holder_seq, existing_branch, pr_base, agent";
+    holder_seq, existing_branch, pr_base, agent, parent_id, done_summary, land_failed";
 
 fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
     let pr = match row.get::<_, Option<i64>>("pr_number")? {
@@ -115,6 +126,10 @@ fn session_from(row: &Row) -> rusqlite::Result<SessionRecord> {
         port_block: port_block_from(row)?,
         queued_prompt: row.get("queued_prompt")?,
         holder_seq: row.get::<_, i64>("holder_seq")? as u64,
+        plan: Plan::default(),
+        parent: row.get::<_, Option<String>>("parent_id")?.map(SessionId),
+        done_summary: row.get("done_summary")?,
+        land_failed: row.get("land_failed")?,
         created_at: from_millis(row.get("created_at")?),
         updated_at: from_millis(row.get("updated_at")?),
     })
@@ -126,8 +141,8 @@ impl Store {
         self.conn.execute(
             "INSERT INTO sessions
                 (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at,
-                 existing_branch, agent)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11)",
+                 existing_branch, agent, parent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11, ?12)",
             params![
                 new.id.as_str(),
                 new.repo.0,
@@ -140,6 +155,7 @@ impl Store {
                 now,
                 new.existing_branch,
                 new.agent,
+                new.parent.as_ref().map(SessionId::as_str),
             ],
         )?;
         self.existing_session(&new.id)
@@ -155,7 +171,8 @@ impl Store {
                 worktree_missing = ?13, base_missing = ?14, muted = ?15, pr_number = ?16,
                 pr_checks = ?17, pr_review = ?18, pr_new_comments = ?19, pr_state = ?20,
                 updated_at = ?21, agent_state = ?22, guards_enabled = ?23, queued_prompt = ?24,
-                title = ?25, holder_seq = ?26, pr_base = ?27
+                title = ?25, holder_seq = ?26, pr_base = ?27, parent_id = ?28,
+                done_summary = ?29, land_failed = ?30
              WHERE id = ?1",
             params![
                 session.id.as_str(),
@@ -185,6 +202,9 @@ impl Store {
                 session.title,
                 session.holder_seq as i64,
                 session.pr_base,
+                session.parent.as_ref().map(SessionId::as_str),
+                session.done_summary,
+                session.land_failed,
             ],
         )?;
         if changed == 0 {
@@ -202,6 +222,7 @@ impl Store {
                 params![session.id.as_str(), position, Stored(hit.kind), hit.target],
             )?;
         }
+        save_plan(&tx, &session.id, &session.plan)?;
         tx.commit()?;
         self.existing_session(&session.id)
     }
@@ -323,8 +344,59 @@ impl Store {
                 })
             })
             .collect();
+        session.plan = self.plan(&session.id)?.unwrap_or_else(|reason| {
+            eprintln!(
+                "orch: warning: the stored Plan of Session {} can't be read, keeping it untouched: {reason}",
+                session.id.as_str()
+            );
+            Plan::unreadable(reason)
+        });
         Ok(session)
     }
+
+    fn plan(&self, id: &SessionId) -> Result<Result<Plan, String>, StoreError> {
+        stored_plan(&self.conn, id)
+    }
+}
+
+/// The Session's stored Plan, or (inner `Err`) why the stored JSON doesn't
+/// decode: an undecodable Plan must surface, not quietly read as empty — but
+/// only on the Plan, never failing the Session around it.
+fn stored_plan(
+    conn: &rusqlite::Connection,
+    id: &SessionId,
+) -> Result<Result<Plan, String>, StoreError> {
+    let stored: Option<String> = conn
+        .prepare_cached("SELECT plan FROM plans WHERE session_id = ?1")?
+        .query_row(params![id.as_str()], |row| row.get(0))
+        .optional()?;
+    match stored {
+        None => Ok(Ok(Plan::default())),
+        Some(json) => Ok(serde_json::from_str(&json).map_err(|err| err.to_string())),
+    }
+}
+
+fn save_plan(tx: &Transaction, id: &SessionId, plan: &Plan) -> Result<(), StoreError> {
+    // Never overwrite or delete a row we couldn't read back; the rest of the
+    // Session still saves.
+    if plan.unreadable.is_some() || stored_plan(tx, id)?.is_err() {
+        return Ok(());
+    }
+    if plan.is_untouched() {
+        tx.execute(
+            "DELETE FROM plans WHERE session_id = ?1",
+            params![id.as_str()],
+        )?;
+        return Ok(());
+    }
+    let json =
+        serde_json::to_string(plan).map_err(|err| StoreError::Io(std::io::Error::other(err)))?;
+    tx.execute(
+        "INSERT INTO plans (session_id, plan) VALUES (?1, ?2)
+         ON CONFLICT (session_id) DO UPDATE SET plan = excluded.plan",
+        params![id.as_str(), json],
+    )?;
+    Ok(())
 }
 
 pub(crate) fn touch(tx: &Transaction, session: &SessionId) -> rusqlite::Result<()> {

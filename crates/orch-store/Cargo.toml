@@ -9,6 +9,7 @@ orch-core.workspace = true
 orch-agent.workspace = true
 orch-config = { path = "../orch-config" }
 orch-git = { path = "../orch-git" }
+serde_json.workspace = true
 rusqlite = { version = "0.37", features = ["bundled"] }
 
 [dev-dependencies]

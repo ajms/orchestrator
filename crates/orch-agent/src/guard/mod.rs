@@ -21,6 +21,8 @@ pub enum GuardKind {
     PrReview,
     PrApproval,
     Issue,
+    /// A Child Session on a looser Preset than its parent.
+    ChildPreset,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

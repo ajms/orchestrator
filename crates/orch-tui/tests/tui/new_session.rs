@@ -136,6 +136,7 @@ fn an_edited_branch_base_and_preset_are_sent() {
             base: Some("orch/other-work".into()),
             preset: Some("plan".into()),
             agent: None,
+            parent: None,
         }]
     );
 }

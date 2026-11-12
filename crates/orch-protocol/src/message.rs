@@ -196,6 +196,9 @@ pub struct CreateSession {
     pub preset: Option<String>,
     #[serde(default)]
     pub agent: Option<String>,
+    /// Starts a Child Session of this Session, on its Branch.
+    #[serde(default)]
+    pub parent: Option<SessionId>,
 }
 
 impl CreateSession {
@@ -207,6 +210,7 @@ impl CreateSession {
             base: None,
             preset: None,
             agent: None,
+            parent: None,
         }
     }
 }
@@ -367,6 +371,9 @@ pub enum Reply {
         unlanded: Vec<CommitView>,
         #[serde(default)]
         branch_kept: bool,
+        /// Open Child Sessions (by name) Discarded along with this one.
+        #[serde(default)]
+        children: Vec<String>,
     },
     Reconciled {
         report: Box<ReconcileReport>,

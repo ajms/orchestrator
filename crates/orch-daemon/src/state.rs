@@ -54,6 +54,8 @@ pub(crate) struct State {
     notifier: Notifier,
     rate_limits: RateLimits,
     use_clock: UseClock,
+    /// Bumped whenever a Session changes or goes, for `orch session wait`.
+    pub(crate) ticks: watch::Sender<u64>,
 }
 
 #[derive(Default)]
@@ -93,6 +95,8 @@ pub(crate) struct Live {
     pub(crate) last_error: Option<String>,
     pub(crate) panes: PaneSizes,
     pub(crate) exclusive: bool,
+    /// Child Sessions being spawned under this Session right now.
+    pub(crate) spawning: usize,
     pub(crate) comments: CommentCursor,
     pub(crate) recheck: Recheck,
     pub(crate) launching: bool,
@@ -100,6 +104,10 @@ pub(crate) struct Live {
     pub(crate) preset_sandboxed: bool,
     pub(crate) repo_missing: bool,
     pub(crate) transcripts: Option<Box<dyn SubagentTranscripts>>,
+    /// The Sessions its blocked `orch session wait` calls wait for, one
+    /// entry per call and id, so a Done child it waits for doesn't also get
+    /// its summary queued as a prompt.
+    pub(crate) waiting_on: Vec<SessionId>,
     end_noticed: bool,
     holder: Option<HolderLink>,
     generation: u64,
@@ -214,6 +222,7 @@ impl Live {
             last_error: None,
             panes: PaneSizes::default(),
             exclusive: false,
+            spawning: 0,
             comments: CommentCursor::default(),
             recheck: Recheck::default(),
             launching: false,
@@ -221,6 +230,7 @@ impl Live {
             preset_sandboxed: true,
             repo_missing: false,
             transcripts,
+            waiting_on: Vec::new(),
             end_noticed: false,
             holder: None,
             generation: 0,
@@ -433,6 +443,10 @@ impl Live {
                     worktree: subagent.outcome.worktree.as_deref().map(Into::into),
                 })
                 .collect(),
+            plan: record.plan.clone(),
+            parent: record.parent.clone(),
+            done_summary: record.done_summary.clone(),
+            land_failed: record.land_failed.clone(),
         }
     }
 }
@@ -448,6 +462,7 @@ fn guard_kind_view(kind: GuardKind) -> GuardKindView {
         GuardKind::PrReview => GuardKindView::PrReview,
         GuardKind::PrApproval => GuardKindView::PrApproval,
         GuardKind::Issue => GuardKindView::Issue,
+        GuardKind::ChildPreset => GuardKindView::ChildPreset,
     }
 }
 
@@ -529,6 +544,7 @@ impl Daemon {
                 notifier,
                 rate_limits: RateLimits::default(),
                 use_clock: UseClock::default(),
+                ticks: watch::Sender::new(0),
             }),
             store,
             shutdown: Notify::new(),
@@ -848,6 +864,7 @@ impl State {
         for client in self.clients.values() {
             client.outbox.session_changed(view.clone());
         }
+        self.ticks.send_modify(|tick| *tick += 1);
     }
 
     pub(crate) fn remove_session(&mut self, id: &SessionId) {
@@ -857,6 +874,7 @@ impl State {
         for client in self.clients.values() {
             client.outbox.session_removed(id.clone());
         }
+        self.ticks.send_modify(|tick| *tick += 1);
     }
 
     pub(crate) fn publish_report(&mut self, report: &ReconcileReport) {

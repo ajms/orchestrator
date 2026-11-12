@@ -39,6 +39,24 @@ const NO_HOME: &str = "claude's Agent profile needs HOME to be set";
 
 pub const CLAUDE: &str = "claude";
 
+/// Appended to Claude's system prompt so it keeps the Session's Plan (ADR
+/// 0021) and can run Child Sessions (ADR 0022).
+pub const PLAN_GUIDANCE: &str = "# Under orch: the Plan and Child Sessions
+
+You run inside an orch Session. Keep this Session's Plan in orch with `orch plan` (the user sees it in orch, read-only):
+- `orch plan add \"<title>\" [--after <id>] [--blocked-by <id>]... [--link <issue URL or #123>]` prints the new Task's id.
+- `orch plan status <id> pending|in-progress|done|dropped`, `orch plan block <id> --by <id>...` (`unblock` undoes it), `orch plan link <id> <ref>`, `orch plan attach <id> <subagent-id>`.
+- `orch plan show [--json]` lists the Tasks and which are ready (every blocker Done or Dropped).
+- When a Subagent serves a Task, put `[task:<id>]` in its description; orch attaches it to that Task.
+- For multi-step work, write the Plan first and keep statuses current as you go.
+
+Child Sessions: for long or interactive work in parallel, start full Sessions on your Branch with `orch session`:
+- `orch session spawn --prompt \"<text>\" [--task <id>] [--agent <name>] [--preset <name>]` prints the child's id at once. It gets its own Worktree; neither of you can write to the other's. A looser Preset than yours asks the user.
+- `orch session wait <id>...` blocks until each child is done or failed and prints its summary; `orch session status [<id>...]` doesn't block.
+- Nothing Lands by itself. Read the child's diff in its Worktree, then `orch session land <id>` squashes it onto your Branch (it keeps your uncommitted work; a conflict or your uncommitted changes in the same files fail it as Land failed: fix and retry), or `orch session discard <id>`. You can't be Landed while a child is open.
+- If `ORCH_PARENT_SESSION` is set, you are a Child Session: finish with `orch session done \"<summary>\"`; your parent decides whether to Land it.
+";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeCode {
     pub program: String,
@@ -104,6 +122,7 @@ impl ClaudeCode {
         let args = conversation
             .into_iter()
             .chain(["--settings", &settings])
+            .chain(["--append-system-prompt", PLAN_GUIDANCE])
             .map(String::from)
             .chain(mode_args(mode))
             .collect();

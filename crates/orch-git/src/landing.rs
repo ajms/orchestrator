@@ -12,9 +12,20 @@ pub struct Landed {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LandingError {
-    Conflict { paths: Vec<String> },
-    BaseCheckoutDirty { worktree: PathBuf },
-    BaseCheckedOutElsewhere { worktree: PathBuf },
+    Conflict {
+        paths: Vec<String>,
+    },
+    /// The Parent Session's Worktree has uncommitted changes in files the
+    /// Child Session's squash would change.
+    ParentDirty {
+        paths: Vec<String>,
+    },
+    BaseCheckoutDirty {
+        worktree: PathBuf,
+    },
+    BaseCheckedOutElsewhere {
+        worktree: PathBuf,
+    },
     NothingToLand,
     BaseMoved,
     Failed(Error),
@@ -32,6 +43,11 @@ impl fmt::Display for LandingError {
             LandingError::Conflict { paths } => write!(
                 f,
                 "Landing conflicts with the Base branch in: {}",
+                paths.join(", ")
+            ),
+            LandingError::ParentDirty { paths } => write!(
+                f,
+                "the Parent Session's Worktree has uncommitted changes in the files this Landing changes: {}",
                 paths.join(", ")
             ),
             LandingError::BaseCheckoutDirty { worktree } => write!(
@@ -77,6 +93,75 @@ impl Repo {
             .git(["commit-tree", &tree, "-p", &base_tip, "-m", message])
             .run()?;
         self.advance_base(&worktree.base, &base_tip, &commit, main_checkout)?;
+        Ok(Landed { commit })
+    }
+
+    /// Squashes a Child Session onto its Parent Session's Branch, which is
+    /// checked out in `parent`. The parent's uncommitted work stays: the
+    /// Landing refuses when it touches the same files, and otherwise updates
+    /// only the files the squash changes.
+    pub fn land_child(
+        &self,
+        child: &SessionWorktree,
+        parent: &Path,
+        message: &str,
+    ) -> Result<Landed, LandingError> {
+        let base_ref = head_ref(&child.base);
+        let base_tip = self
+            .git(["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")])
+            .run()?;
+        let snapshot = snapshot_commit(&child.path)?;
+        let merge_base = self.git(["merge-base", &base_tip, &snapshot]).run()?;
+        let tree = self.merge_tree(&merge_base, &base_tip, &snapshot)?;
+        let base_tree = self
+            .git(["rev-parse", &format!("{base_tip}^{{tree}}")])
+            .run()?;
+        if tree == base_tree {
+            return Err(LandingError::NothingToLand);
+        }
+        let checkout = self
+            .worktree_entries()?
+            .into_iter()
+            .find(|entry| entry.branch.as_deref() == Some(child.base.as_str()))
+            .map(|entry| entry.path);
+        let update_parent = match checkout {
+            None => false,
+            Some(worktree) if same_path(&worktree, parent) => true,
+            Some(worktree) => return Err(LandingError::BaseCheckedOutElsewhere { worktree }),
+        };
+        if update_parent {
+            let changed = lines(&self.git(["diff", "--name-only", &base_tip, &tree]).run()?);
+            let mut dirty = lines(&git(parent, ["diff", "--name-only", "HEAD"]).run()?);
+            dirty.extend(lines(
+                &git(parent, ["ls-files", "--others", "--exclude-standard"]).run()?,
+            ));
+            let mut overlap: Vec<String> = changed
+                .into_iter()
+                .filter(|path| dirty.contains(path))
+                .collect();
+            overlap.sort();
+            overlap.dedup();
+            if !overlap.is_empty() {
+                return Err(LandingError::ParentDirty { paths: overlap });
+            }
+        }
+        let commit = self
+            .git(["commit-tree", &tree, "-p", &base_tip, "-m", message])
+            .run()?;
+        if !self
+            .git(["update-ref", &base_ref, &commit, &base_tip])
+            .succeeds()
+        {
+            return Err(LandingError::BaseMoved);
+        }
+        if update_parent {
+            let _ = git(parent, ["update-index", "-q", "--refresh"]).succeeds();
+            if let Err(error) = git(parent, ["read-tree", "-m", "-u", &base_tip, &commit]).run() {
+                self.git(["update-ref", &base_ref, &base_tip, &commit])
+                    .run()?;
+                return Err(error.into());
+            }
+        }
         Ok(Landed { commit })
     }
 
@@ -298,6 +383,18 @@ fn user_ssh_command() -> String {
             .filter(|command| !command.is_empty())
         })
         .unwrap_or_else(|| "ssh".into())
+}
+
+fn lines(text: &str) -> Vec<String> {
+    text.lines()
+        .filter(|line| !line.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    let canonical = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    canonical(a) == canonical(b)
 }
 
 fn update_would_clobber_local_changes(

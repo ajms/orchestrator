@@ -1,3 +1,4 @@
+mod agent_call;
 mod broker;
 mod client;
 mod daemon;
@@ -5,7 +6,9 @@ mod doctor;
 mod fake_agent;
 mod hold;
 mod hook;
+mod plan;
 mod repo;
+mod session;
 mod subprocess;
 mod systemd;
 mod tap;
@@ -44,8 +47,15 @@ enum Command {
         #[arg(long, default_value = CLAUDE)]
         agent: String,
     },
+    /// Read and write this Session's Plan (run by the Agent inside a Session).
+    #[command(subcommand)]
+    Plan(plan::PlanCommand),
     #[command(subcommand)]
     Repo(repo::RepoCommand),
+    /// Start, wait for, Land and Discard Child Sessions (run by the Agent
+    /// inside a Session).
+    #[command(subcommand)]
+    Session(session::SessionCommand),
     Tap {
         #[arg(long)]
         session: String,
@@ -77,6 +87,8 @@ fn main() -> ExitCode {
         Some(Command::Doctor(args)) => doctor::run(args),
         Some(Command::Hold(args)) => hold::run(args),
         Some(Command::Hook { session, agent }) => hook::run(&session, &agent),
+        Some(Command::Plan(command)) => plan::run(command),
+        Some(Command::Session(command)) => session::run(command),
         Some(Command::Repo(command)) => repo::run(command),
         Some(Command::Tap { session, agent }) => tap::run(&session, &agent),
         Some(Command::Trust(args)) => trust::run(args),

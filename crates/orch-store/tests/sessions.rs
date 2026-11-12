@@ -2,8 +2,8 @@ mod common;
 
 use common::{Fixture, new_session};
 use orch_core::{
-    ChecksState, ConversationId, Flags, PermissionMode, Phase, PrState, PrStatus, ReviewDecision,
-    SessionId,
+    ChecksState, ConversationId, Flags, PermissionMode, Phase, PlanOp, PrState, PrStatus,
+    ReviewDecision, SessionId,
 };
 use orch_store::{NewSession, StoreError};
 
@@ -130,6 +130,7 @@ fn a_session_keeps_the_agent_it_was_created_with() {
         .store
         .create_session(NewSession {
             agent: "pi".into(),
+            parent: None,
             ..new_session(&repo, "on-pi")
         })
         .unwrap();
@@ -148,7 +149,10 @@ fn a_session_stored_before_agents_were_recorded_resolves_to_claude() {
     let repo = fx.register("proj");
     let session = fx.session(&repo, "older");
     let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
-    conn.execute_batch("ALTER TABLE sessions DROP COLUMN agent; PRAGMA user_version = 11;")
+    conn.execute_batch(concat!(
+        "ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN done_summary; ALTER TABLE sessions DROP COLUMN land_failed; ",
+        "ALTER TABLE sessions DROP COLUMN agent; PRAGMA user_version = 11;"
+    ))
         .unwrap();
 
     fx.reopen();
@@ -166,7 +170,10 @@ fn a_session_stored_before_existing_branches_loads_as_on_a_branch_orch_created()
     let session = fx.session(&repo, "older");
     let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
     conn.execute_batch(
-        "ALTER TABLE sessions DROP COLUMN agent; ALTER TABLE sessions DROP COLUMN pr_base; ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;",
+        concat!(
+            "ALTER TABLE sessions DROP COLUMN parent_id; ALTER TABLE sessions DROP COLUMN done_summary; ALTER TABLE sessions DROP COLUMN land_failed; ",
+            "ALTER TABLE sessions DROP COLUMN agent; ALTER TABLE sessions DROP COLUMN pr_base; ALTER TABLE sessions DROP COLUMN existing_branch; PRAGMA user_version = 9;"
+        ),
     )
     .unwrap();
 
@@ -396,4 +403,145 @@ fn a_deleted_session_is_gone_with_its_conversations_and_port_block() {
             .base,
         20000
     );
+}
+
+#[test]
+fn a_plan_persists_with_its_session_until_the_session_is_removed() {
+    use orch_core::{Attachment, PlanOp, TaskStatus};
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut session = fx.session(&repo, "planned");
+    let other = fx.session(&repo, "other");
+    assert!(session.plan.is_empty());
+
+    for title in ["design", "build"] {
+        session
+            .plan
+            .apply(PlanOp::Add {
+                title: title.into(),
+                after: None,
+                blocked_by: vec![],
+                link: Some("#241".into()),
+            })
+            .unwrap();
+    }
+    session
+        .plan
+        .apply(PlanOp::Block {
+            task: 2,
+            by: vec![1],
+        })
+        .unwrap();
+    session
+        .plan
+        .apply(PlanOp::Attach {
+            task: 2,
+            attachment: Attachment::Subagent("sub-1".into()),
+        })
+        .unwrap();
+    session
+        .plan
+        .apply(PlanOp::Status {
+            task: 1,
+            status: TaskStatus::Done,
+        })
+        .unwrap();
+    session.phase = Phase::Landed;
+    fx.store.save_session(&session).unwrap();
+    fx.reopen();
+
+    let loaded = fx.store.session(&session.id).unwrap().unwrap();
+    assert_eq!(loaded.plan, session.plan);
+    assert_eq!(loaded.plan.progress(), (1, 2));
+    assert!(
+        fx.store
+            .session(&other.id)
+            .unwrap()
+            .unwrap()
+            .plan
+            .is_empty()
+    );
+
+    fx.store.delete_session(&session.id).unwrap();
+    let mut recreated = fx.session(&repo, "planned");
+    assert!(recreated.plan.is_empty());
+    recreated.phase = Phase::Active;
+    assert!(fx.store.save_session(&recreated).unwrap().plan.is_empty());
+}
+
+#[test]
+fn an_undecodable_plan_is_marked_unreadable_and_never_overwritten() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let mut session = fx.session(&repo, "corrupt");
+    let conn = rusqlite::Connection::open(fx.db_path()).unwrap();
+    conn.execute(
+        "INSERT INTO plans (session_id, plan) VALUES (?1, 'not json')",
+        [session.id.as_str()],
+    )
+    .unwrap();
+
+    let mut loaded = fx.store.session(&session.id).unwrap().unwrap();
+    assert!(loaded.plan.unreadable.is_some());
+    assert!(loaded.plan.is_empty());
+    assert!(
+        fx.store
+            .sessions()
+            .unwrap()
+            .iter()
+            .any(|listed| listed.id == session.id && listed.plan.unreadable.is_some())
+    );
+    loaded.phase = Phase::Active;
+    let saved = fx.store.save_session(&loaded).unwrap();
+    assert_eq!(saved.phase, Phase::Active);
+    assert!(saved.plan.unreadable.is_some());
+    let refused = loaded
+        .plan
+        .clone()
+        .apply(PlanOp::Add {
+            title: "x".into(),
+            after: None,
+            blocked_by: vec![],
+            link: None,
+        })
+        .unwrap_err();
+    assert!(refused.starts_with("this Session's stored Plan can't be read: "));
+    // A record carrying a readable (empty) Plan doesn't clobber the row either.
+    session.phase = Phase::Landed;
+    fx.store.save_session(&session).unwrap();
+    let kept: String = conn
+        .query_row(
+            "SELECT plan FROM plans WHERE session_id = ?1",
+            [session.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, "not json");
+}
+
+#[test]
+fn a_child_session_keeps_its_parent_done_summary_and_land_failure() {
+    let mut fx = Fixture::new();
+    let repo = fx.register("proj");
+    let parent = fx.session(&repo, "parent");
+    let child = fx
+        .store
+        .create_session(NewSession {
+            parent: Some(parent.id.clone()),
+            base: parent.branch.clone(),
+            ..common::new_session(&repo, "child")
+        })
+        .unwrap();
+    assert_eq!(child.parent.as_ref(), Some(&parent.id));
+    assert_eq!(parent.parent, None);
+
+    let mut saved = child.clone();
+    saved.done_summary = Some("Built it".into());
+    saved.land_failed = Some("conflict in a.rs".into());
+    fx.store.save_session(&saved).unwrap();
+    fx.reopen();
+    let loaded = fx.store.session(&child.id).unwrap().unwrap();
+    assert_eq!(loaded.parent.as_ref(), Some(&parent.id));
+    assert_eq!(loaded.done_summary.as_deref(), Some("Built it"));
+    assert_eq!(loaded.land_failed.as_deref(), Some("conflict in a.rs"));
 }

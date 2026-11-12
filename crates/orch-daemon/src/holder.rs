@@ -300,6 +300,7 @@ impl Daemon {
                     let events = adapter.map_hook(&payload).unwrap_or_default();
                     let effects = observe(live, &events, now, &mut conversations, &mut usage);
                     describe_subagents(live, &events);
+                    attach_named_subagents(live, &events);
                     if let Some(guard) = guard {
                         decide_guard(live, adapter.as_ref(), guard, &events, now);
                     }
@@ -497,6 +498,29 @@ fn describe_subagents(live: &mut Live, events: &[AgentEvent]) {
             .any(|subagent| &subagent.id == id && subagent.description.is_empty());
         if let Some(description) = transcripts.describe(id).filter(|_| undescribed) {
             live.status.describe_subagent(id, description);
+        }
+    }
+}
+
+/// Attaches each Subagent the events touch to the Plan Task its description
+/// names with `[task:N]` (ADR 0021).
+fn attach_named_subagents(live: &mut Live, events: &[AgentEvent]) {
+    for event in events {
+        let id = match event {
+            AgentEvent::SubagentStarted { id, .. } => id,
+            AgentEvent::ToolStarted {
+                subagent: Some(id), ..
+            } => id,
+            _ => continue,
+        };
+        let description = live
+            .status
+            .subagents()
+            .iter()
+            .find(|subagent| &subagent.id == id)
+            .map(|subagent| subagent.description.clone());
+        if let Some(description) = description {
+            live.record.plan.attach_named(&id.0, &description);
         }
     }
 }

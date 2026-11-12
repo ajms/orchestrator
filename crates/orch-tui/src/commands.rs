@@ -18,6 +18,10 @@ const COMMANDS: &[Command] = &[
         run: |app, _| app.open_new_form(),
     },
     Command {
+        names: &["child", "nc"],
+        run: |app, _| app.open_child_form(),
+    },
+    Command {
         names: &["l", "land"],
         run: |app, _| app.open_land(),
     },
@@ -68,6 +72,10 @@ const COMMANDS: &[Command] = &[
     Command {
         names: &["m", "mute"],
         run: mute,
+    },
+    Command {
+        names: &["plan"],
+        run: |app, _| app.show_plan(),
     },
     Command {
         names: &["u", "usage"],

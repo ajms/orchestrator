@@ -36,6 +36,17 @@ pub struct SessionView {
     pub context_used_percent: Option<f64>,
     pub cost_usd: Option<f64>,
     pub subagents: Vec<SubagentView>,
+    #[serde(default)]
+    pub plan: orch_core::Plan,
+    /// The Parent Session of a Child Session.
+    #[serde(default)]
+    pub parent: Option<SessionId>,
+    /// What a Done Child Session's Agent said it did.
+    #[serde(default)]
+    pub done_summary: Option<String>,
+    /// Why Landing this Child Session onto its parent's Branch failed.
+    #[serde(default)]
+    pub land_failed: Option<String>,
 }
 
 impl SessionView {
@@ -209,6 +220,7 @@ pub enum GuardKindView {
     PrReview,
     PrApproval,
     Issue,
+    ChildPreset,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

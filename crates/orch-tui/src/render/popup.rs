@@ -1,5 +1,7 @@
+use orch_core::{Attachment, Readiness, TaskStatus, join_ids};
 use orch_protocol::{
-    GuardKindView, GuardPrompt, LandingMode, RepoUsage, SessionView, UsageReport, UsageTotalsView,
+    GuardKindView, GuardPrompt, LandingMode, RepoUsage, SessionView, SubagentStateView,
+    UsageReport, UsageTotalsView,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
@@ -30,6 +32,11 @@ pub(super) fn draw(app: &App, frame: &mut Frame) {
         Some(Popup::Discard(confirm)) => discard(frame, confirm),
         Some(Popup::Usage(report)) => usage(frame, report),
         Some(Popup::Retarget(picker)) => retarget(frame, picker),
+        Some(Popup::Plan(session)) => {
+            if let Some(view) = app.sessions.get(session) {
+                plan(frame, view, &app.sessions);
+            }
+        }
         None => {}
     }
     if let Some((_, prompt)) = app.guard_prompt() {
@@ -108,6 +115,16 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
                 .map(|commit| Line::from(format!("   {commit}"))),
         );
     }
+    if !preview.children.is_empty() {
+        lines.push(Line::default());
+        lines.push(Line::from(" Its open Child Sessions are Discarded too:").red());
+        lines.extend(
+            preview
+                .children
+                .iter()
+                .map(|child| Line::from(format!("   {child}"))),
+        );
+    }
     if preview.branch_kept {
         lines.push(Line::default());
         lines.push(
@@ -117,6 +134,96 @@ fn discard(frame: &mut Frame, preview: &DiscardConfirm) {
     lines.push(Line::default());
     lines.push(Line::from(" y discard · any other key cancels").dark_gray());
     show(frame, " :discard ", Color::Red, lines, 76);
+}
+
+/// A Child Session attached to a Task, with where it stands.
+fn child_line(sessions: &crate::sessions::Sessions, id: &str) -> Line<'static> {
+    let Some(child) = orch_core::SessionId::parse(id)
+        .ok()
+        .and_then(|id| sessions.get(&id))
+    else {
+        return Line::from(format!("       ⇲ Child Session {id} (ended)")).dark_gray();
+    };
+    let (state, colour) = super::style::child_status(child);
+    Line::from(vec![
+        Span::raw(format!("       ⇲ {} ", child.title_or_slug())),
+        Span::styled(state, Style::new().fg(colour)),
+    ])
+}
+
+fn plan(frame: &mut Frame, view: &SessionView, sessions: &crate::sessions::Sessions) {
+    let plan = &view.plan;
+    let mut lines = vec![Line::from(format!(" {}", view.title_or_slug())).bold()];
+    if let Some(reason) = &plan.unreadable {
+        lines.push(Line::default());
+        lines.push(Line::from(" The stored Plan can't be read; it is kept untouched.").red());
+        lines.push(Line::from(format!(" {reason}")).dark_gray());
+    } else if plan.is_empty() {
+        lines.push(Line::default());
+        lines.push(
+            Line::from(" The Agent has no Plan yet (it writes one with `orch plan`).").dark_gray(),
+        );
+    } else {
+        let (done, total) = plan.progress();
+        lines.push(Line::from(format!(" {done}/{total} done")).dark_gray());
+        lines.push(Line::default());
+    }
+    for task in &plan.tasks {
+        let plain = Span::raw(task.title.clone());
+        let (mark, colour, title) = match task.status {
+            TaskStatus::Done => ("✓", Color::Green, plain.dark_gray()),
+            TaskStatus::InProgress => ("▶", Color::Cyan, plain),
+            TaskStatus::Dropped => ("–", Color::DarkGray, plain.dark_gray().crossed_out()),
+            TaskStatus::Pending => ("○", Color::Reset, plain),
+        };
+        let readiness = match plan.readiness(task) {
+            Readiness::Settled => Span::raw(""),
+            Readiness::Ready => Span::raw("  ready").green(),
+            Readiness::BlockedBy(open) => {
+                Span::raw(format!("  blocked by {}", join_ids(&open))).yellow()
+            }
+        };
+        lines.push(Line::from(vec![
+            Span::raw(format!(" {:>3} ", task.id)).dark_gray(),
+            Span::styled(format!("{mark} "), Style::new().fg(colour)),
+            title,
+            readiness,
+        ]));
+        if let Some(link) = &task.link {
+            lines.push(Line::from(format!("       {link}")).blue());
+        }
+        for attachment in &task.attachments {
+            let id = match attachment {
+                Attachment::Subagent(id) => id,
+                Attachment::ChildSession(id) => {
+                    lines.push(child_line(sessions, id));
+                    continue;
+                }
+            };
+            let subagent = view.subagents.iter().find(|subagent| &subagent.id == id);
+            let line = match subagent {
+                Some(subagent) => {
+                    let (state, colour) = match subagent.state {
+                        SubagentStateView::Working => ("working", Color::Cyan),
+                        SubagentStateView::Done => ("done", Color::Green),
+                        SubagentStateView::Errored => ("errored", Color::Red),
+                    };
+                    Line::from(vec![
+                        Span::raw(format!(
+                            "       ↳ {}: {} ",
+                            subagent.agent_type, subagent.description
+                        )),
+                        Span::styled(state, Style::new().fg(colour)),
+                    ])
+                }
+                None => Line::from(format!("       ↳ Subagent {id}")).dark_gray(),
+            };
+            lines.push(line);
+        }
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(" Esc / p close").dark_gray());
+    show(frame, " Plan ", Color::Cyan, lines, 84);
 }
 
 fn usage(frame: &mut Frame, report: &UsageReport) {
@@ -232,6 +339,7 @@ fn guard_kind(kind: GuardKindView) -> &'static str {
         GuardKindView::PrReview => "PR review on GitHub, through the Broker",
         GuardKindView::PrApproval => "PR approval as you, through the Broker",
         GuardKindView::Issue => "Issue on GitHub, through the Broker",
+        GuardKindView::ChildPreset => "Child Session on a looser Preset than this one",
     }
 }
 

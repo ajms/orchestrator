@@ -247,6 +247,7 @@ fn discard_previews_what_would_be_lost_before_a_one_key_confirmation() {
             subject: "Read timeout from config".into(),
         }],
         branch_kept: false,
+        children: Vec::new(),
     }));
     tui.command("discard");
     assert_eq!(
@@ -284,6 +285,7 @@ fn discarding_a_session_on_an_existing_branch_says_the_branch_is_kept() {
         uncommitted: vec!["src/wip.rs".into()],
         unlanded: vec![],
         branch_kept: true,
+        children: Vec::new(),
     }));
 
     tui.command("discard");
@@ -304,6 +306,7 @@ fn any_other_key_cancels_the_discard() {
         uncommitted: vec![],
         unlanded: vec![],
         branch_kept: false,
+        children: Vec::new(),
     }));
     tui.command("discard");
     assert!(tui.screen().contains("nothing uncommitted"));
@@ -401,4 +404,25 @@ fn offers_only_pushing(phase: orch_protocol::PhaseView) {
             body: String::new()
         }]
     );
+}
+
+#[test]
+fn a_failed_child_landing_says_the_child_stays_open_not_that_the_agent_rebases() {
+    let mut tui = Harness::new();
+    let mut child = session("webshop", "done");
+    child.parent = Some(id("lead"));
+    tui.sessions(vec![child]);
+    tui.daemon().script_reply(drafted("draft", ""));
+    tui.daemon().script_reply(Err(RequestError::Conflict {
+        paths: vec!["src/a.rs".into()],
+    }));
+    tui.command("land");
+    tui.press(KeyCode::Enter);
+    let status = statusline(&mut tui);
+    assert!(status.contains("src/a.rs"), "{status}");
+    assert!(
+        status.contains("stays open, marked Land failed"),
+        "{status}"
+    );
+    assert!(!status.contains("handed to the Agent"), "{status}");
 }

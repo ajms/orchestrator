@@ -554,6 +554,10 @@ pub fn session(repo: &str, slug: &str) -> SessionView {
         context_used_percent: None,
         cost_usd: None,
         subagents: Vec::new(),
+        plan: Default::default(),
+        parent: None,
+        done_summary: None,
+        land_failed: None,
     }
 }
 

@@ -82,6 +82,10 @@ Local checks (the Base branches, other Sessions' Branches, checked-out Branches)
 
 When Claude, or pi with the [patched `subagent` extension](docs/patches/README.md), runs a Subagent in its own worktree, `orch` creates that worktree at `.orchestrator/subagents/<slug>/<name>` on Branch `worktree-<name>`, starting from the Session's HEAD. Guards treat it as part of the Session, so the Subagent can edit there without a prompt. It is removed with the Session. A Subagent Branch with commits that were never merged into the Session is kept. `orch` records where the worktree started and, when it is removed, what it held, uncommitted files included; `d` / `D` on the Subagent's row reviews just that work. Merging it into the Session stays with the Agent.
 
+A Session has a Plan: the ordered Tasks its Agent is working through, each Pending, In progress, Done or Dropped, with the Tasks it is blocked by, optional Subagents working on it and an optional issue link (a URL or a reference such as `#241`; `orch` doesn't sync with any tracker). Only the Agent writes it, with `orch plan` inside its Session; the sidebar row shows its progress (`3/7`: Done out of the Tasks not Dropped) and `p` or `:plan` shows it in full, read-only, with which Tasks are ready. It outlives Conversations and Agent restarts and stays readable after Landing or Discarding until the Session is removed. orch tells both Claude and pi about `orch plan`, and a Subagent whose description holds `[task:<id>]` is attached to that Task.
+
+A Session can start Child Sessions: full Sessions (pane, Needs input, notifications, Review) on its own Branch, each with its own Worktree and Branch. The Agent starts one with `orch session spawn`, optionally for a Plan Task; you start one with `:child` on the selected Session, which opens the new-Session form with the parent's Preset and Agent. A child gets the parent's Agent and Preset unless others are picked, and a looser Preset than the parent's needs your approval in a Guard prompt. Children nest at most two levels deep by default (`max_child_depth`). The child's Agent ends with `orch session done "<summary>"`; it is then **Done** but stays open, and its parent's Agent decides: `orch session land <child>` squashes it onto the parent's Branch, keeping the parent Worktree's uncommitted work, or fails as **Land failed** (the child stays open) when the squash conflicts or the parent has uncommitted changes in the same files. Nothing Lands automatically. You can Land or Discard a child yourself with `:land` / `:discard` (Landing goes onto the parent's Branch). A Session can't be Landed while any of its children is open, and Discarding it Discards its open children too after one confirmation that lists them. In the sidebar children nest under their parent; `za` on a parent collapses them, and a collapsed parent shows the most urgent mark below it. Muting a parent mutes its children. A child whose parent ended without it (after a crash) becomes a top-level Session.
+
 When the Agent is done, press `d` to review, then run `:land` to squash onto the Base branch or open a PR. If the Branch already has an open PR, `:land` follows that one instead. With an open PR, whether the Session is PR open or Suspended or `:land` finds one on GitHub, `:land` only commits any uncommitted changes and pushes the Branch to that PR; it refuses a squash. `:land` never force-pushes: if origin has commits the Branch lacks, it refuses until you pull or rebase. Landing, a merged PR and Discarding delete the Branch along with the Worktree, except an Existing Branch, which `orch` always keeps.
 
 When a PR is retargeted on GitHub, `orch` follows it: polling reads the PR's base, the Session's Base branch becomes that base (fetched from origin if it isn't local), and the Session is marked as needing a rebase in its status line. A Base that `orch` moved itself, for example after Landing the Branch a stacked Session sat on, stays put: if retargeting the PR on GitHub failed, polling retries it instead of moving back. The same happens when `:land` follows an existing PR whose base differs from the Session's.
@@ -95,6 +99,8 @@ When a PR is retargeted on GitHub, `orch` follows it: polling reads the PR's bas
 | `orch repo move <old> <new>` | Tell `orch` a known Repo now lives at a new path. Its Sessions follow it, and Agents keep running if you already moved the directory. |
 | `orch repo forget <path>` | Make `orch` forget a known Repo. This is refused while it has Sessions or running Agents. |
 | `orch trust <repo> [--yes]` | Show what in the Repo's config needs Trust and approve it after a y/N prompt. |
+| `orch plan add <title> [--after <id>] [--blocked-by <id>]... [--link <ref>]` | Inside a Session (for its Agent): add a Task to the Session's Plan. Also `status <id> pending\|in-progress\|done\|dropped`, `block <id> --by <id>...`, `unblock <id> --by <id>...`, `link <id> <ref>`, `attach <id> <subagent-id>` and `show [--json]`. It reaches only its own Session's Plan. |
+| `orch session spawn --prompt <text> [--task <id>] [--agent <name>] [--preset <name>]` | Inside a Session (for its Agent): start a Child Session on this Session's Branch and print its id. Also `done "<summary>"` (from a child), `wait <id>...` (blocks until each is Done or failed, prints the summaries), `status [<id>...] [--json]`, `land <id>` and `discard <id>`. It reaches only its own Session and that Session's descendants. |
 | `orch daemon [--no-idle-exit]` | Run the Daemon in the foreground |
 | `orch daemon install` / `uninstall` | Manage the systemd user unit |
 
@@ -117,13 +123,14 @@ The TUI is modal, like nvim's `:terminal`. In **Insert** mode every key except `
 | `i` on a Subagent | Insert into its parent Session's Agent |
 | `o` on a Subagent | Show full tool results in the Subagent transcript (until you leave it) |
 | `Enter` on `↳ N done` | Expand / collapse that Session's finished Subagents |
-| `za`, or `Enter` on a folded heading | Fold / unfold the selected Repo |
+| `za`, or `Enter` on a folded heading | Fold / unfold the selected Repo; on a Session with Child Sessions, collapse / expand them |
 | `Ctrl-d` / `Ctrl-u`, `gg` / `G` | Scroll history |
 | `Ctrl-w h` / `l` / `w` | Focus sidebar / pane / other |
 | `v` / `V`, then `y` | Select and yank text |
 | `d` / `D` | Built-in Review / external Review command |
 | `d` / `D` on a Subagent | Review that Subagent's worktree, from its base to its tip |
 | `o` | Review view: open the first hunk in `$EDITOR` |
+| `p` | Show the selected Session's Plan (`Esc` / `p` closes it) |
 | `:` | Command line |
 
 The mouse works the same in Insert and Normal mode and never switches between them. When the Agent asks for the mouse (Claude Code's fullscreen renderer does), clicks, drags, the wheel and motion over the Session pane go to the Agent, so its own selection, copy, scrolling and links work as in a plain terminal. A drag that starts in the pane stays with the pane until you release, even if it wanders onto the sidebar. Hold Shift while dragging to get your terminal's native selection instead; it spans the whole window, sidebar included.
@@ -138,6 +145,7 @@ In the Review view the wheel scrolls the column under it, a click on a file show
 
 Commands:
 
+- `:child`, `:nc` (a Child Session of the selected Session, on its Branch)
 - `:n`, `:new` (the Branch field's status line says whether the name is new, an Existing Branch, a PR, or refused)
 - `:l`, `:land` (with an open PR, only pushes to it)
 - `:d`, `:discard` (an Existing Branch is kept: only the Worktree is removed, and the preview warns only about uncommitted changes)
@@ -147,6 +155,7 @@ Commands:
 - `:p <name>`, `:preset <name>`
 - `:guards on|off`
 - `:m`, `:mute`
+- `:plan`
 - `:u`, `:usage`
 - `:reconcile`
 - `:sh`, `:shell`, `:!<command>` (your shell, or one command, in the Session's Worktree outside the Sandbox; `:sh` again switches back)
@@ -160,6 +169,7 @@ Global settings live in `~/.config/orchestrator/config.toml` (`$XDG_CONFIG_HOME`
 ```toml
 branch_prefix = "orch/"
 stalled_minutes = 10
+max_child_depth = 2           # how deep Child Sessions nest
 ports = { start = 20000, end = 29999, block_size = 10 }   # ORCH_PORT_BASE per Session
 
 [notifications.desktop]

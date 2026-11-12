@@ -67,7 +67,7 @@ _Avoid_: Allow-list, permission
 
 **Session**:
 One Agent working on one Worktree on one Branch of a Repo, from creation until it is Landed or Discarded. Restarting or resuming the Agent, or starting a new Conversation, keeps the same Session.
-_Avoid_: Task, job, instance, run
+_Avoid_: job, instance, run
 
 **Session title**:
 A name given to the Session through its Agent, by the user (e.g. Claude Code's `/rename`) or by the Agent itself. It is shown in place of the slug and outlives the Conversation it was given in.
@@ -91,11 +91,19 @@ _Avoid_: Chat, thread, transcript
 
 **Subagent**:
 A helper the Agent spawns inside its own Session; it shares the Session's Worktree or works in a worktree of its own, such as a Subagent worktree, and is not a Session itself. It is Working until it ends, then Done, or Errored when its Agent reports it failed.
-_Avoid_: Child session, worker, sub-session
+_Avoid_: worker, sub-session (a spawned Session is a Child Session)
 
 **Subagent worktree**:
 A git worktree the Agent asks for to isolate one Subagent. It branches from the Session's HEAD, lives under `.orchestrator/subagents/<slug>/`, counts as inside the Session for Guards, and is removed with the Session. The Orchestrator records its base when it is created and its tip when it is removed, for the Subagent's Review.
 _Avoid_: Agent worktree, child worktree
+
+**Plan**:
+The ordered Tasks one Session's Agent is working through. Each Session has at most one; only its Agent writes it, through `orch plan`, and the user views it in the TUI. It outlives Conversations and Agent restarts, and stays readable after the Session is Landed or Discarded until the Session record is removed.
+_Avoid_: Todo list, roadmap, checklist
+
+**Task**:
+One step of a Plan: a title, a status (Pending, In progress, Done or Dropped), the Tasks it is blocked by, and optionally the Subagents or Child Sessions working on it and a link to an issue in any tracker. A Task is ready when every Task it is blocked by is Done or Dropped. It needs no Subagent.
+_Avoid_: Step, todo, item, job
 
 **Subagent transcript**:
 A read-only, live record of what a Subagent was asked and did (its prompt, its text, and its tool calls with their results), followed from the Agent's own files and shown when the Subagent is selected.
@@ -117,8 +125,16 @@ _Avoid_: Adopted branch (adopting is a Reconciliation fix for Leftovers), foreig
 The branch a Session's work is reviewed against and Landed into. A Branch the Orchestrator creates starts from it.
 _Avoid_: Parent, target, trunk
 
+**Child Session**:
+A Session started from another Session, its Parent Session, by that Session's Agent or by the user. Its Base branch is the Parent Session's Branch, it has its own Worktree that the parent can't write to (nor it to the parent's), and it inherits the parent's Agent and Preset unless others are picked, never a looser Preset without the user's approval. It is Done when its Agent says so with a summary; the Parent Session's Agent (or the user) then decides whether to Land it onto the parent's Branch. Children nest at most two levels deep by default.
+_Avoid_: Subagent, sub-session, worker
+
+**Parent Session**:
+The Session a Child Session was started from. Its Agent decides when to Land each Done child. It can't be Landed while any of its Child Sessions is open, and Discarding it Discards them too.
+_Avoid_: Root session, owner
+
 **Landing**:
-Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch, or pushing the Branch to its pull request, opening one if there is none.
+Finishing a Session by getting its changes out of the Worktree: either a squash of the Worktree's changes onto the Base branch, or pushing the Branch to its pull request, opening one if there is none. A Child Session is Landed by a squash onto its Parent Session's Branch; when that fails (a conflict, uncommitted changes in the same files, or the parent's Branch moving meanwhile) it stays open as Land failed. The parent's Agent can Land only a Done child; the user can Land any child.
 _Avoid_: Shipping, completing, finishing
 
 **Setup script**:

@@ -27,7 +27,10 @@ pub(super) fn draw(frame: &mut Frame, form: &NewForm, home: Option<&Path>) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(Color::Cyan))
-        .title(" :new Session ")
+        .title(match &form.parent {
+            Some(parent) => format!(" :child of {} (on {}) ", parent.name, parent.branch),
+            None => " :new Session ".to_string(),
+        })
         .title_bottom(hints(form));
     let body = block.inner(area);
     frame.render_widget(block, area);

@@ -19,6 +19,8 @@ pub struct GlobalConfig {
     pub notifications: Notifications,
     pub signing_key: Option<PathBuf>,
     pub readable_owners: ReadableOwners,
+    /// How deep Child Sessions may nest.
+    pub max_child_depth: usize,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -26,6 +28,7 @@ pub struct GlobalConfig {
 pub(crate) struct GlobalFile {
     branch_prefix: Option<String>,
     stalled_minutes: Option<u64>,
+    max_child_depth: Option<usize>,
     ports: Option<PortRange>,
     #[serde(default)]
     pub(crate) notifications: NotificationsLayer,
@@ -70,6 +73,9 @@ impl GlobalFile {
         GlobalConfig {
             branch_prefix: self.branch_prefix.clone().unwrap_or_else(|| "orch/".into()),
             stalled_after: Duration::from_secs(60 * self.stalled_minutes.unwrap_or(10)),
+            max_child_depth: self
+                .max_child_depth
+                .unwrap_or(orch_core::DEFAULT_MAX_CHILD_DEPTH),
             ports: self.ports.unwrap_or_default(),
             notifications: Notifications::layered([&self.notifications]),
             signing_key: self

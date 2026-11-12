@@ -27,6 +27,9 @@ fn reshape_as_left_by_the_antigravity_release(fx: &Fixture, antigravity_session:
     conn.execute_batch(&format!(
         "
 ALTER TABLE sessions DROP COLUMN agent;
+ALTER TABLE sessions DROP COLUMN parent_id;
+ALTER TABLE sessions DROP COLUMN done_summary;
+ALTER TABLE sessions DROP COLUMN land_failed;
 ALTER TABLE sessions DROP COLUMN pr_base;
 ALTER TABLE sessions DROP COLUMN existing_branch;
 ALTER TABLE sessions DROP COLUMN holder_seq;

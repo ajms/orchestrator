@@ -18,11 +18,46 @@ use orch_store::{NewSession, RepoRoot, SessionRecord};
 
 use crate::agents::{Adapter, adapter_for, resolve_env};
 use crate::branch::{BranchRequest, BranchTarget};
+use crate::children::depth;
 use crate::holder::Attach;
 use crate::state::{Daemon, Live, gate_message, store_conversations};
 
 pub(crate) const HOLDER_EXIT_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const PROMPT_FILE: &str = "prompt";
+/// Exported to a Child Session's Agent: the id of its Parent Session.
+pub(crate) const PARENT_SESSION_ENV: &str = "ORCH_PARENT_SESSION";
+/// Ends the preamble a Child Session's initial prompt starts with.
+pub(crate) const CHILD_PREAMBLE_END: &str = "\n\n---\n\n";
+
+/// Tells a Child Session's Agent that it is one (ADR 0022), so it finishes
+/// with `orch session done` and its parent's `orch session wait` returns.
+pub(crate) fn child_preamble(
+    parent: &str,
+    parent_id: &SessionId,
+    branch: &str,
+    task: Option<&str>,
+) -> String {
+    let mut text = format!(
+        "You are a Child Session of {parent} (id {}), working on its Branch {branch} in your own Worktree.",
+        parent_id.as_str()
+    );
+    if let Some(task) = task {
+        text.push_str(&format!(" You are working on its {task}."));
+    }
+    text.push_str(
+        " When your work is finished, commit it and run `orch session done \"<summary>\"`; your parent decides whether to Land it. If you need the user, just ask.",
+    );
+    text.push_str(CHILD_PREAMBLE_END);
+    text
+}
+
+/// The prompt without a Child Session's preamble.
+pub(crate) fn strip_child_preamble(prompt: &str) -> &str {
+    match prompt.split_once(CHILD_PREAMBLE_END) {
+        Some((head, rest)) if head.starts_with("You are a Child Session of ") => rest,
+        _ => prompt,
+    }
+}
 const PORT_BASE_ENV: &str = "ORCH_PORT_BASE";
 const CLICK_QUEUE: usize = 64;
 
@@ -110,6 +145,9 @@ pub(crate) fn session_env(record: &SessionRecord) -> Vec<(String, String)> {
     if let Some(block) = record.port_block {
         env.push((PORT_BASE_ENV.into(), block.base.to_string()));
     }
+    if let Some(parent) = &record.parent {
+        env.push((PARENT_SESSION_ENV.into(), parent.as_str().into()));
+    }
     env
 }
 
@@ -189,7 +227,31 @@ impl Daemon {
         self: &Arc<Self>,
         create: CreateSession,
     ) -> Result<Reply, RequestError> {
+        self.create_session_on(create, None).await
+    }
+
+    /// `task` describes the parent's Task a Child Session works on.
+    pub(crate) async fn create_session_on(
+        self: &Arc<Self>,
+        mut create: CreateSession,
+        task: Option<String>,
+    ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
+        if let Some(parent) = &create.parent {
+            if create.branch.is_some() || create.base.is_some() {
+                return Err(refused(
+                    "a Child Session gets a new Branch on its Parent Session's Branch",
+                ));
+            }
+            let (_, repo) = self
+                .snapshot(parent)
+                .ok_or_else(|| refused("the Parent Session has ended"))?;
+            create.repo = repo;
+        }
+        let _spawning = match &create.parent {
+            Some(parent) => Some(self.reserve_child(parent)?),
+            None => None,
+        };
         let inside = create.repo.clone();
         let root = tokio::task::spawn_blocking(move || RepoRoot::resolve(&inside))
             .await
@@ -201,7 +263,7 @@ impl Daemon {
             None => None,
         };
         let daemon = self.clone();
-        let live = tokio::task::spawn_blocking(move || daemon.prepare(create, target))
+        let live = tokio::task::spawn_blocking(move || daemon.prepare(create, target, task))
             .await
             .map_err(refused)??;
         let session = live.record.id.clone();
@@ -214,6 +276,7 @@ impl Daemon {
         &self,
         create: CreateSession,
         target: Option<BranchTarget>,
+        task: Option<String>,
     ) -> Result<Live, RequestError> {
         let root = RepoRoot::resolve(&create.repo).map_err(refused)?;
         let registered = root.clone();
@@ -230,12 +293,33 @@ impl Daemon {
             .loader
             .repo(root.path(), approval.as_ref())
             .map_err(refused)?;
-        let preset = select_preset(root.path(), &config, create.preset.as_deref())?;
+        let parent = match &create.parent {
+            Some(id) => Some(self.parent_of_child(id)?),
+            None => None,
+        };
+        let global = self.config.loader.global().map_err(refused)?;
+        if let Some(parent) = &parent
+            && parent.depth > global.max_child_depth
+        {
+            return Err(refused(format!(
+                "Child Sessions nest at most {} levels deep",
+                global.max_child_depth
+            )));
+        }
+        let inherited_preset = parent.as_ref().map(|parent| parent.preset.as_str());
+        let preset = select_preset(
+            root.path(),
+            &config,
+            create.preset.as_deref().or(inherited_preset),
+        )?;
         let preset_sandboxed = preset.sandboxed();
         if config.setup_script().is_err() {
             return Err(untrusted(root.path(), &config));
         }
-        let picked = create.agent.as_deref();
+        let picked = create
+            .agent
+            .as_deref()
+            .or(parent.as_ref().map(|parent| parent.agent.as_str()));
         let agent = config
             .agent(picked.unwrap_or(config.default_agent()))
             .map_err(|_| untrusted(root.path(), &config))?;
@@ -248,15 +332,15 @@ impl Daemon {
             self.probe_sandbox(None, root.path(), adapter.as_ref(), &configured)
                 .map_err(refused)?;
         }
-        let global = self.config.loader.global().map_err(refused)?;
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
         let requested = match &target {
             Some(target) => target.base(create.base)?,
             None => create.base,
         };
-        let base = match requested {
-            Some(base) => base,
-            None => git.default_base(config.base_branch()).map_err(refused)?,
+        let base = match (&parent, requested) {
+            (Some(parent), _) => parent.branch.clone(),
+            (None, Some(base)) => base,
+            (None, None) => git.default_base(config.base_branch()).map_err(refused)?,
         };
         let (name, resolved) = match &target {
             Some(target) => {
@@ -280,9 +364,10 @@ impl Daemon {
         };
         let existing_branch = resolved.is_some();
         let id = new_session_id()?;
-        let worktree = match &resolved {
-            Some(resolved) => git.attach_existing_branch(&name, &base, resolved),
-            None => git.create_worktree(&name, &base),
+        let worktree = match (&resolved, &parent) {
+            (Some(resolved), _) => git.attach_existing_branch(&name, &base, resolved),
+            (None, Some(_)) => git.create_child_worktree(&name, &base),
+            (None, None) => git.create_worktree(&name, &base),
         }
         .map_err(refused)?;
         let rollback = SessionWorktree {
@@ -300,6 +385,7 @@ impl Daemon {
             preset: preset.name,
             existing_branch,
             agent: agent.name,
+            parent: create.parent.clone(),
         };
         let ports = global.ports;
         let stored = self.store.call_blocking(move |store| {
@@ -325,9 +411,18 @@ impl Daemon {
                 return Err(err);
             }
         };
+        let prompt = match (&parent, &create.parent) {
+            (Some(parent), Some(parent_id)) => {
+                let mut prompt =
+                    child_preamble(&parent.name, parent_id, &parent.branch, task.as_deref());
+                prompt.push_str(&create.prompt);
+                prompt
+            }
+            _ => create.prompt.clone(),
+        };
         let dir = self.session_dir(&id);
         let written = std::fs::create_dir_all(&dir)
-            .and_then(|()| std::fs::write(dir.join(PROMPT_FILE), &create.prompt));
+            .and_then(|()| std::fs::write(dir.join(PROMPT_FILE), &prompt));
         if let Err(err) = written {
             eprintln!("orch daemon: storing the prompt of {}: {err}", id.as_str());
         }
@@ -339,6 +434,26 @@ impl Daemon {
                 .map_err(refused)?;
         }
         Ok(live)
+    }
+
+    fn parent_of_child(&self, id: &SessionId) -> Result<ParentOfChild, RequestError> {
+        let state = self.lock();
+        let live = state
+            .sessions
+            .get(id)
+            .filter(|live| !live.status.phase().is_terminal())
+            .ok_or_else(|| refused("the Parent Session has ended"))?;
+        Ok(ParentOfChild {
+            name: live
+                .record
+                .title
+                .clone()
+                .unwrap_or_else(|| live.record.slug.clone()),
+            branch: live.record.branch.clone(),
+            agent: live.record.agent.clone(),
+            preset: live.record.preset.clone(),
+            depth: depth(&state.sessions, id) + 1,
+        })
     }
 
     pub(crate) async fn check_launch(
@@ -482,17 +597,6 @@ impl Daemon {
         }
         if restart {
             self.launch_agent(id, true).await;
-        }
-        Ok(Reply::Done)
-    }
-
-    pub(crate) fn set_muted(&self, id: &SessionId, muted: bool) -> Result<Reply, RequestError> {
-        self.update(id, |live| {
-            live.status.set_muted(muted);
-            Ok(())
-        })?;
-        if muted {
-            self.lock().dismiss(id);
         }
         Ok(Reply::Done)
     }
@@ -701,7 +805,7 @@ impl Daemon {
                 .arg("--port-size")
                 .arg(block.size.to_string());
         }
-        let mut broker_env = Vec::new();
+        let broker_env;
         let mut display = self.lock().display.pairs();
         if let Some(SandboxLaunch { args, warning, env }) = sandbox {
             display.clear();
@@ -711,6 +815,9 @@ impl Daemon {
                 command.arg("--warning").arg(warning);
             }
             broker_env = env;
+        } else {
+            let shims = self.session_dir(&record.id).join(crate::broker::SHIMS_DIR);
+            broker_env = crate::broker::install_orch_shim(&shims, &self.config.orch_program)?;
         }
         let env = session_env(record)
             .into_iter()
@@ -767,6 +874,7 @@ impl Daemon {
                 _ => {}
             }
         }
+        daemon.adopt_orphans();
         daemon
     }
 
@@ -825,6 +933,16 @@ impl Daemon {
         }
         known
     }
+}
+
+struct ParentOfChild {
+    /// Its title, or its slug before it has one.
+    name: String,
+    branch: String,
+    agent: String,
+    preset: String,
+    /// The depth the child would have.
+    depth: usize,
 }
 
 struct SandboxLaunch {

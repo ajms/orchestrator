@@ -24,7 +24,7 @@ use crate::land::LandForm;
 use crate::layout::Areas;
 use crate::link::RequestId;
 use crate::mouse::Region;
-use crate::new_form::{Field, NewForm};
+use crate::new_form::{Field, NewForm, ParentChoice};
 use crate::pane::PaneMirror;
 use crate::preparing::{Preparing, PreparingId, PreparingState};
 use crate::reconcile::{FixStep, ReconcileView, RetargetPicker, plan};
@@ -134,7 +134,9 @@ pub(crate) enum Pending {
     Create(PreparingId),
     Trust(Box<Retry>),
     Draft(SessionId, LandingMode),
-    Land,
+    Land {
+        child: bool,
+    },
     DiscardPreview(SessionId),
     Usage,
     Reconcile,
@@ -201,6 +203,7 @@ pub(crate) enum Popup {
     Discard(DiscardConfirm),
     Usage(UsageReport),
     Retarget(RetargetPicker),
+    Plan(SessionId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -473,7 +476,7 @@ impl App {
             }
             (Pending::Trust(retry), Ok(_)) => self.request(retry.request, retry.pending),
             (Pending::Draft(session, mode), result) => self.drafted(&session, mode, result),
-            (Pending::Land, Ok(Reply::Landed { commit, warning })) => {
+            (Pending::Land { .. }, Ok(Reply::Landed { commit, warning })) => {
                 self.message = Some(
                     match warning {
                         Some(warning) => format!("Landed as {commit}; warning: {warning}"),
@@ -483,7 +486,7 @@ impl App {
                 );
             }
             (
-                Pending::Land,
+                Pending::Land { .. },
                 Ok(Reply::PrOpened {
                     number,
                     committed_changes,
@@ -497,7 +500,7 @@ impl App {
                 }.into());
             }
             (
-                Pending::Land,
+                Pending::Land { .. },
                 Ok(Reply::Pushed {
                     number,
                     committed_changes,
@@ -510,7 +513,13 @@ impl App {
                     false => format!("pushed to PR #{number}"),
                 }.into());
             }
-            (Pending::Land, Err(RequestError::Conflict { paths })) => {
+            (Pending::Land { child: true }, Err(err)) => {
+                self.message = Some(
+                    format!("Land failed: {err}; the Child Session stays open, marked Land failed")
+                        .into(),
+                );
+            }
+            (Pending::Land { child: false }, Err(RequestError::Conflict { paths })) => {
                 let conflict = RequestError::Conflict { paths };
                 self.message =
                     Some(format!("{conflict}; the rebase was handed to the Agent").into());
@@ -521,6 +530,7 @@ impl App {
                     uncommitted,
                     unlanded,
                     branch_kept,
+                    children,
                 }),
             ) => {
                 let question = match self.sessions.get(&session) {
@@ -529,7 +539,8 @@ impl App {
                 };
                 let target = DiscardTarget::Session(session);
                 let confirm =
-                    DiscardConfirm::new(target, question, uncommitted, unlanded, branch_kept);
+                    DiscardConfirm::new(target, question, uncommitted, unlanded, branch_kept)
+                        .with_children(children);
                 self.popup = Some(Popup::Discard(confirm));
             }
             (
@@ -538,6 +549,7 @@ impl App {
                     uncommitted,
                     unlanded,
                     branch_kept,
+                    ..
                 }),
             ) => {
                 let question = format!("Remove the Leftover {}?", leftover.label());
@@ -813,6 +825,13 @@ impl App {
 
     pub fn findings(&self) -> usize {
         self.reconcile_report.findings().count()
+    }
+
+    pub fn show_plan(&mut self) {
+        match self.selected.clone() {
+            Some(session) => self.popup = Some(Popup::Plan(session)),
+            None => self.message = Some(NO_SESSION.into()),
+        }
     }
 
     pub fn request_usage(&mut self) {
@@ -1097,7 +1116,41 @@ impl App {
             return;
         };
         let mut form = self.new_form();
+        let parent = create.parent.clone();
         form.restore(create);
+        if let Some(parent) = parent.and_then(|id| self.parent_choice(&id)) {
+            form.parent = Some(parent);
+        }
+        self.show_new_form(form);
+    }
+
+    fn parent_choice(&self, id: &SessionId) -> Option<ParentChoice> {
+        let view = self.sessions.get(id)?;
+        Some(ParentChoice {
+            id: view.id.clone(),
+            name: view.title_or_slug().to_string(),
+            branch: view.branch.clone(),
+        })
+    }
+
+    /// The new-Session form for a Child Session of the selected Session.
+    pub fn open_child_form(&mut self) {
+        let Some(view) = self.selected_view() else {
+            self.message = Some("select the Session to start a Child Session of".into());
+            return;
+        };
+        let (id, repo, preset, agent) = (
+            view.id.clone(),
+            view.repo.clone(),
+            view.preset.clone(),
+            view.agent.clone(),
+        );
+        let Some(parent) = self.parent_choice(&id) else {
+            return;
+        };
+        let mut form = self.new_form();
+        form.repo.set(repo);
+        form.child_of(parent, &preset, &agent);
         self.show_new_form(form);
     }
 
@@ -1199,7 +1252,15 @@ impl App {
         self.sidebar.heading.is_some()
     }
 
+    /// `za`: on a Parent Session, collapses or expands its Child Sessions;
+    /// elsewhere, folds the Repo.
     pub fn toggle_cursor_fold(&mut self) {
+        if let Some(Stop::Session(session)) = self.cursor()
+            && self.sessions.has_children(&session)
+        {
+            self.sidebar.toggle_collapsed(&session);
+            return;
+        }
         if let Some(repo) = self.cursor_repo() {
             self.toggle_fold(&repo);
         }
@@ -1222,6 +1283,19 @@ impl App {
         };
         if let Some(repo) = repo {
             self.sidebar.unfold(&repo);
+        }
+        let ancestors: Vec<SessionId> = self
+            .selected_view()
+            .map(|view| {
+                self.sessions
+                    .ancestors(view)
+                    .into_iter()
+                    .map(|ancestor| ancestor.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for ancestor in &ancestors {
+            self.sidebar.uncollapse(ancestor);
         }
         if let Some((view, subagent)) = self.cursor_subagent()
             && crate::sidebar::collapses(subagent)
@@ -1622,13 +1696,17 @@ impl App {
 
     pub fn land(&mut self, session: SessionId, landing: orch_protocol::Landing) {
         self.message = Some("Landing…".into());
+        let child = self
+            .sessions
+            .get(&session)
+            .is_some_and(|view| view.parent.is_some());
         self.request(
             Request::Land {
                 session,
                 landing,
                 skip_teardown: false,
             },
-            Pending::Land,
+            Pending::Land { child },
         );
     }
 
