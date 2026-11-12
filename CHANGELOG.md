@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0](https://github.com/ajms/orchestrator/compare/v0.18.1...v0.19.0) - 2026-11-12
+
+### Added
+
+- *(session)* add Child Sessions with orch session, tree-aware Land and Discard, and a nested sidebar ([#242](https://github.com/ajms/orchestrator/pull/242))
+- tell Claude about orch plan and attach Subagents that name a Task ([#247](https://github.com/ajms/orchestrator/pull/247))
+- give each Session a Plan the Agent writes through orch plan
+- *(core)* add Plan::is_untouched, Plan::readiness and join_ids ([#247](https://github.com/ajms/orchestrator/pull/247))
+
+### Fixed
+
+- *(session)* tell a Child Session's Agent that it is one ([#242](https://github.com/ajms/orchestrator/pull/242))
+- *(session)* require Done for agent Land, hand over summaries, document orphans and BaseMoved ([#247](https://github.com/ajms/orchestrator/pull/247))
+- *(session)* child Land/Discard review findings ([#242](https://github.com/ajms/orchestrator/pull/242))
+- *(store)* keep a Session loadable when its stored Plan is corrupt ([#247](https://github.com/ajms/orchestrator/pull/247))
+- *(daemon)* put orch on PATH for unsandboxed Sessions so orch plan works ([#247](https://github.com/ajms/orchestrator/pull/247))
+- *(store)* report an undecodable Plan instead of reading it as empty ([#247](https://github.com/ajms/orchestrator/pull/247))
+
+### Other
+
+- *(cli)* share the orch plan/session broker call and add Attachment::is_child_session ([#247](https://github.com/ajms/orchestrator/pull/247))
+- share Plan readiness and id joining from orch-core ([#247](https://github.com/ajms/orchestrator/pull/247))
+- *(session)* tell Claude and pi about orch session and document Child Sessions ([#242](https://github.com/ajms/orchestrator/pull/242))
+- *(daemon)* move child-tree walks into children.rs ([#247](https://github.com/ajms/orchestrator/pull/247))
+
 ## [0.18.1](https://github.com/ajms/orchestrator/compare/v0.18.0...v0.18.1) - 2026-11-10
 
 ### Fixed
