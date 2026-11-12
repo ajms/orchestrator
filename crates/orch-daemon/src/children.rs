@@ -257,7 +257,10 @@ impl Daemon {
             parent: Some(id.clone()),
             ..CreateSession::new(repo, prompt)
         };
-        let child = match self.create_session(create).await {
+        let task_note = task
+            .and_then(|task| record.plan.task(task))
+            .map(|task| format!("Task {}: {}", task.id, task.title));
+        let child = match self.create_session_on(create, task_note).await {
             Ok(Reply::Created { session }) => session,
             Ok(other) => return Err(format!("unexpected reply: {other:?}")),
             Err(err) => return Err(err.to_string()),

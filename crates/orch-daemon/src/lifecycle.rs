@@ -24,6 +24,40 @@ use crate::state::{Daemon, Live, gate_message, store_conversations};
 
 pub(crate) const HOLDER_EXIT_WAIT: Duration = Duration::from_secs(5);
 pub(crate) const PROMPT_FILE: &str = "prompt";
+/// Exported to a Child Session's Agent: the id of its Parent Session.
+pub(crate) const PARENT_SESSION_ENV: &str = "ORCH_PARENT_SESSION";
+/// Ends the preamble a Child Session's initial prompt starts with.
+pub(crate) const CHILD_PREAMBLE_END: &str = "\n\n---\n\n";
+
+/// Tells a Child Session's Agent that it is one (ADR 0022), so it finishes
+/// with `orch session done` and its parent's `orch session wait` returns.
+pub(crate) fn child_preamble(
+    parent: &str,
+    parent_id: &SessionId,
+    branch: &str,
+    task: Option<&str>,
+) -> String {
+    let mut text = format!(
+        "You are a Child Session of {parent} (id {}), working on its Branch {branch} in your own Worktree.",
+        parent_id.as_str()
+    );
+    if let Some(task) = task {
+        text.push_str(&format!(" You are working on its {task}."));
+    }
+    text.push_str(
+        " When your work is finished, commit it and run `orch session done \"<summary>\"`; your parent decides whether to Land it. If you need the user, just ask.",
+    );
+    text.push_str(CHILD_PREAMBLE_END);
+    text
+}
+
+/// The prompt without a Child Session's preamble.
+pub(crate) fn strip_child_preamble(prompt: &str) -> &str {
+    match prompt.split_once(CHILD_PREAMBLE_END) {
+        Some((head, rest)) if head.starts_with("You are a Child Session of ") => rest,
+        _ => prompt,
+    }
+}
 const PORT_BASE_ENV: &str = "ORCH_PORT_BASE";
 const CLICK_QUEUE: usize = 64;
 
@@ -111,6 +145,9 @@ pub(crate) fn session_env(record: &SessionRecord) -> Vec<(String, String)> {
     if let Some(block) = record.port_block {
         env.push((PORT_BASE_ENV.into(), block.base.to_string()));
     }
+    if let Some(parent) = &record.parent {
+        env.push((PARENT_SESSION_ENV.into(), parent.as_str().into()));
+    }
     env
 }
 
@@ -188,7 +225,16 @@ impl Daemon {
 
     pub(crate) async fn create_session(
         self: &Arc<Self>,
+        create: CreateSession,
+    ) -> Result<Reply, RequestError> {
+        self.create_session_on(create, None).await
+    }
+
+    /// `task` describes the parent's Task a Child Session works on.
+    pub(crate) async fn create_session_on(
+        self: &Arc<Self>,
         mut create: CreateSession,
+        task: Option<String>,
     ) -> Result<Reply, RequestError> {
         let _busy = Busy::new(self);
         if let Some(parent) = &create.parent {
@@ -217,7 +263,7 @@ impl Daemon {
             None => None,
         };
         let daemon = self.clone();
-        let live = tokio::task::spawn_blocking(move || daemon.prepare(create, target))
+        let live = tokio::task::spawn_blocking(move || daemon.prepare(create, target, task))
             .await
             .map_err(refused)??;
         let session = live.record.id.clone();
@@ -230,6 +276,7 @@ impl Daemon {
         &self,
         create: CreateSession,
         target: Option<BranchTarget>,
+        task: Option<String>,
     ) -> Result<Live, RequestError> {
         let root = RepoRoot::resolve(&create.repo).map_err(refused)?;
         let registered = root.clone();
@@ -364,9 +411,18 @@ impl Daemon {
                 return Err(err);
             }
         };
+        let prompt = match (&parent, &create.parent) {
+            (Some(parent), Some(parent_id)) => {
+                let mut prompt =
+                    child_preamble(&parent.name, parent_id, &parent.branch, task.as_deref());
+                prompt.push_str(&create.prompt);
+                prompt
+            }
+            _ => create.prompt.clone(),
+        };
         let dir = self.session_dir(&id);
         let written = std::fs::create_dir_all(&dir)
-            .and_then(|()| std::fs::write(dir.join(PROMPT_FILE), &create.prompt));
+            .and_then(|()| std::fs::write(dir.join(PROMPT_FILE), &prompt));
         if let Err(err) = written {
             eprintln!("orch daemon: storing the prompt of {}: {err}", id.as_str());
         }
@@ -388,6 +444,11 @@ impl Daemon {
             .filter(|live| !live.status.phase().is_terminal())
             .ok_or_else(|| refused("the Parent Session has ended"))?;
         Ok(ParentOfChild {
+            name: live
+                .record
+                .title
+                .clone()
+                .unwrap_or_else(|| live.record.slug.clone()),
             branch: live.record.branch.clone(),
             agent: live.record.agent.clone(),
             preset: live.record.preset.clone(),
@@ -875,6 +936,8 @@ impl Daemon {
 }
 
 struct ParentOfChild {
+    /// Its title, or its slug before it has one.
+    name: String,
     branch: String,
     agent: String,
     preset: String,

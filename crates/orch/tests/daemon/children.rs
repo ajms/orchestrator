@@ -101,6 +101,22 @@ async fn a_child_starts_on_its_parents_branch_and_is_attached_to_its_task() {
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].id, child.as_str());
     assert_eq!(reports[0].state, ChildState::Working);
+
+    let mut pane = env.pane(&child, PANE).await;
+    pane.wait_for_long_line(&format!(
+        "prompt> You are a Child Session of lead-the-work (id {}), working on its Branch {}",
+        parent.as_str(),
+        parent_view.branch
+    ))
+    .await;
+    pane.wait_for_long_line("You are working on its Task 1: Split.")
+        .await;
+    pane.wait_for_long_line("orch session done").await;
+    pane.wait_for_long_line("---").await;
+    pane.wait_for_long_line("Do one part").await;
+    pane.type_line("env ORCH_PARENT_SESSION").await;
+    pane.wait_for_text(&format!("ORCH_PARENT_SESSION={}", parent.as_str()))
+        .await;
 }
 
 #[tokio::test]

@@ -57,6 +57,9 @@ async fn a_new_session_runs_its_setup_script_then_starts_the_agent_with_its_prom
     pane.type_line("env ORCH_WORKTREE").await;
     pane.wait_for_text(&format!("ORCH_WORKTREE={worktree}"))
         .await;
+    pane.type_line("env ORCH_PARENT_SESSION").await;
+    pane.wait_for_text("ORCH_PARENT_SESSION=<unset>").await;
+    assert!(!pane.text().contains("Child Session"));
 }
 
 #[tokio::test]

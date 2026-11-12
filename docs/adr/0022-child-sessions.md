@@ -33,4 +33,5 @@ A Subagent is lightweight and lives inside its Session: it can't ask for input, 
 - A child left by a parent that ended anyway becomes top-level, with the parent's Branch still as its Base branch; it Lands like any other Session.
 - A Done child that the parent never Lands stays open. It counts as open for the parent's Landing, so it can't be lost silently.
 - Landing writes to the parent's Branch while the parent's Worktree may hold uncommitted work. The squash must leave that work intact or fail as Land failed.
+- A Child Session's initial prompt starts with a short preamble naming its parent, its Branch, its Task if one is attached, and that it finishes with `orch session done`. Its Agent also gets `ORCH_PARENT_SESSION=<parent id>`. Without this the child may never run `done` and its parent's `orch session wait` blocks forever.
 - Port blocks, Holders and notifications scale with the tree. The depth limit bounds this.
