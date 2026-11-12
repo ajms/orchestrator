@@ -57,6 +57,8 @@ Only `capabilities` and `launch` are required. Every other method has a default 
 
 Every Session's Agent can run `orch` itself: the Daemon puts an `orch` shim (a script that `exec`s the Daemon's own `orch` program) in the Session's `shims/` dir, puts that dir first on the Agent's `PATH` and sets `ORCH_BIN` to the program. A sandboxed Session gets it with the Broker's other shims; a Session whose Preset has `sandbox = false` gets just this one. The Holder sets `ORCH_HOLDER_SOCKET`, so `orch plan` reaches the Daemon through the Session's own Holder and writes only that Session's Plan (ADR 0021). The Broker serves `orch plan` for unsandboxed Sessions too; every other Broker request is still sandboxed-only.
 
+A Child Session's Agent (ADR 0022) also gets `ORCH_PARENT_SESSION=<parent id>`, and its initial prompt starts with a preamble that names its parent, its Branch and its Task, and tells it to finish with `orch session done`. The Daemon writes the preamble into the stored prompt, so a relaunch after a failed launch includes it too; a resume doesn't repeat the prompt. Both adapters' guidance says that `ORCH_PARENT_SESSION` being set means the Agent is a Child Session.
+
 Each adapter tells its Agent about `orch plan` and `orch session`:
 
 - **Claude** gets `PLAN_GUIDANCE` (`crates/orch-agent/src/claude/mod.rs`) with `--append-system-prompt` on launch and resume, so nothing is written to the user's `CLAUDE.md`.

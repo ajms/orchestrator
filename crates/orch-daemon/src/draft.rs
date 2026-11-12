@@ -7,7 +7,7 @@ use orch_protocol::{LandingMode, Reply, RequestError};
 use orch_store::SessionRecord;
 
 use crate::agents::adapter_for;
-use crate::lifecycle::{PROMPT_FILE, refused, untrusted, with_git};
+use crate::lifecycle::{PROMPT_FILE, refused, strip_child_preamble, untrusted, with_git};
 use crate::state::{Daemon, session_worktree};
 use crate::subprocess;
 
@@ -129,6 +129,7 @@ impl Daemon {
             .ok()
             .and_then(Result::ok)
             .filter(|prompt| !prompt.trim().is_empty());
+        let prompt = prompt.map(|prompt| strip_child_preamble(&prompt).to_owned());
         split_draft(&prompt.unwrap_or_else(|| slug.replace('-', " ")))
     }
 }

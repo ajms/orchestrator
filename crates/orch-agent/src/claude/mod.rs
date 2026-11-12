@@ -54,7 +54,7 @@ Child Sessions: for long or interactive work in parallel, start full Sessions on
 - `orch session spawn --prompt \"<text>\" [--task <id>] [--agent <name>] [--preset <name>]` prints the child's id at once. It gets its own Worktree; neither of you can write to the other's. A looser Preset than yours asks the user.
 - `orch session wait <id>...` blocks until each child is done or failed and prints its summary; `orch session status [<id>...]` doesn't block.
 - Nothing Lands by itself. Read the child's diff in its Worktree, then `orch session land <id>` squashes it onto your Branch (it keeps your uncommitted work; a conflict or your uncommitted changes in the same files fail it as Land failed: fix and retry), or `orch session discard <id>`. You can't be Landed while a child is open.
-- In a Child Session, finish with `orch session done \"<summary>\"`; your parent decides whether to Land it.
+- If `ORCH_PARENT_SESSION` is set, you are a Child Session: finish with `orch session done \"<summary>\"`; your parent decides whether to Land it.
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
