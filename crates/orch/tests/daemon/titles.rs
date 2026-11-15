@@ -30,6 +30,7 @@ async fn a_title_given_through_the_agent_outlives_clear_and_a_daemon_restart() {
     let mut daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let (id, mut pane) = idle_session(&env, &mut client, "Fix login").await;
+    let slug = client.session_list().await[0].slug.clone();
 
     pane.hook(&hook("UserPromptSubmit", &titled("login redirect")))
         .await;
@@ -38,7 +39,7 @@ async fn a_title_given_through_the_agent_outlives_clear_and_a_daemon_restart() {
             view.title.as_deref() == Some("login redirect")
         })
         .await;
-    assert_eq!(titled_view.slug, "fix-login");
+    assert_eq!(titled_view.slug, slug);
 
     pane.hook(r#"{"hook_event_name":"SessionStart","session_id":"conv-2","source":"clear"}"#)
         .await;
@@ -97,7 +98,9 @@ async fn desktop_notifications_name_the_session_by_its_title() {
     pane.hook(&hook("UserPromptSubmit", &titled("login redirect")))
         .await;
     client
-        .until(&id, "the title", |view| view.title.is_some())
+        .until(&id, "the title", |view| {
+            view.title.as_deref() == Some("login redirect")
+        })
         .await;
 
     pane.hook(&hook("PermissionRequest", r#""tool_name":"Bash""#))

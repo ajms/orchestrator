@@ -3,7 +3,7 @@ use orch_tui::{Effect, Event};
 use ratatui::style::Color;
 
 use crate::common::*;
-use crate::new_session::{config, field, form};
+use crate::new_session::{config, field, form, shown_title, type_title};
 
 fn shift_tab(tui: &mut Harness) {
     tui.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
@@ -18,9 +18,10 @@ fn prompt_of_create(tui: &mut Harness) -> String {
 }
 
 #[test]
-fn tab_goes_from_the_prompt_through_repo_branch_base_preset_and_agent_back_to_the_prompt() {
+fn tab_goes_from_the_prompt_through_repo_branch_base_preset_agent_and_title_back_to_the_prompt() {
     let mut tui = form(config());
     tui.keys("Fix");
+    type_title(&mut tui, "Fix");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::End);
@@ -37,13 +38,18 @@ fn tab_goes_from_the_prompt_through_repo_branch_base_preset_and_agent_back_to_th
 
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
+    tui.keys("ed");
+    assert_eq!(shown_title(&mut tui), "Fixed");
+
+    tui.press(KeyCode::Tab);
     tui.keys(" it");
     assert_eq!(prompt_of_create(&mut tui), "Fix it");
 }
 
 #[test]
-fn shift_tab_goes_back_from_the_prompt_through_the_agent_to_the_preset() {
+fn shift_tab_goes_back_from_the_prompt_through_the_title_and_agent_to_the_preset() {
     let mut tui = form(config());
+    shift_tab(&mut tui);
     shift_tab(&mut tui);
     shift_tab(&mut tui);
     tui.press(KeyCode::Right);
@@ -51,7 +57,7 @@ fn shift_tab_goes_back_from_the_prompt_through_the_agent_to_the_preset() {
 }
 
 #[test]
-fn enter_on_branch_base_preset_and_agent_moves_to_the_next_field() {
+fn enter_on_branch_base_preset_agent_and_title_moves_to_the_next_field() {
     let mut tui = form(config());
     tui.keys("Fix");
     tui.press(KeyCode::Tab);
@@ -60,6 +66,7 @@ fn enter_on_branch_base_preset_and_agent_moves_to_the_next_field() {
     tui.keys("main");
     tui.press(KeyCode::Enter);
     tui.press(KeyCode::Right);
+    tui.press(KeyCode::Enter);
     tui.press(KeyCode::Enter);
     tui.press(KeyCode::Enter);
     tui.keys(" it");
@@ -185,7 +192,7 @@ fn up_and_down_move_between_prompt_lines_and_jump_to_the_ends_at_the_edges() {
 #[test]
 fn branch_and_base_have_the_same_editing_keys() {
     let mut tui = form(config());
-    tui.keys("Fix");
+    type_title(&mut tui, "Fix");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Home);
@@ -202,9 +209,9 @@ fn branch_and_base_have_the_same_editing_keys() {
 }
 
 #[test]
-fn clearing_the_branch_hands_it_back_to_the_prompt_derived_name_shown_dimmed() {
+fn clearing_the_branch_hands_it_back_to_the_title_derived_name_shown_dimmed() {
     let mut tui = form(config());
-    tui.keys("Fix it");
+    type_title(&mut tui, "Fix it");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::End);
@@ -213,6 +220,7 @@ fn clearing_the_branch_hands_it_back_to_the_prompt_derived_name_shown_dimmed() {
 
     tui.ctrl('u');
     assert_eq!(tui.colour_of("orch/fix-it"), Color::DarkGray);
+    tui.press(KeyCode::BackTab);
     tui.press(KeyCode::BackTab);
     tui.press(KeyCode::BackTab);
     tui.keys(" today");
@@ -309,7 +317,8 @@ fn column_of(tui: &mut Harness, needle: &str) -> u16 {
 fn fields_are_stacked_left_of_the_prompt_with_labels_above_values() {
     let mut tui = form(config());
     let repo = row_of(&mut tui, "│ Repo ");
-    assert!(tui.lines()[repo].contains("Prompt"));
+    assert!(tui.lines()[repo].contains("Title"));
+    assert!(row_of(&mut tui, "Prompt") > repo + 1);
     assert!(tui.lines()[repo + 1].contains("/home/me/recent"));
     assert!(row_of(&mut tui, "│ Branch ") > repo + 1);
     assert!(row_of(&mut tui, "│ Preset ") > row_of(&mut tui, "│ Base "));
@@ -368,6 +377,7 @@ fn an_overflowing_prompt_scrolls_to_keep_the_cursor_visible() {
 #[test]
 fn the_terminal_cursor_sits_at_the_text_cursor() {
     let mut tui = form(config());
+    type_title(&mut tui, "wxyz");
     tui.keys("abcd");
     tui.press(KeyCode::Left);
     let at = (
@@ -378,8 +388,8 @@ fn the_terminal_cursor_sits_at_the_text_cursor() {
 
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
-    let branch = row_of(&mut tui, "orch/abcd") as u16;
-    let end = column_of(&mut tui, "orch/abcd") + "orch/abcd".len() as u16;
+    let branch = row_of(&mut tui, "orch/wxyz") as u16;
+    let end = column_of(&mut tui, "orch/wxyz") + "orch/wxyz".len() as u16;
     assert_eq!(tui.cursor(), Some((end, branch)));
 
     tui.press(KeyCode::Tab);
@@ -415,6 +425,9 @@ fn the_bottom_border_shows_the_keys_for_the_focused_field() {
     tui.press(KeyCode::Esc);
 
     shift_tab(&mut tui);
+    shift_tab(&mut tui);
+    let title = hints(&mut tui);
+    assert!(title.contains("Ctrl+u clear"), "{title}");
     shift_tab(&mut tui);
     let preset = hints(&mut tui);
     assert!(preset.contains("←/→ choose"), "{preset}");
@@ -525,6 +538,7 @@ fn enter_or_typing_on_the_repo_field_opens_the_picker() {
 #[test]
 fn up_and_down_on_preset_cycle_like_left_and_right() {
     let mut tui = form(config());
+    shift_tab(&mut tui);
     shift_tab(&mut tui);
     shift_tab(&mut tui);
     tui.press(KeyCode::Down);

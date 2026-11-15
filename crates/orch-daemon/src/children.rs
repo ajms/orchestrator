@@ -12,7 +12,7 @@ use std::sync::Arc;
 use orch_agent::GuardKind;
 use orch_core::{
     AgentState, Attachment, ChildReport, ChildState, MAX_CHILD_IDS, MAX_CHILD_PROMPT,
-    MAX_CHILD_SUMMARY, Phase, PlanOp, SessionId, SessionOp, checked_text,
+    MAX_CHILD_SUMMARY, MAX_CHILD_TITLE, Phase, PlanOp, SessionId, SessionOp, checked_text,
 };
 use orch_holder::{BrokerReply, GuardId};
 use orch_protocol::{CreateSession, Landing, Reply, RequestError};
@@ -200,12 +200,19 @@ impl Daemon {
         match op {
             SessionOp::Spawn {
                 prompt,
+                title,
                 task,
                 agent,
                 preset,
             } => {
-                self.spawn_child(id, broker, prompt, task, agent, preset)
-                    .await
+                let spawn = ChildSpawn {
+                    prompt,
+                    title,
+                    task,
+                    agent,
+                    preset,
+                };
+                self.spawn_child(id, broker, spawn).await
             }
             SessionOp::Done { summary } => self.child_done(id, summary),
             SessionOp::Wait { ids } => self.wait_children(id, ids).await,
@@ -219,12 +226,19 @@ impl Daemon {
         self: &Arc<Self>,
         id: &SessionId,
         broker: GuardId,
-        prompt: String,
-        task: Option<orch_core::TaskId>,
-        agent: Option<String>,
-        preset: Option<String>,
+        spawn: ChildSpawn,
     ) -> Result<BrokerReply, String> {
+        let ChildSpawn {
+            prompt,
+            title,
+            task,
+            agent,
+            preset,
+        } = spawn;
         let prompt = checked_text(&prompt, MAX_CHILD_PROMPT, "prompt")?;
+        let title = title
+            .map(|title| checked_text(&title, MAX_CHILD_TITLE, "title"))
+            .transpose()?;
         let (record, repo) = self.snapshot(id).ok_or("the Session has ended")?;
         if let Some(task) = task
             && record.plan.task(task).is_none()
@@ -252,6 +266,7 @@ impl Daemon {
             }
         }
         let create = CreateSession {
+            title,
             preset,
             agent,
             parent: Some(id.clone()),
@@ -575,4 +590,13 @@ impl Daemon {
             })
             .collect()
     }
+}
+
+/// What `orch session spawn` asked for.
+struct ChildSpawn {
+    prompt: String,
+    title: Option<String>,
+    task: Option<orch_core::TaskId>,
+    agent: Option<String>,
+    preset: Option<String>,
 }

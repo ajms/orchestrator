@@ -26,6 +26,8 @@ pub struct NewSession {
     pub agent: String,
     /// The Parent Session of a Child Session.
     pub parent: Option<SessionId>,
+    /// The Session title it is created with.
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,8 +143,8 @@ impl Store {
         self.conn.execute(
             "INSERT INTO sessions
                 (id, repo_id, slug, branch, base, worktree, phase, preset, created_at, updated_at,
-                 existing_branch, agent, parent_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11, ?12)",
+                 existing_branch, agent, parent_id, title)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11, ?12, ?13)",
             params![
                 new.id.as_str(),
                 new.repo.0,
@@ -156,6 +158,7 @@ impl Store {
                 new.existing_branch,
                 new.agent,
                 new.parent.as_ref().map(SessionId::as_str),
+                new.title,
             ],
         )?;
         self.existing_session(&new.id)

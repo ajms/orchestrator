@@ -32,7 +32,11 @@ async fn a_pi_session_runs_pi_from_its_agent_profile() {
     let mut client = env.client().await;
     let repo = env.repo("app");
 
-    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    let create = CreateSession {
+        title: Some("Fix it".into()),
+        ..CreateSession::new(&repo, "Fix it")
+    };
+    let id = client.create(create).await;
 
     let view = client
         .until(&id, "running", |view| view.agent_state.is_some())
@@ -78,7 +82,11 @@ async fn pi_pane_shows_env(env: &Env, name: &str, expected: &str) {
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let repo = env.repo("app");
-    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    let create = CreateSession {
+        title: Some("Fix it".into()),
+        ..CreateSession::new(&repo, "Fix it")
+    };
+    let id = client.create(create).await;
     client
         .until(&id, "running", |view| view.agent_state.is_some())
         .await;
@@ -124,7 +132,11 @@ async fn a_failing_env_command_errors_the_session_naming_the_variable() {
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let repo = env.repo("app");
-    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    let create = CreateSession {
+        title: Some("Fix it".into()),
+        ..CreateSession::new(&repo, "Fix it")
+    };
+    let id = client.create(create).await;
 
     let view = client
         .until(&id, "a failed launch", |view| view.error.is_some())
@@ -141,7 +153,11 @@ async fn a_pi_session_resumes_the_same_conversation_after_a_reboot() {
     let mut daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let repo = env.repo("app");
-    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    let create = CreateSession {
+        title: Some("Fix it".into()),
+        ..CreateSession::new(&repo, "Fix it")
+    };
+    let id = client.create(create).await;
     client
         .until(&id, "held", |view| view.holder_pid.is_some())
         .await;
@@ -247,7 +263,11 @@ async fn a_suspended_or_exited_pi_session_resumes_the_same_conversation() {
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let repo = env.repo("app");
-    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    let create = CreateSession {
+        title: Some("Fix it".into()),
+        ..CreateSession::new(&repo, "Fix it")
+    };
+    let id = client.create(create).await;
     client
         .until(&id, "held", |view| view.holder_pid.is_some())
         .await;
@@ -273,7 +293,11 @@ async fn an_edit_planted_in_the_profile_is_reset_at_the_next_launch() {
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
     let repo = env.repo("app");
-    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    let create = CreateSession {
+        title: Some("Fix it".into()),
+        ..CreateSession::new(&repo, "Fix it")
+    };
+    let id = client.create(create).await;
     client
         .until(&id, "held", |view| view.holder_pid.is_some())
         .await;
@@ -303,7 +327,11 @@ async fn started_pi_session(
     client: &mut TestClient,
 ) -> (orch_core::SessionId, PaneView) {
     let repo = env.repo("app");
-    let id = client.create(CreateSession::new(&repo, "Fix it")).await;
+    let create = CreateSession {
+        title: Some("Fix it".into()),
+        ..CreateSession::new(&repo, "Fix it")
+    };
+    let id = client.create(create).await;
     client
         .until(&id, "Starting", |view| {
             view.agent_state == Some(State::Starting)

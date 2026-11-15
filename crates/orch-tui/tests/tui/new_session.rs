@@ -73,11 +73,33 @@ fn without_a_selection_or_working_directory_new_starts_on_the_most_recent_repo()
     assert!(field(&mut tui, "Repo").contains("/home/me/recent"));
 }
 
+pub fn type_title(tui: &mut Harness, title: &str) {
+    tui.press(KeyCode::BackTab);
+    tui.keys(title);
+    tui.press(KeyCode::Tab);
+}
+
+pub fn shown_title(tui: &mut Harness) -> String {
+    let shown = field(tui, "Title");
+    let (head, value) = shown.split_once('\n').unwrap();
+    let column = head[..head.find("│ Title").unwrap()].chars().count() + 1;
+    value
+        .chars()
+        .skip(column)
+        .take_while(|c| *c != '│')
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 #[test]
-fn the_branch_is_prefilled_from_the_prompt_until_edited() {
+fn the_branch_is_prefilled_from_the_title_until_edited() {
     let mut tui = form(config());
     tui.keys("Fix the login timeout");
-    assert!(field(&mut tui, "Branch").contains("orch/fix-the-login-timeout"));
+    assert!(!field(&mut tui, "Branch").contains("fix-the-login"));
+
+    type_title(&mut tui, "Login timeout");
+    assert!(field(&mut tui, "Branch").contains("orch/login-timeout"));
 
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
@@ -87,22 +109,52 @@ fn the_branch_is_prefilled_from_the_prompt_until_edited() {
     tui.keys("-bug");
     tui.press(KeyCode::BackTab);
     tui.press(KeyCode::BackTab);
-    tui.keys(" quickly");
-    assert!(field(&mut tui, "Branch").contains("orch/fix-the-login-bug"));
+    tui.press(KeyCode::BackTab);
+    tui.keys(" fix");
+    assert!(field(&mut tui, "Branch").contains("orch/login-bug"));
+}
+
+#[test]
+fn without_a_typed_title_a_random_one_is_suggested_dimmed_and_names_the_branch() {
+    let mut tui = form(config());
+    tui.keys("Fix the login timeout");
+    let title = shown_title(&mut tui);
+    assert_eq!(title.split(' ').count(), 2, "{title}");
+    assert_eq!(tui.colour_of(&title), ratatui::style::Color::DarkGray);
+    let slug = title.to_ascii_lowercase().replace(' ', "-");
+    assert!(field(&mut tui, "Branch").contains(&format!("orch/{slug}")));
+
+    submit(&mut tui);
+    assert_eq!(create_requests(&mut tui)[0].title, Some(title));
+}
+
+#[test]
+fn typing_a_title_replaces_the_suggestion_and_clearing_it_brings_it_back() {
+    let mut tui = form(config());
+    let suggested = shown_title(&mut tui);
+    tui.press(KeyCode::BackTab);
+    tui.keys("Login");
+    assert_eq!(shown_title(&mut tui), "Login");
+    assert_ne!(tui.colour_of("Login"), ratatui::style::Color::DarkGray);
+
+    tui.ctrl('u');
+    assert_eq!(shown_title(&mut tui), suggested);
+    assert!(field(&mut tui, "Branch").contains(&suggested.to_ascii_lowercase().replace(' ', "-")));
 }
 
 #[test]
 fn submitting_creates_a_session_with_defaults_left_to_the_daemon() {
     let mut tui = form(config());
     tui.keys("First line\nsecond line");
+    type_title(&mut tui, "Two lines");
     submit(&mut tui);
 
     assert_eq!(
         create_requests(&mut tui),
-        vec![CreateSession::new(
-            "/home/me/recent",
-            "First line\nsecond line"
-        )]
+        vec![CreateSession {
+            title: Some("Two lines".into()),
+            ..CreateSession::new("/home/me/recent", "First line\nsecond line")
+        }]
     );
     assert!(!tui.screen().contains(":new Session"));
 }
@@ -115,6 +167,7 @@ fn an_edited_branch_base_and_preset_are_sent() {
     tui.sessions(vec![other]);
     tui.command("new");
     tui.keys("Stacked work");
+    type_title(&mut tui, "Stacked work");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::End);
@@ -132,6 +185,7 @@ fn an_edited_branch_base_and_preset_are_sent() {
         vec![CreateSession {
             repo: "/home/me/recent".into(),
             prompt: "Stacked work".into(),
+            title: Some("Stacked work".into()),
             branch: Some("orch/stacked-work-v2".into()),
             base: Some("orch/other-work".into()),
             preset: Some("plan".into()),
@@ -168,7 +222,6 @@ fn ctrl_g_edits_the_prompt_in_the_editor() {
     tui.send(Event::EditorClosed(Ok(
         "Rewrite the parser\nwith tests".into()
     )));
-    assert!(field(&mut tui, "Branch").contains("orch/rewrite-the-parser-with-tests"));
     submit(&mut tui);
     assert_eq!(
         create_requests(&mut tui)[0].prompt,
@@ -211,10 +264,11 @@ fn another_key_after_esc_keeps_the_form() {
 #[test]
 fn an_empty_prompt_starts_a_session_without_one() {
     let mut tui = form(config());
-    assert!(field(&mut tui, "Branch").contains("orch/session"));
+    let title = shown_title(&mut tui);
     submit(&mut tui);
     let create = create_requests(&mut tui).pop().expect("no Session created");
     assert_eq!(create.prompt, "");
+    assert_eq!(create.title, Some(title));
     assert_eq!(create.branch, None);
 }
 
@@ -243,6 +297,7 @@ fn an_untrusted_repo_asks_for_trust_and_retries_after_approval() {
         items: vec!["Setup script: ./scripts/setup.sh".into()],
     }));
     tui.keys("Needs trust");
+    type_title(&mut tui, "Trust me");
     submit(&mut tui);
 
     let screen = tui.screen();
@@ -262,7 +317,10 @@ fn an_untrusted_repo_asks_for_trust_and_retries_after_approval() {
                 repo: "/home/me/recent".into(),
                 hash: "abc123".into()
             },
-            Request::CreateSession(CreateSession::new("/home/me/recent", "Needs trust")),
+            Request::CreateSession(CreateSession {
+                title: Some("Trust me".into()),
+                ..CreateSession::new("/home/me/recent", "Needs trust")
+            }),
         ]
     );
 }

@@ -104,7 +104,8 @@ async fn a_child_starts_on_its_parents_branch_and_is_attached_to_its_task() {
 
     let mut pane = env.pane(&child, PANE).await;
     pane.wait_for_long_line(&format!(
-        "prompt> You are a Child Session of lead-the-work (id {}), working on its Branch {}",
+        "prompt> You are a Child Session of {} (id {}), working on its Branch {}",
+        parent_view.title.as_deref().unwrap(),
         parent.as_str(),
         parent_view.branch
     ))
@@ -511,4 +512,27 @@ async fn after_a_restart_no_child_is_left_pointing_at_an_ended_parent() {
         .await;
     assert!(view.error.unwrap().contains("Parent Session ended"));
     assert!(!client.sessions.contains_key(&parent));
+}
+
+#[tokio::test]
+async fn a_child_spawned_with_a_title_is_named_by_it() {
+    let env = Env::new();
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+    let parent = running_session(&env, &mut client, "Lead the work").await;
+
+    let output = orch_session(
+        &env,
+        &parent,
+        &["spawn", "--prompt", "Do one part", "--title", "Part one"],
+    )
+    .await;
+    assert!(output.status.success(), "{}", stderr(&output));
+    let child = SessionId::parse(stdout(&output).trim()).unwrap();
+
+    let view = client
+        .until(&child, "listed", |view| view.title.is_some())
+        .await;
+    assert_eq!(view.title.as_deref(), Some("Part one"));
+    assert_eq!(view.slug, "part-one");
 }

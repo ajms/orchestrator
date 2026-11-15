@@ -9,6 +9,8 @@ use crate::TaskId;
 pub const DEFAULT_MAX_CHILD_DEPTH: usize = 2;
 /// Longest prompt a spawn may carry.
 pub const MAX_CHILD_PROMPT: usize = 64 * 1024;
+/// Longest title `orch session spawn --title` accepts.
+pub const MAX_CHILD_TITLE: usize = 200;
 /// Longest summary `orch session done` stores.
 pub const MAX_CHILD_SUMMARY: usize = 16 * 1024;
 /// Most ids one `wait` or `status` names.
@@ -22,6 +24,8 @@ pub const MAX_CHILD_IDS: usize = 64;
 pub enum SessionOp {
     Spawn {
         prompt: String,
+        #[serde(default)]
+        title: Option<String>,
         #[serde(default)]
         task: Option<TaskId>,
         #[serde(default)]

@@ -93,9 +93,20 @@ fn columns(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
             cursor
         }
     };
-    let [head, text] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(right);
+    let [title_head, title_value, _, head, text] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .areas(right);
+    frame.render_widget(Paragraph::new(label(form, Field::Title, 6)), title_head);
+    let title_cursor = title(frame, form, title_value);
     frame.render_widget(Paragraph::new(label(form, Field::Prompt, 6)), head);
-    prompt(frame, form, text.inner(Margin::new(1, 0))).or(cursor)
+    prompt(frame, form, text.inner(Margin::new(1, 0)))
+        .or(title_cursor)
+        .or(cursor)
 }
 
 fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -> Option<Position> {
@@ -103,8 +114,9 @@ fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
         Some(_) => body.height / 2,
         None => 6 + u16::from(form.error.is_some()) + 1,
     };
-    let [fields, head, text] = Layout::vertical([
+    let [fields, title_row, head, text] = Layout::vertical([
         Constraint::Length(rows),
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
     ])
@@ -140,8 +152,31 @@ fn stacked(frame: &mut Frame, form: &NewForm, body: Rect, home: Option<&Path>) -
             cursor
         }
     };
+    let [title_head, title_value] =
+        Layout::horizontal([Constraint::Length(ROW_LABEL as u16 + 3), Constraint::Min(1)])
+            .areas(title_row);
+    frame.render_widget(
+        Paragraph::new(label(form, Field::Title, ROW_LABEL)),
+        title_head,
+    );
+    let title_cursor = title(frame, form, title_value);
     frame.render_widget(Paragraph::new(label(form, Field::Prompt, 6)), head);
-    prompt(frame, form, text.inner(Margin::new(1, 0))).or(cursor)
+    prompt(frame, form, text.inner(Margin::new(1, 0)))
+        .or(title_cursor)
+        .or(cursor)
+}
+
+fn title(frame: &mut Frame, form: &NewForm, area: Rect) -> Option<Position> {
+    let focused = form.field == Field::Title && form.repo.picker().is_none();
+    let (line, cursor) = match form.title.text().is_empty() {
+        true => (
+            Line::from(format!(" {}", form.title_suggestion)).dark_gray(),
+            focused.then_some(Position::new(area.x + 1, area.y)),
+        ),
+        false => single_line(&form.title, focused, area, Style::new()),
+    };
+    frame.render_widget(Paragraph::new(line), area);
+    cursor
 }
 
 fn hints(form: &NewForm) -> Line<'static> {
@@ -159,7 +194,9 @@ fn hints(form: &NewForm) -> Line<'static> {
             "Enter newline · Ctrl+g $EDITOR · Ctrl+r Repo · Ctrl+s create · Esc cancel"
         }
         (None, Field::Repo) => "Enter pick Repo · Tab next · Ctrl+s create · Esc cancel",
-        (None, Field::Branch) => "Ctrl+u clear · Enter next · Ctrl+s create · Esc cancel",
+        (None, Field::Branch | Field::Title) => {
+            "Ctrl+u clear · Enter next · Ctrl+s create · Esc cancel"
+        }
         (None, Field::Base) => "↑/↓ other Branches · Enter next · Ctrl+s create · Esc cancel",
         (None, Field::Preset | Field::Agent) => {
             "←/→ choose · Enter next · Ctrl+s create · Esc cancel"
@@ -211,6 +248,7 @@ fn label(form: &NewForm, field: Field, width: usize) -> Span<'static> {
     let name = match field {
         Field::Repo => "Repo",
         Field::Prompt => "Prompt",
+        Field::Title => "Title",
         Field::Branch => "Branch",
         Field::Base => "Base",
         Field::Preset => "Preset",
@@ -286,7 +324,7 @@ fn value(
             },
         }),
         Field::Agent => agent(form),
-        Field::Prompt => Line::default(),
+        Field::Prompt | Field::Title => Line::default(),
     };
     (line, None)
 }
