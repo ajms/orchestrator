@@ -25,3 +25,27 @@ pub fn slugify(prompt: &str) -> String {
     }
     slug
 }
+
+const ADJECTIVES: &[&str] = &[
+    "Amber", "Bold", "Brisk", "Calm", "Clever", "Cosmic", "Crisp", "Dapper", "Eager", "Fancy",
+    "Gentle", "Golden", "Happy", "Hidden", "Jolly", "Keen", "Lucky", "Merry", "Mellow", "Nimble",
+    "Noble", "Plucky", "Quiet", "Rapid", "Rustic", "Silent", "Silver", "Sleepy", "Spry", "Steady",
+    "Sunny", "Swift", "Tidy", "Velvet", "Vivid", "Witty",
+];
+
+const NOUNS: &[&str] = &[
+    "Badger", "Beacon", "Comet", "Cedar", "Falcon", "Fern", "Finch", "Fox", "Glacier", "Harbor",
+    "Heron", "Lantern", "Lynx", "Maple", "Meadow", "Moose", "Otter", "Owl", "Panda", "Pebble",
+    "Pine", "Quokka", "Raven", "River", "Robin", "Sparrow", "Summit", "Thistle", "Tiger", "Walrus",
+    "Willow", "Wren",
+];
+
+pub fn random_title() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let seed = std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish() as usize;
+    let adjective = ADJECTIVES[seed % ADJECTIVES.len()];
+    let noun = NOUNS[(seed / ADJECTIVES.len()) % NOUNS.len()];
+    format!("{adjective} {noun}")
+}

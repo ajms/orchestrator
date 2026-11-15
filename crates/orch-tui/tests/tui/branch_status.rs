@@ -3,11 +3,12 @@ use orch_protocol::{BranchFound, BranchLookup, LookupDepth, OpenPr};
 use orch_tui::Event;
 
 use crate::common::*;
-use crate::new_session::{config, field, form};
+use crate::new_session::{config, field, form, type_title};
 
 fn on_branch_field() -> Harness {
     let mut tui = form(config());
     tui.keys("Fix");
+    type_title(&mut tui, "Fix");
     tui.press(KeyCode::Tab);
     tui.press(KeyCode::Tab);
     tui

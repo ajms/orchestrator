@@ -255,6 +255,7 @@ impl Daemon {
                     existing_branch: false,
                     agent: new.agent,
                     parent: None,
+                    title: None,
                 })?;
                 match new.port_block {
                     Some(block) => drop(store.hold_port_block(&created.id, block)?),

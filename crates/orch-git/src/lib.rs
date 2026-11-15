@@ -24,7 +24,7 @@ pub use leftover::Leftover;
 pub use mirror::update_mirror;
 pub use repo::Repo;
 pub use script::{Script, ScriptOutcome};
-pub use slug::slugify;
+pub use slug::{random_title, slugify};
 pub use snapshot::{ReviewSnapshot, worktree_status};
 pub use subagent::{SubagentRefs, subagent_branch, subagent_worktrees_dir};
 pub use worktree::{DEFAULT_BRANCH_PREFIX, SessionName, SessionWorktree};

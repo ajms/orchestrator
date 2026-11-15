@@ -16,6 +16,10 @@ pub enum SessionCommand {
         /// What the Child Session's Agent should do.
         #[arg(long)]
         prompt: String,
+        /// The Child Session's title (default: a random one); its Branch is
+        /// named after it.
+        #[arg(long)]
+        title: Option<String>,
         /// Attach the Child Session to this Plan Task.
         #[arg(long)]
         task: Option<TaskId>,
@@ -74,11 +78,13 @@ fn op(command: SessionCommand) -> SessionOp {
     match command {
         SessionCommand::Spawn {
             prompt,
+            title,
             task,
             agent,
             preset,
         } => SessionOp::Spawn {
             prompt,
+            title,
             task,
             agent,
             preset,

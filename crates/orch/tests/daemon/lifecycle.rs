@@ -13,16 +13,18 @@ async fn a_new_session_runs_its_setup_script_then_starts_the_agent_with_its_prom
     let mut client = env.client().await;
 
     let id = client
-        .create(CreateSession::new(&repo, "Fix the login bug"))
+        .create(titled(&repo, "Fix the login bug", "Login bug"))
         .await;
     let setting_up = client
         .until(&id, "listed", |view| view.phase == PhaseView::SettingUp)
         .await;
-    assert_eq!(setting_up.branch, "orch/fix-the-login-bug");
+    assert_eq!(setting_up.title.as_deref(), Some("Login bug"));
+    assert_eq!(setting_up.slug, "login-bug");
+    assert_eq!(setting_up.branch, "orch/login-bug");
     assert_eq!(setting_up.base, "main");
     assert_eq!(
         setting_up.worktree,
-        repo.join(".orchestrator/worktrees/fix-the-login-bug")
+        repo.join(".orchestrator/worktrees/login-bug")
     );
     assert_eq!(setting_up.port_base, Some(20000));
 
@@ -63,13 +65,32 @@ async fn a_new_session_runs_its_setup_script_then_starts_the_agent_with_its_prom
 }
 
 #[tokio::test]
+async fn a_session_without_a_title_gets_a_random_one_that_names_its_branch() {
+    let env = Env::new();
+    let repo = env.repo("app");
+    let _daemon = env.start_daemon().await;
+    let mut client = env.client().await;
+
+    let id = client
+        .create(CreateSession::new(&repo, "Fix the login bug"))
+        .await;
+    let listed = client
+        .until(&id, "listed", |view| view.phase == PhaseView::SettingUp)
+        .await;
+    let title = listed.title.clone().expect("a random title");
+    assert_eq!(listed.slug, orch_git::slugify(&title));
+    assert_eq!(listed.branch, format!("orch/{}", listed.slug));
+    assert!(!listed.slug.contains("login"), "{}", listed.slug);
+}
+
+#[tokio::test]
 async fn parallel_sessions_get_distinct_port_blocks_and_branches() {
     let env = Env::new();
     let repo = env.repo("app");
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let first = client.create(CreateSession::new(&repo, "Same task")).await;
-    let second = client.create(CreateSession::new(&repo, "Same task")).await;
+    let first = client.create(titled(&repo, "Do it", "Same task")).await;
+    let second = client.create(titled(&repo, "Do it", "Same task")).await;
     let first = client
         .until(&first, "Active", |view| view.phase == PhaseView::Active)
         .await;
@@ -89,10 +110,11 @@ async fn a_failed_creation_leaves_no_worktree_branch_or_session_behind() {
     env.write_config("[ports]\nstart = 20000\nend = 20009\nblock_size = 10\n");
     let _daemon = env.start_daemon().await;
     let mut client = env.client().await;
-    let first = client.create(CreateSession::new(&repo, "First task")).await;
+    let first = client.create(titled(&repo, "Do it", "First task")).await;
     let refused = client
-        .request(orch_protocol::Request::CreateSession(CreateSession::new(
+        .request(orch_protocol::Request::CreateSession(titled(
             &repo,
+            "Do it",
             "Second task",
         )))
         .await;
@@ -107,4 +129,11 @@ async fn a_failed_creation_leaves_no_worktree_branch_or_session_behind() {
     let listed = fresh.session_list().await;
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, first);
+}
+
+fn titled(repo: &std::path::Path, prompt: &str, title: &str) -> CreateSession {
+    CreateSession {
+        title: Some(title.into()),
+        ..CreateSession::new(repo, prompt)
+    }
 }

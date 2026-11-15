@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use orch_git::slugify;
+use orch_git::{random_title, slugify};
 use orch_protocol::{CreateSession, OpenPr, RepoSettings};
 
 use crate::branch_check::{BranchCheck, LookupKey};
@@ -13,19 +13,21 @@ use crate::text_input::{Suggested, TextInput};
 pub enum Field {
     Repo,
     Prompt,
+    Title,
     Branch,
     Base,
     Preset,
     Agent,
 }
 
-const FIELDS: [Field; 6] = [
+const FIELDS: [Field; 7] = [
     Field::Prompt,
     Field::Repo,
     Field::Branch,
     Field::Base,
     Field::Preset,
     Field::Agent,
+    Field::Title,
 ];
 
 pub enum Outcome {
@@ -41,6 +43,8 @@ pub struct NewForm {
     pub repo: RepoChoice,
     pub prompt: TextInput,
     pub prompt_top: Cell<usize>,
+    pub title: TextInput,
+    pub title_suggestion: String,
     pub branch: Suggested,
     branch_prefix: String,
     pub base: Suggested,
@@ -80,6 +84,8 @@ impl NewForm {
             repo: RepoChoice::new(repos, repo),
             prompt: TextInput::default(),
             prompt_top: Cell::new(0),
+            title: TextInput::default(),
+            title_suggestion: random_title(),
             branch: Suggested::suggestion(String::new()),
             branch_prefix: prefix.to_string(),
             base: Suggested::default(),
@@ -120,6 +126,9 @@ impl NewForm {
     pub fn restore(&mut self, create: CreateSession) {
         self.repo.set(create.repo);
         self.prompt.set(create.prompt);
+        if let Some(title) = create.title {
+            self.title.set(title);
+        }
         if let Some(branch) = create.branch {
             self.branch.set(branch);
         }
@@ -172,7 +181,7 @@ impl NewForm {
         }
         let discarding = std::mem::take(&mut self.discarding);
         match key.code {
-            KeyCode::Esc if discarding || self.prompt.text().is_empty() => Outcome::Cancel,
+            KeyCode::Esc if discarding || self.untouched() => Outcome::Cancel,
             KeyCode::Esc => {
                 self.discarding = true;
                 Outcome::Stay
@@ -184,6 +193,7 @@ impl NewForm {
             KeyCode::BackTab => self.move_field(FIELDS.len() - 1),
             _ => match self.field {
                 Field::Prompt => self.prompt_key(key),
+                Field::Title => self.title_key(key),
                 Field::Repo => self.repo_key(key, home),
                 Field::Branch => self.branch_key(key),
                 Field::Base => self.base_key(key),
@@ -200,6 +210,16 @@ impl NewForm {
             KeyCode::Down => self.prompt.down(),
             _ => {
                 self.prompt.key(key);
+            }
+        }
+        Outcome::Stay
+    }
+
+    fn title_key(&mut self, key: KeyEvent) -> Outcome {
+        match key.code {
+            KeyCode::Enter => return self.move_field(1),
+            _ => {
+                self.title.key(key);
             }
         }
         self.prefill_branch();
@@ -235,8 +255,9 @@ impl NewForm {
             return Outcome::Stay;
         }
         match self.field {
-            Field::Prompt => {
-                self.prompt.insert(&text);
+            Field::Prompt => self.prompt.insert(&text),
+            Field::Title => {
+                self.title.insert(line);
                 self.prefill_branch();
             }
             Field::Repo => return self.open_picker(line.to_string(), home),
@@ -322,8 +343,19 @@ impl NewForm {
         });
     }
 
+    pub(crate) fn shown_title(&self) -> &str {
+        match self.title.text().trim() {
+            "" => &self.title_suggestion,
+            typed => typed,
+        }
+    }
+
+    fn untouched(&self) -> bool {
+        self.prompt.text().is_empty() && self.title.text().is_empty()
+    }
+
     pub(crate) fn derived_branch(&self) -> String {
-        format!("{}{}", self.branch_prefix, slugify(self.prompt.text()))
+        format!("{}{}", self.branch_prefix, slugify(self.shown_title()))
     }
 
     pub(crate) fn locking_pr(&self) -> Option<&OpenPr> {
@@ -388,6 +420,7 @@ impl NewForm {
                 preset: self.preset.map(|at| self.presets[at].clone()),
                 agent: self.agent.clone(),
                 parent: Some(parent.id.clone()),
+                title: Some(self.shown_title().to_string()),
                 ..CreateSession::new(repo, self.prompt.text())
             });
         }
@@ -396,6 +429,7 @@ impl NewForm {
         Outcome::Submit(CreateSession {
             repo,
             prompt: self.prompt.text().to_string(),
+            title: Some(self.shown_title().to_string()),
             branch: (!self.branch.suggested() && !branch.is_empty()).then(|| branch.to_string()),
             base: (!base.is_empty()).then(|| base.to_string()),
             preset: self.preset.map(|at| self.presets[at].clone()),

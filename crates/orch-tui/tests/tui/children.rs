@@ -1,6 +1,7 @@
 use orch_protocol::{AgentStateView, Reply, SessionView};
 
 use crate::common::*;
+use crate::new_session::type_title;
 
 fn child_of(parent: &str, slug: &str) -> SessionView {
     let mut view = session("webshop", slug);
@@ -105,11 +106,13 @@ fn child_starts_the_new_session_form_on_the_selected_session() {
     tui.command("child");
     assert!(tui.screen().contains("child of lead"), "{}", tui.screen());
     tui.keys("Split the work");
+    type_title(&mut tui, "Split");
     tui.ctrl('s');
     let created = create_requests(&mut tui);
     assert_eq!(created.len(), 1, "{:?}", tui.daemon().requests());
     assert_eq!(created[0].parent, Some(id("lead")));
     assert_eq!(created[0].branch, None);
+    assert_eq!(created[0].title.as_deref(), Some("Split"));
 }
 
 #[test]

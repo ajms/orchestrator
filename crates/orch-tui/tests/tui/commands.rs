@@ -54,8 +54,27 @@ fn short_commands_do_what_their_long_form_does() {
             by_long.daemon().requests(),
             ":{short}"
         );
-        assert_eq!(by_short.screen(), by_long.screen(), ":{short}");
+        assert_eq!(
+            without_title(&mut by_short),
+            without_title(&mut by_long),
+            ":{short}"
+        );
     }
+}
+
+fn without_title(tui: &mut Harness) -> String {
+    let screen = tui.screen();
+    if !screen.contains(":new Session") {
+        return screen;
+    }
+    let title = crate::new_session::shown_title(tui);
+    let slug = title.to_ascii_lowercase().replace(' ', "-");
+    let masked = screen.replace(&title, "<title>").replace(&slug, "<slug>");
+    masked
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[test]

@@ -191,6 +191,9 @@ pub struct CommitView {
 pub struct CreateSession {
     pub repo: PathBuf,
     pub prompt: String,
+    /// The Session title; a random one when absent.
+    #[serde(default)]
+    pub title: Option<String>,
     pub branch: Option<String>,
     pub base: Option<String>,
     pub preset: Option<String>,
@@ -206,6 +209,7 @@ impl CreateSession {
         Self {
             repo: repo.into(),
             prompt: prompt.into(),
+            title: None,
             branch: None,
             base: None,
             preset: None,

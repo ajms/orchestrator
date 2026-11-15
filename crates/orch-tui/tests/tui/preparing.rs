@@ -8,6 +8,7 @@ use orch_tui::{Event, TuiConfig};
 use ratatui::style::Color;
 
 use crate::common::*;
+use crate::new_session::type_title;
 
 fn submitted(prompt: &str) -> Harness {
     replying(prompt, Ok(Reply::Done))
@@ -23,6 +24,7 @@ fn replying(prompt: &str, reply: Result<Reply, RequestError>) -> Harness {
     tui.daemon().hold = true;
     tui.command("new");
     tui.keys(prompt);
+    type_title(&mut tui, prompt.lines().next().unwrap_or_default());
     tui.ctrl('s');
     tui
 }
@@ -302,6 +304,7 @@ fn preparing_in_a_folded_repo_unfolds_it_to_show_the_row() {
     tui.daemon().hold = true;
     tui.command("new");
     tui.keys("Fix login timeout");
+    type_title(&mut tui, "Fix login timeout");
     tui.ctrl('s');
 
     assert_ne!(tui.sidebar_background_of("fix-login-timeout"), Color::Reset);
@@ -340,4 +343,22 @@ fn a_trust_prompt_closed_another_way_fails_the_row() {
     }));
 
     assert!(tui.sidebar_line_with("fix-login-timeout").contains("✗"));
+}
+
+#[test]
+fn the_preparing_row_is_named_after_the_title_not_the_prompt() {
+    let mut tui = Harness::with_config(TuiConfig {
+        repos: vec![PathBuf::from("/home/me/webshop")],
+        ..TuiConfig::default()
+    });
+    tui.sessions(vec![session("webshop", "existing")]);
+    tui.daemon().script_reply(Ok(Reply::Done));
+    tui.daemon().hold = true;
+    tui.command("new");
+    tui.keys("Fix login timeout");
+    type_title(&mut tui, "Speedy login");
+    tui.ctrl('s');
+
+    assert!(tui.sidebar_line_with("speedy-login").contains("Preparing"));
+    assert!(!tui.screen().contains("fix-login-timeout"));
 }

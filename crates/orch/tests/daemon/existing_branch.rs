@@ -182,12 +182,13 @@ async fn another_sessions_branch_is_refused_but_its_base_can_be_started_on() {
     stacked.base = Some("lower".into());
     let upper = running_on(&mut client, stacked).await;
     let owned = client.sessions[&upper].branch.clone();
+    let owner = client.sessions[&upper].slug.clone();
 
     let refused = refusal(&mut client, on_branch(&repo, &owned)).await;
     let lower = running_on(&mut client, on_branch(&repo, "lower")).await;
 
     assert!(
-        refused.contains(&format!("{owned} is the Branch of Session stacked-work")),
+        refused.contains(&format!("{owned} is the Branch of Session {owner}")),
         "{refused}"
     );
     assert_eq!(client.sessions[&lower].branch, "lower");
@@ -262,8 +263,8 @@ async fn the_branch_of_a_session_whose_worktree_is_gone_is_still_refused() {
 
     assert!(
         refused.contains(&format!(
-            "{} is the Branch of Session broken",
-            failed.branch
+            "{} is the Branch of Session {}",
+            failed.branch, failed.slug
         )),
         "{refused}"
     );

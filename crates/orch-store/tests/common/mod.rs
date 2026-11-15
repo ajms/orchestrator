@@ -75,6 +75,7 @@ pub fn new_session(repo: &Repo, slug: &str) -> NewSession {
         existing_branch: false,
         agent: "claude".into(),
         parent: None,
+        title: None,
     }
 }
 

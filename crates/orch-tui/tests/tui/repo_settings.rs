@@ -6,7 +6,7 @@ use orch_protocol::{RepoSettings, Request};
 use orch_tui::{Effect, Event, ReviewData, ReviewPurpose, TuiConfig};
 
 use crate::common::*;
-use crate::new_session::field;
+use crate::new_session::{field, type_title};
 
 fn settings(repo: &str, base: &str) -> RepoSettings {
     RepoSettings {
@@ -49,6 +49,7 @@ fn the_new_form_shows_the_repos_resolved_default_base_presets_and_branch_prefix(
     tui.daemon().settings = vec![settings("/home/me/recent", "develop")];
     tui.command("new");
     tui.keys("Fix it");
+    type_title(&mut tui, "Fix it");
 
     assert_eq!(
         settings_requested(&mut tui),
@@ -57,6 +58,7 @@ fn the_new_form_shows_the_repos_resolved_default_base_presets_and_branch_prefix(
     assert!(field(&mut tui, "Base").contains("develop"));
     assert!(field(&mut tui, "Preset").contains("careful"));
     assert!(field(&mut tui, "Branch").contains("me/fix-it"));
+    tui.press(KeyCode::BackTab);
     tui.press(KeyCode::BackTab);
     tui.press(KeyCode::BackTab);
     tui.press(KeyCode::Right);
@@ -82,6 +84,7 @@ fn the_new_form_picks_another_agent_for_the_session() {
     tui.daemon().settings = vec![settings("/home/me/recent", "develop")];
     tui.command("new");
     tui.keys("Fix it");
+    tui.press(KeyCode::BackTab);
     tui.press(KeyCode::BackTab);
     tui.press(KeyCode::Right);
     assert!(field(&mut tui, "Agent").contains("◂ pi ▸"));

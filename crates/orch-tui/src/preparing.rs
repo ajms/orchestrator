@@ -28,7 +28,7 @@ impl Preparing {
     pub fn new(id: PreparingId, create: CreateSession, prefix: &str, since: Instant) -> Self {
         let slug = match &create.branch {
             Some(branch) => slugify(branch.strip_prefix(prefix).unwrap_or(branch)),
-            None => slugify(&create.prompt),
+            None => slugify(create.title.as_deref().unwrap_or_default()),
         };
         Self {
             id,
