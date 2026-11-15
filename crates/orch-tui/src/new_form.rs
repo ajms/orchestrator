@@ -372,10 +372,6 @@ impl NewForm {
             self.error = Some("enter the Repo's path".into());
             return Outcome::Stay;
         };
-        if self.prompt.text().trim().is_empty() {
-            self.error = Some("the prompt is empty".into());
-            return Outcome::Stay;
-        }
         if self.check.refused() {
             return Outcome::Stay;
         }
@@ -384,6 +380,10 @@ impl NewForm {
             return Outcome::Stay;
         }
         if let Some(parent) = &self.parent {
+            if self.prompt.text().trim().is_empty() {
+                self.error = Some("the prompt is empty".into());
+                return Outcome::Stay;
+            }
             return Outcome::Submit(CreateSession {
                 preset: self.preset.map(|at| self.presets[at].clone()),
                 agent: self.agent.clone(),

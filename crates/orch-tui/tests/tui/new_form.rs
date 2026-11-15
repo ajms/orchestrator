@@ -500,20 +500,6 @@ fn ctrl_s_in_the_picker_creates_with_the_repo_already_chosen() {
 }
 
 #[test]
-fn ctrl_s_in_the_picker_with_an_empty_prompt_shows_the_error_on_the_form() {
-    let mut tui = form(config());
-    tui.ctrl('r');
-    tui.ctrl('s');
-    assert!(create_requests(&mut tui).is_empty());
-    assert!(
-        tui.screen().contains("the prompt is empty"),
-        "{}",
-        tui.screen()
-    );
-    assert!(!tui.screen().contains("/home/me/older"), "{}", tui.screen());
-}
-
-#[test]
 fn ctrl_g_in_the_picker_opens_the_editor_on_the_prompt() {
     let mut tui = form(config());
     tui.keys("draft");

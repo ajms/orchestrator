@@ -113,6 +113,19 @@ fn child_starts_the_new_session_form_on_the_selected_session() {
 }
 
 #[test]
+fn a_child_session_needs_a_prompt() {
+    let mut tui = family();
+    tui.command("child");
+    tui.ctrl('s');
+    assert!(create_requests(&mut tui).is_empty());
+    assert!(
+        tui.screen().contains("the prompt is empty"),
+        "{}",
+        tui.screen()
+    );
+}
+
+#[test]
 fn the_plan_shows_the_child_sessions_working_on_a_task() {
     use orch_core::{Attachment, PlanOp};
     let mut tui = family();
