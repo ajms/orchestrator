@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use orch_core::SessionId;
+use orch_core::{SessionId, chosen_title};
 use orch_git::slugify;
 use orch_protocol::CreateSession;
 
@@ -28,7 +28,7 @@ impl Preparing {
     pub fn new(id: PreparingId, create: CreateSession, prefix: &str, since: Instant) -> Self {
         let slug = match &create.branch {
             Some(branch) => slugify(branch.strip_prefix(prefix).unwrap_or(branch)),
-            None => slugify(create.title.as_deref().unwrap_or_default()),
+            None => slugify(chosen_title(create.title.as_deref()).unwrap_or_default()),
         };
         Self {
             id,

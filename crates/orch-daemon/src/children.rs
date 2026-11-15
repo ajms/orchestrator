@@ -205,13 +205,14 @@ impl Daemon {
                 agent,
                 preset,
             } => {
-                let create = ChildCreate {
+                let spawn = ChildSpawn {
                     prompt,
                     title,
+                    task,
                     agent,
                     preset,
                 };
-                self.spawn_child(id, broker, create, task).await
+                self.spawn_child(id, broker, spawn).await
             }
             SessionOp::Done { summary } => self.child_done(id, summary),
             SessionOp::Wait { ids } => self.wait_children(id, ids).await,
@@ -225,15 +226,15 @@ impl Daemon {
         self: &Arc<Self>,
         id: &SessionId,
         broker: GuardId,
-        child: ChildCreate,
-        task: Option<orch_core::TaskId>,
+        spawn: ChildSpawn,
     ) -> Result<BrokerReply, String> {
-        let ChildCreate {
+        let ChildSpawn {
             prompt,
             title,
+            task,
             agent,
             preset,
-        } = child;
+        } = spawn;
         let prompt = checked_text(&prompt, MAX_CHILD_PROMPT, "prompt")?;
         let title = title
             .map(|title| checked_text(&title, MAX_CHILD_TITLE, "title"))
@@ -591,9 +592,11 @@ impl Daemon {
     }
 }
 
-struct ChildCreate {
+/// What `orch session spawn` asked for.
+struct ChildSpawn {
     prompt: String,
     title: Option<String>,
+    task: Option<orch_core::TaskId>,
     agent: Option<String>,
     preset: Option<String>,
 }

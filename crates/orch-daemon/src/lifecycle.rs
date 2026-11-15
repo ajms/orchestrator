@@ -10,8 +10,9 @@ use orch_agent::{
 use orch_config::{PresetError, RepoConfig, TrustHash, TrustItem, Untrusted, xdg};
 use orch_core::{
     AgentState, ConversationId, Observation, PermissionMode, Phase, PhaseEvent, SessionId,
+    chosen_title, random_title,
 };
-use orch_git::{BranchSource, SessionWorktree, random_title, slugify};
+use orch_git::{BranchSource, SessionWorktree, slugify};
 use orch_holder::SESSION_ENV;
 use orch_protocol::{CreateSession, Reply, RequestError, TrustNeeded};
 use orch_store::{NewSession, RepoRoot, SessionRecord};
@@ -333,12 +334,7 @@ impl Daemon {
                 .map_err(refused)?;
         }
         let git = orch_git::Repo::open(root.path()).map_err(refused)?;
-        let title = create
-            .title
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .map_or_else(random_title, Into::into);
+        let title = chosen_title(create.title.as_deref()).map_or_else(random_title, Into::into);
         let requested = match &target {
             Some(target) => target.base(create.base)?,
             None => create.base,

@@ -2,7 +2,8 @@ use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use orch_git::{random_title, slugify};
+use orch_core::{chosen_title, random_title};
+use orch_git::slugify;
 use orch_protocol::{CreateSession, OpenPr, RepoSettings};
 
 use crate::branch_check::{BranchCheck, LookupKey};
@@ -344,10 +345,7 @@ impl NewForm {
     }
 
     pub(crate) fn shown_title(&self) -> &str {
-        match self.title.text().trim() {
-            "" => &self.title_suggestion,
-            typed => typed,
-        }
+        chosen_title(Some(self.title.text())).unwrap_or(&self.title_suggestion)
     }
 
     fn untouched(&self) -> bool {

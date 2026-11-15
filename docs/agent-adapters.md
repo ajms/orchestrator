@@ -158,7 +158,7 @@ The store treats every sample of a Conversation as cumulative: `record_usage` ke
 | `modes` | The Daemon launches and resumes the Agent with the `inherit` Preset whatever was chosen (`Capabilities::effective_preset`, applied in `agent_command`), and no `ModeChanged` is reported. |
 | `guards` | The Daemon lets every blocking hook proceed without evaluating it (`Capabilities::guards_available`, which needs both hooks and guards, gates the Guard path). |
 | `subagents` | No `SubagentStarted`/`SubagentFinished`, so no nested Subagent rows. |
-| `titles` | `title_watch` returns `None` and no `TitleChanged` is reported, so the Session keeps showing its slug. |
+| `titles` | `title_watch` returns `None` and no `TitleChanged` is reported, so the Session keeps the title it was created with (typed or random). |
 | `transcripts` | `subagent_transcripts` returns `None`, so subscribing to a Subagent is refused and there is no Subagent transcript (ADR 0004). |
 
 ## Normalized event vocabulary
@@ -170,7 +170,7 @@ The events come from `orch_core::AgentEvent`:
 - `PermissionRequested`, `PermissionDenied`, `QuestionAsked`
 - `Failed { kind }`
 - `ModeChanged { mode }`, `ConversationChanged { id }`
-- `TitleChanged { title }`, the Session title the user gave through the Agent; an empty title clears it and brings the slug back
+- `TitleChanged { title }`, the Session title the user gave through the Agent; it replaces the title the Session was created with, and an empty title clears it and brings the slug back
 - `UsageSample { … }`
 - `SubagentStarted { id, agent_type, description }`, `SubagentFinished { id, outcome }`. `outcome` is a `SubagentOutcome { errored, summary, failure, model, usage, worktree }`: whether the Subagent ended in error (its state then is Errored, else Done), its final text, why it failed, its model, its `SubagentUsage { input_tokens, output_tokens, cost_usd, turns }` and its `SubagentWorktree { path, branch, merge, message, preserved_branch }`, where `merge` is a `SubagentMerge`: `Merged`, `NothingToMerge`, `NotMerged`, `Conflict { files }` (merging back conflicted on `files`, at most 20) or `Abandoned` (the run failed and its work was discarded, or kept on a branch, without a merge attempt). Every field but `errored` is optional; an adapter fills what its Agent reports and never guesses. The Daemon measures a Subagent's duration from `SubagentStarted` to `SubagentFinished` (ADR 0019).
 - `GuardCheck { tool, input_json, cwd }`, which the Daemon answers with allow, deny or ask

@@ -5,6 +5,7 @@ mod flags;
 mod gate;
 mod phase;
 mod plan;
+mod session_title;
 mod stacking;
 mod status;
 mod subagent;
@@ -28,6 +29,7 @@ pub use plan::{
     Attachment, MAX_ATTACHMENT_ID, MAX_ATTACHMENTS, MAX_BLOCKERS, MAX_LINK, MAX_TASKS, MAX_TITLE,
     Plan, PlanOp, Readiness, Task, TaskId, TaskStatus, join_ids, task_marker,
 };
+pub use session_title::{chosen_title, random_title};
 pub use stacking::{Retarget, retarget};
 pub use status::SessionStatus;
 pub use subagent::{

@@ -26,6 +26,7 @@ pub struct NewSession {
     pub agent: String,
     /// The Parent Session of a Child Session.
     pub parent: Option<SessionId>,
+    /// The Session title it is created with.
     pub title: Option<String>,
 }
 
