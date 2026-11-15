@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0](https://github.com/ajms/orchestrator/compare/v0.20.0...v0.21.0) - 2026-11-15
+
+### Added
+
+- *(session)* name Sessions by a title instead of the prompt
+
+### Other
+
+- *(session)* share the Session title rule in orch-core
+
 ## [0.20.0](https://github.com/ajms/orchestrator/compare/v0.19.0...v0.20.0) - 2026-11-15
 
 ### Added
