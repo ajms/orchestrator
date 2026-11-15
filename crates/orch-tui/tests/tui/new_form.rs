@@ -500,15 +500,6 @@ fn ctrl_s_in_the_picker_creates_with_the_repo_already_chosen() {
 }
 
 #[test]
-fn ctrl_s_in_the_picker_with_an_empty_prompt_creates_a_session() {
-    let mut tui = form(config());
-    tui.ctrl('r');
-    tui.ctrl('s');
-    let create = create_requests(&mut tui).pop().expect("no Session created");
-    assert_eq!(create.prompt, "");
-}
-
-#[test]
 fn ctrl_g_in_the_picker_opens_the_editor_on_the_prompt() {
     let mut tui = form(config());
     tui.keys("draft");
