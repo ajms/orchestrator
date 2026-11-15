@@ -372,10 +372,6 @@ impl NewForm {
             self.error = Some("enter the Repo's path".into());
             return Outcome::Stay;
         };
-        if self.prompt.text().trim().is_empty() {
-            self.error = Some("the prompt is empty".into());
-            return Outcome::Stay;
-        }
         if self.check.refused() {
             return Outcome::Stay;
         }

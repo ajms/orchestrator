@@ -209,11 +209,13 @@ fn another_key_after_esc_keeps_the_form() {
 }
 
 #[test]
-fn an_empty_prompt_is_refused() {
+fn an_empty_prompt_starts_a_session_without_one() {
     let mut tui = form(config());
+    assert!(field(&mut tui, "Branch").contains("orch/session"));
     submit(&mut tui);
-    assert!(create_requests(&mut tui).is_empty());
-    assert!(tui.screen().contains("the prompt is empty"));
+    let create = create_requests(&mut tui).pop().expect("no Session created");
+    assert_eq!(create.prompt, "");
+    assert_eq!(create.branch, None);
 }
 
 #[test]

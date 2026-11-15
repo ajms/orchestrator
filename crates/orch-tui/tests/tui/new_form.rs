@@ -500,17 +500,12 @@ fn ctrl_s_in_the_picker_creates_with_the_repo_already_chosen() {
 }
 
 #[test]
-fn ctrl_s_in_the_picker_with_an_empty_prompt_shows_the_error_on_the_form() {
+fn ctrl_s_in_the_picker_with_an_empty_prompt_creates_a_session() {
     let mut tui = form(config());
     tui.ctrl('r');
     tui.ctrl('s');
-    assert!(create_requests(&mut tui).is_empty());
-    assert!(
-        tui.screen().contains("the prompt is empty"),
-        "{}",
-        tui.screen()
-    );
-    assert!(!tui.screen().contains("/home/me/older"), "{}", tui.screen());
+    let create = create_requests(&mut tui).pop().expect("no Session created");
+    assert_eq!(create.prompt, "");
 }
 
 #[test]
