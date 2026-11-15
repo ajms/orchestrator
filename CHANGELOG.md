@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0](https://github.com/ajms/orchestrator/compare/v0.19.0...v0.20.0) - 2026-11-15
+
+### Added
+
+- *(tui)* allow starting a session without a prompt
+
+### Fixed
+
+- *(tui)* keep requiring a prompt for child sessions
+
 ## [0.19.0](https://github.com/ajms/orchestrator/compare/v0.18.1...v0.19.0) - 2026-11-12
 
 ### Added
