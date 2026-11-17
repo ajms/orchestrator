@@ -672,7 +672,10 @@ fn api(args: &[String], input: Option<&str>, limits: &Limits) -> Result<GhCall, 
         if methods.iter().any(|m| !is(m, "POST")) {
             return Err(input_refused());
         }
-        return whole_review(parsed, &endpoint, &endpoint[prefix..], input);
+        return match numbered(&endpoint[prefix..], "/pulls/") {
+            Some("comments") => review_comment(parsed, &endpoint, input),
+            _ => whole_review(parsed, &endpoint, &endpoint[prefix..], input),
+        };
     }
     let change = match posts {
         true if methods.iter().any(|m| !is(m, "GET") && !is(m, "POST")) => {
@@ -713,12 +716,58 @@ fn field(name: &str) -> bool {
 }
 
 fn api_post_refused() -> String {
-    "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues, add pull request review comments, or send a whole review with --input"
+    "the Broker passes only GET requests to gh api, and POSTs that link sub-issues or blocking issues, add pull request review comments, or send a whole review"
         .into()
 }
 
 fn input_refused() -> String {
-    "the Broker passes --input only to gh api -X POST repos/<owner>/<repo>/pulls/<n>/reviews".into()
+    "the Broker passes --input only to gh api -X POST repos/<owner>/<repo>/pulls/<n>/reviews or .../pulls/<n>/comments".into()
+}
+
+fn input_object(
+    parsed: &Parsed,
+    input: &str,
+    what: &str,
+    known: &[&str],
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    if parsed.flags.iter().any(|(name, _)| field(name)) {
+        return Err(format!("{what} takes its fields from --input, not -f/-F"));
+    }
+    no_env_in_jq(parsed)?;
+    let object: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(input).map_err(|err| format!("{what} is one JSON object: {err}"))?;
+    match object.keys().find(|key| !known.contains(&key.as_str())) {
+        Some(unknown) => Err(format!("the Broker doesn't pass {unknown} in {what}")),
+        None => Ok(object),
+    }
+}
+
+fn review_comment(parsed: Parsed, endpoint: &str, input: &str) -> Result<GhCall, String> {
+    let comment = input_object(
+        &parsed,
+        input,
+        "a review comment",
+        &[
+            "body",
+            "commit_id",
+            "path",
+            "line",
+            "side",
+            "start_line",
+            "start_side",
+            "subject_type",
+            "in_reply_to",
+        ],
+    )?;
+    let serialised = serde_json::to_vec(&comment).map_err(|err| err.to_string())?;
+    let mut args = api_args(parsed, endpoint, "POST");
+    args.extend(strings(&["--input", "-"]));
+    Ok(GhCall {
+        args,
+        said: format!("gh api {endpoint}"),
+        change: Some(Change::PrReview),
+        input: Some(serialised),
+    })
 }
 
 fn whole_review(
@@ -733,20 +782,12 @@ fn whole_review(
         .filter(|number| number.bytes().all(|b| b.is_ascii_digit()))
         .and_then(|number| number.parse().ok())
         .ok_or_else(input_refused)?;
-    if parsed.flags.iter().any(|(name, _)| field(name)) {
-        return Err("a whole review takes its fields from --input, not -f/-F".into());
-    }
-    no_env_in_jq(&parsed)?;
-    let review: serde_json::Map<String, serde_json::Value> = serde_json::from_str(input)
-        .map_err(|err| format!("a whole review is one JSON object: {err}"))?;
-    if let Some(unknown) = review
-        .keys()
-        .find(|key| !matches!(key.as_str(), "commit_id" | "body" | "event" | "comments"))
-    {
-        return Err(format!(
-            "the Broker doesn't pass {unknown} in a whole review"
-        ));
-    }
+    let review = input_object(
+        &parsed,
+        input,
+        "a whole review",
+        &["commit_id", "body", "event", "comments"],
+    )?;
     let verdict = match review.get("event").and_then(|event| event.as_str()) {
         Some("COMMENT") => Verdict::Comment,
         Some("REQUEST_CHANGES") => Verdict::RequestChanges,
@@ -937,8 +978,43 @@ mod tests {
         }
     }
 
+    const COMMENTS: &str = "api -X POST repos/acme/app/pulls/7/comments";
+
     #[test]
-    fn only_a_whole_review_in_this_repo_takes_input() {
+    fn a_review_comment_from_input_goes_to_gh_on_stdin() {
+        let json = r#"{"body":"ok","in_reply_to":99}"#;
+        let call = call_with(COMMENTS, Some(json)).unwrap();
+        assert_eq!(
+            call.args.join(" "),
+            "api repos/acme/app/pulls/7/comments --method POST --input -"
+        );
+        assert_eq!(call.change, Some(Change::PrReview));
+        assert_eq!(
+            sent(&call),
+            serde_json::from_str::<serde_json::Value>(json).unwrap()
+        );
+        let inline = r#"{"body":"nit","commit_id":"abc","path":"a.rs","line":3,"side":"RIGHT","start_line":1,"start_side":"RIGHT","subject_type":"line"}"#;
+        assert!(call_with(COMMENTS, Some(inline)).is_ok());
+    }
+
+    #[test]
+    fn a_review_comment_from_input_has_only_comment_fields() {
+        for (json, says) in [
+            (r#"{"body":"x","event":"APPROVE"}"#, "event"),
+            (r#"{"body":"x","comments":[]}"#, "comments"),
+            (r#"["body"]"#, "JSON"),
+            ("not json", "JSON"),
+        ] {
+            let refused = call_with(COMMENTS, Some(json)).unwrap_err();
+            assert!(refused.contains(says), "{json}: {refused}");
+        }
+        let refused =
+            call_with(&format!("{COMMENTS} -f body=x"), Some(r#"{"body":"x"}"#)).unwrap_err();
+        assert!(refused.contains("--input"), "{refused}");
+    }
+
+    #[test]
+    fn only_reviews_and_review_comments_in_this_repo_take_input() {
         let json = Some(r#"{"event":"COMMENT"}"#);
         for line in [
             "api -X POST repos/other/app/pulls/7/reviews",
@@ -946,7 +1022,10 @@ mod tests {
             "api -X POST repos/acme/app/pulls/x/reviews",
             "api -X POST repos/acme/app/pulls/+7/reviews",
             "api -X POST repos/acme/app/pulls/7/reviews/9/events",
-            "api -X POST repos/acme/app/pulls/7/comments",
+            "api -X POST repos/other/app/pulls/7/comments",
+            "api -X POST repos/acme/app/pulls/x/comments",
+            "api -X POST repos/acme/app/pulls/7/comments/99",
+            "api -X POST repos/acme/app/issues/3/comments",
             "api -X POST repos/acme/app/issues/3/sub_issues",
             "api -X GET repos/acme/app/pulls/7/reviews",
             "api -X PUT repos/acme/app/pulls/7/reviews",
