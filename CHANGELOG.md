@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0](https://github.com/ajms/orchestrator/compare/v0.21.0...v0.22.0) - 2026-11-17
+
+### Added
+
+- *(broker)* accept --input for pull request review comments
+
+### Other
+
+- *(broker)* share the stdin call and review comments check
+
 ## [0.21.0](https://github.com/ajms/orchestrator/compare/v0.20.0...v0.21.0) - 2026-11-15
 
 ### Added
