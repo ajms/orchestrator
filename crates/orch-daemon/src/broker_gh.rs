@@ -672,9 +672,9 @@ fn api(args: &[String], input: Option<&str>, limits: &Limits) -> Result<GhCall, 
         if methods.iter().any(|m| !is(m, "POST")) {
             return Err(input_refused());
         }
-        return match numbered(&endpoint[prefix..], "/pulls/") {
-            Some("comments") => review_comment(parsed, &endpoint, input),
-            _ => whole_review(parsed, &endpoint, &endpoint[prefix..], input),
+        return match review_comments(&endpoint[prefix..]) {
+            true => review_comment(parsed, &endpoint, input),
+            false => whole_review(parsed, &endpoint, &endpoint[prefix..], input),
         };
     }
     let change = match posts {
@@ -759,15 +759,8 @@ fn review_comment(parsed: Parsed, endpoint: &str, input: &str) -> Result<GhCall,
             "in_reply_to",
         ],
     )?;
-    let serialised = serde_json::to_vec(&comment).map_err(|err| err.to_string())?;
-    let mut args = api_args(parsed, endpoint, "POST");
-    args.extend(strings(&["--input", "-"]));
-    Ok(GhCall {
-        args,
-        said: format!("gh api {endpoint}"),
-        change: Some(Change::PrReview),
-        input: Some(serialised),
-    })
+    let said = format!("gh api {endpoint}");
+    stdin_call(parsed, endpoint, &comment, said, Change::PrReview)
 }
 
 fn whole_review(
@@ -796,15 +789,30 @@ fn whole_review(
             return Err("a whole review's event is COMMENT, REQUEST_CHANGES or APPROVE".into());
         }
     };
-    let serialised = serde_json::to_vec(&review).map_err(|err| err.to_string())?;
+    let said = format!("gh pr review {pr} --{}", verdict.flag());
+    stdin_call(parsed, endpoint, &review, said, verdict.change())
+}
+
+fn stdin_call(
+    parsed: Parsed,
+    endpoint: &str,
+    object: &serde_json::Map<String, serde_json::Value>,
+    said: String,
+    change: Change,
+) -> Result<GhCall, String> {
+    let serialised = serde_json::to_vec(object).map_err(|err| err.to_string())?;
     let mut args = api_args(parsed, endpoint, "POST");
     args.extend(strings(&["--input", "-"]));
     Ok(GhCall {
         args,
-        said: format!("gh pr review {pr} --{}", verdict.flag()),
-        change: Some(verdict.change()),
+        said,
+        change: Some(change),
         input: Some(serialised),
     })
+}
+
+fn review_comments(path: &str) -> bool {
+    numbered(path, "/pulls/") == Some("comments")
 }
 
 fn numbered<'a>(path: &'a str, collection: &str) -> Option<&'a str> {
@@ -819,7 +827,7 @@ fn reads_a_file(field: &str) -> bool {
 }
 
 fn api_post(parsed: &Parsed, path: &str) -> Result<Change, String> {
-    if numbered(path, "/pulls/") == Some("comments") {
+    if review_comments(path) {
         let fields = parsed.flags.iter().filter(|(name, _)| *name == "field");
         return match fields
             .filter_map(|(_, value)| value.as_deref())
@@ -993,6 +1001,10 @@ mod tests {
             sent(&call),
             serde_json::from_str::<serde_json::Value>(json).unwrap()
         );
+    }
+
+    #[test]
+    fn a_review_comment_from_input_takes_every_inline_field() {
         let inline = r#"{"body":"nit","commit_id":"abc","path":"a.rs","line":3,"side":"RIGHT","start_line":1,"start_side":"RIGHT","subject_type":"line"}"#;
         assert!(call_with(COMMENTS, Some(inline)).is_ok());
     }
