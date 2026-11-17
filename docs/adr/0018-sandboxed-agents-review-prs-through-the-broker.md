@@ -2,7 +2,7 @@
 
 This amends 0010, which kept a sandboxed Agent's PR changes to the Session's Branch and its `api` POSTs to two issue-link endpoints. A sandboxed Agent can now take part in review on any PR in its Repo, not just its own, under the user's identity:
 
-- **comments:** `pr comment`, and `gh api -X POST repos/<owner>/<repo>/pulls/<n>/comments` for inline review comments and thread replies;
+- **comments:** `pr comment`, and `gh api -X POST repos/<owner>/<repo>/pulls/<n>/comments` for inline review comments and thread replies, with `-f` fields or one JSON object by `--input <file>`;
 - **reviews:** `pr review` with `--comment` or `--request-changes`, which follow the Preset, and `--approve`, which always asks;
 - **whole reviews:** `gh api -X POST repos/<owner>/<repo>/pulls/<n>/reviews --input <file>`, a summary and inline comments in one call, under the same rules as `pr review`.
 
@@ -23,3 +23,4 @@ A comment is the Agent speaking. An approval is the user's identity satisfying a
 - `gh` follows a PR or issue URL over `--repo`, and it accepts more spellings than the usual `https://`, such as `https:/owner/repo/pull/1`. Every positional that could be a URL, meaning any with a `:`, must name a repo the Broker allows. Git refs can't contain `:`, so branch names still pass.
 - `gh api` writes are POST only.
 - The Daemon parses a whole review and gives `gh` its own serialisation, so a repeated `event` key can't read as one verdict to the Broker and another to GitHub. Only `commit_id`, `body`, `event` and `comments` pass. `event` must be `COMMENT`, `REQUEST_CHANGES` or `APPROVE`; an `APPROVE` takes the approval Guard. A review with no `event` is refused, since it would stay pending and the Broker can't submit it.
+- A review comment sent by `--input` is parsed and reserialised the same way, and only `body`, `commit_id`, `path`, `line`, `side`, `start_line`, `start_side`, `subject_type` and `in_reply_to` pass. It adds no capability over the `-f` form; it lets the Agent send a reply without quoting free text on a command line.
